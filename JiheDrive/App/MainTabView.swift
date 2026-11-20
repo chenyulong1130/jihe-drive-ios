@@ -66,7 +66,8 @@ struct MainTabView: View {
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
                 .clipShape(HorizontalClip())
                 .contentShape(Rectangle())
-                .highPriorityGesture(pageDrag(width: w))
+                // 必须 simultaneous：highPriority 会把 ScrollView 纵向滚动手势整段吃掉
+                .simultaneousGesture(pageDrag(width: w))
 
                 LiquidTabBar(tab: $tab)
             }
@@ -113,22 +114,22 @@ struct MainTabView: View {
     }
 
     private func pageDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 16, coordinateSpace: .local)
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
 
-                // 方向锁：累计位移超过阈值判一次向，之后整个手势只认这个方向。
-                // 水平意图要明显强于纵向（1.35x），避免滚动列表时页面被拽走。
+                // 方向锁：只判一次。水平要明显强于纵向，否则整段交给页面内 ScrollView。
                 if panAxis == nil {
-                    guard abs(dx) > 14 || abs(dy) > 14 else { return }
-                    if abs(dx) > abs(dy) * 1.35 {
+                    guard abs(dx) > 12 || abs(dy) > 12 else { return }
+                    if abs(dx) > abs(dy) * 1.6 {
                         panAxis = .horizontal
                         isDragging = true
                     } else {
                         panAxis = .vertical
                     }
                 }
+                // 纵向：不碰 dragOffset，让 ScrollView 自己滚
                 guard panAxis == .horizontal else { return }
 
                 var offset = dx
@@ -146,14 +147,14 @@ struct MainTabView: View {
 
                 // 纵向手势直接放弃，不做任何翻页动作
                 guard horizontal else {
-                    dragOffset = 0
+                    if dragOffset != 0 { dragOffset = 0 }
                     return
                 }
 
                 let dx = value.translation.width
                 let projected = value.predictedEndTranslation.width
                 let delta = abs(projected) > abs(dx) ? projected : dx
-                let threshold = width * 0.18
+                let threshold = width * 0.2
 
                 var target = index
                 if delta < -threshold {
