@@ -387,6 +387,10 @@ extension Vehicle {
     }
 
     static func intValue(_ raw: Any?) -> Int {
+        if let number = raw as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return 0 }
+            return number.intValue
+        }
         if let number = raw as? Int { return number }
         if let number = raw as? Double { return Int(number) }
         if let string = raw as? String, let number = Double(string) { return Int(number) }
@@ -394,9 +398,17 @@ extension Vehicle {
     }
 
     static func doubleValue(_ raw: Any?) -> Double? {
+        if raw == nil || raw is NSNull { return nil }
+        // JSON 整数是 NSNumber，as? Double 会失败，必须先走 NSNumber
+        if let number = raw as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+            return number.doubleValue
+        }
         if let number = raw as? Double { return number }
         if let number = raw as? Int { return Double(number) }
-        if let string = raw as? String { return Double(string) }
+        if let string = raw as? String {
+            return Double(string.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         return nil
     }
 
@@ -471,6 +483,9 @@ struct RideTrack: Identifiable, Hashable {
     var endAddress: String? = nil
     /// 与 points 对齐的速度采样（km/h），回放按速度着色
     var speedSamples: [Double] = []
+    var accelTimes: Int = 0
+    var brakeTimes: Int = 0
+    var bendTimes: Int = 0
 
     static func parse(_ response: [String: Any]) -> [RideTrack] {
         guard let data = response["data"] else { return [] }

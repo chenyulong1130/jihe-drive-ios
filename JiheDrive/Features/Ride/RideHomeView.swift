@@ -261,7 +261,7 @@ struct RideHomeView: View {
         VStack(spacing: 10) {
             SectionHeader(selectedDay.map { "\($0.date) 行程" } ?? "当日行程")
 
-            if let day = selectedDay, day.mileage > 0 || (daySummary?.mileage ?? 0) > 0 {
+            if selectedDay != nil, (selectedDay?.mileage ?? 0) > 0 || (daySummary?.mileage ?? 0) > 0 || daySummary != nil {
                 daySummaryCard
             }
 
@@ -314,9 +314,9 @@ struct RideHomeView: View {
                 )
             }
             HStack(spacing: 10) {
-                MetricChip(title: "急加速", value: accel > 0 ? "\(accel)" : "--", unit: "次", icon: "arrow.up.right")
-                MetricChip(title: "急刹车", value: brake > 0 ? "\(brake)" : "--", unit: "次", icon: "arrow.down.right")
-                MetricChip(title: "弯道", value: bend > 0 ? "\(bend)" : "--", unit: "次", icon: "arrow.turn.up.right")
+                MetricChip(title: "急加速", value: "\(accel)", unit: "次", icon: "arrow.up.right")
+                MetricChip(title: "急刹车", value: "\(brake)", unit: "次", icon: "arrow.down.right")
+                MetricChip(title: "弯道", value: "\(bend)", unit: "次", icon: "arrow.turn.up.right")
             }
         }
     }
@@ -412,7 +412,10 @@ struct RideHomeView: View {
         errorText = nil
         defer { loadingMonth = false }
 
-        let days = await RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor)
+        guard let days = await RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor) else {
+            // 刷新取消或失败：保留当前图表，不要清空
+            return
+        }
         monthDays = days
 
         if days.isEmpty {
@@ -438,24 +441,47 @@ struct RideHomeView: View {
 
     private func loadSelectedDay() async {
         guard let vehicle = model.selectedVehicle, let day = selectedDay else {
-            daySummary = nil
-            tracks = []
             return
         }
 
         loadingDay = true
         defer { loadingDay = false }
 
-        guard let date = Self.parseDotted(day.date) else {
-            daySummary = nil
-            tracks = []
-            return
-        }
+        guard let date = Self.parseDotted(day.date) else { return }
 
         async let summaryTask = RideTrackService.daySummary(vin: vehicle.vinNo, date: date)
         async let tracksTask = RideTrackService.tracks(vin: vehicle.vinNo, from: date, to: date)
-        daySummary = await summaryTask
-        tracks = await tracksTask ?? []
+        let summary = await summaryTask
+        let list = await tracksTask
+
+        if Task.isCancelled { return }
+
+        if let list {
+            tracks = list
+        }
+        var merged = summary
+        let source = list ?? tracks
+        let accel = source.reduce(0) { $0 + $1.accelTimes }
+        let brake = source.reduce(0) { $0 + $1.brakeTimes }
+        let bend = source.reduce(0) { $0 + $1.bendTimes }
+        if merged == nil, day.mileage > 0 || !source.isEmpty {
+            merged = RideTrackService.DaySummary(
+                mileage: day.mileage,
+                minutes: day.minutes,
+                maxSpeed: source.compactMap(\.maxSpeed).max() ?? 0,
+                accelTimes: accel,
+                brakeTimes: brake,
+                bendTimes: bend
+            )
+        } else if var dayInfo = merged {
+            if dayInfo.accelTimes == 0, accel > 0 { dayInfo.accelTimes = accel }
+            if dayInfo.brakeTimes == 0, brake > 0 { dayInfo.brakeTimes = brake }
+            if dayInfo.bendTimes == 0, bend > 0 { dayInfo.bendTimes = bend }
+            merged = dayInfo
+        }
+        if let merged {
+            daySummary = merged
+        }
     }
 
     private func dayLabel(_ date: String) -> String {

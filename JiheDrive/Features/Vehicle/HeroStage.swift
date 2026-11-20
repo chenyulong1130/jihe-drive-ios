@@ -56,7 +56,7 @@ struct HeroStage: View {
                 statusRow
                     .padding(.top, 10)
                 // 中间空白让触摸落到下方 3D 层，可拖拽旋转
-                Spacer(minLength: 4)
+                Spacer(minLength: hasTire ? 16 : 4)
                     .allowsHitTesting(false)
                 tireStrip
             }
@@ -66,20 +66,20 @@ struct HeroStage: View {
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
-        .background { backdrop }
-        .overlay(alignment: .bottom) {
-            // 向下淡入内容区（对齐小程序 mask），不要圆角盖板
-            LinearGradient(
-                colors: [
-                    Color.clear,
-                    (onDark ? Theme.groupedBackground.opacity(0.28) : Theme.groupedBackground.opacity(0.55)),
-                    Theme.groupedBackground
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 56)
-            .allowsHitTesting(false)
+        .background {
+            // 主题只淡出自身下沿，不把灰雾叠到车图上
+            backdrop
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.78),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
         }
     }
 
@@ -205,14 +205,12 @@ struct HeroStage: View {
         )
     }
 
-    /// 上暗下更暗，白字在任何背景上都读得清（对齐小程序顶部压暗）
+    /// 只压顶部保证车名可读；中间和车图区域不再铺黑雾
     private var scrim: some View {
         LinearGradient(
             stops: [
-                .init(color: Color.black.opacity(0.42), location: 0),
-                .init(color: Color.black.opacity(0.04), location: 0.28),
-                .init(color: Color.black.opacity(0.08), location: 0.68),
-                .init(color: Color.black.opacity(0.38), location: 1)
+                .init(color: Color(hex: 0x080E18).opacity(0.42), location: 0),
+                .init(color: Color.clear, location: 0.28)
             ],
             startPoint: .top,
             endPoint: .bottom
@@ -222,8 +220,11 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图顶距：躲开顶栏 + 电量；压缩底部空隙让车图更大
+    /// 车图顶距：躲开顶栏 + 电量
     private var carTopPad: CGFloat { topInset + 96 }
+    /// 有胎压时把车图抬高，避免压在读数上
+    private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
+    private var carBottomPad: CGFloat { hasTire ? 86 : 18 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -235,11 +236,11 @@ struct HeroStage: View {
                             ModelViewerWebView(glbFile: modelGLBFile, interactive: true, autoRotate: false)
                         }
                         .padding(.top, carTopPad - 8)
-                        .padding(.bottom, 18)
+                        .padding(.bottom, carBottomPad)
                 } else if let modelScene {
                     VehicleSceneView(scene: modelScene, interactive: true, autoSpin: false, spinSpeed: 0)
                         .padding(.top, carTopPad - 8)
-                        .padding(.bottom, 18)
+                        .padding(.bottom, carBottomPad)
                 } else {
                     ZStack {
                         Ellipse()
@@ -263,12 +264,12 @@ struct HeroStage: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 304)
+                        .frame(maxHeight: .infinity)
                         .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
                     }
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.top, carTopPad - 8)
-                    .padding(.bottom, 14)
+                    .padding(.bottom, carBottomPad)
                     .allowsHitTesting(false)
                 }
             }

@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// 极核接口签名：sign = md5(sha1(query + bodyJson + appParam + secret))
+/// 极核接口签名
 enum ZeehoSigner {
     static let appId = "S7qPWPU1"
     static let appSecret = "c5e0da7f4da28df805694ec3dd1fc6792e9df99d"

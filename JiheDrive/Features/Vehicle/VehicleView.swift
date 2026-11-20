@@ -45,7 +45,7 @@ struct VehicleView: View {
                 .padding(.bottom, 128)
             }
             .ignoresSafeArea(edges: .top)
-            .refreshable { await model.refreshAll() }
+            .refreshable { await reloadPage() }
         }
         .background(Theme.groupedBackground)
         .overlay(alignment: .bottom) {
@@ -84,20 +84,18 @@ struct VehicleView: View {
         }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
-            // 切车先清掉上一台的模型，避免画面短暂串车
+            // 切车先清掉上一台的模型，避免画面短暂串车；骑行数据等新结果再覆盖
             heroGLB = nil
             model3D.clear()
-            rideExtra = nil
             resolvedAddress = nil
-            await loadHeroModel()
+            async let ride: Void = loadRideSummary(vin: vin)
             async let battery: Void = model.loadBattery(vin: vin)
             async let detail: Void = model.loadDetail(vin: vin)
             async let tire: Void = model.loadTire(vin: vin)
             async let sign: Void = signin.refresh()
-            _ = await (battery, detail, tire, sign)
+            async let addr: Void = resolveAddressIfNeeded()
+            _ = await (ride, battery, detail, tire, sign, addr)
             await loadHeroModel()
-            await loadRideSummary(vin: vin)
-            await resolveAddressIfNeeded()
             WidgetSnapshot.publish(from: model, signin: signin)
         }
         .onChange(of: model.selectedVehicle?.soc) { _, _ in
@@ -111,7 +109,7 @@ struct VehicleView: View {
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             guard oldPhase == .background, newPhase == .active else { return }
-            Task { await model.refreshAll() }
+            Task { await reloadPage() }
         }
     }
 
@@ -131,7 +129,8 @@ struct VehicleView: View {
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             topInset: proxy.safeAreaInsets.top + 10,
-            height: max(420, fullHeight * 0.50),
+            height: max(420, fullHeight * 0.50)
+                + ((model.tire != nil || vehicle.hasTirePressure) ? 36 : 0),
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -147,12 +146,8 @@ struct VehicleView: View {
                 }
             },
             onOpenTheme: {
-                if vehicle.isCarMaster {
-                    themeFocus = .theme
-                    showTheme = true
-                } else {
-                    showToast("分享车辆暂不支持主题")
-                }
+                themeFocus = .theme
+                showTheme = true
             },
             onOpenCushion: {
                 run("cushion") { try await model.openCushion(vehicle) }
@@ -188,8 +183,18 @@ struct VehicleView: View {
         }
     }
 
+    private func reloadPage() async {
+        await model.refreshAll()
+        guard let vin = model.selectedVehicle?.vinNo else { return }
+        await loadRideSummary(vin: vin)
+        await resolveAddressIfNeeded()
+        WidgetSnapshot.publish(from: model, signin: signin)
+    }
+
     private func loadRideSummary(vin: String) async {
-        rideExtra = await RideTrackService.rideExtra(vin: vin)
+        if let extra = await RideTrackService.rideExtra(vin: vin) {
+            rideExtra = extra
+        }
     }
 
     // MARK: - 内容面板
@@ -588,24 +593,6 @@ struct VehicleView: View {
                         label: "时长"
                     )
                 }
-
-                HStack(spacing: 0) {
-                    rideStat(
-                        value: rideExtra?.todayAccel.map { "\($0)" } ?? "—",
-                        unit: "次",
-                        label: "急加速"
-                    )
-                    rideStat(
-                        value: rideExtra?.todayBrake.map { "\($0)" } ?? "—",
-                        unit: "次",
-                        label: "急刹车"
-                    )
-                    rideStat(
-                        value: rideExtra?.todayBend.map { "\($0)" } ?? "—",
-                        unit: "次",
-                        label: "弯道"
-                    )
-                }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -676,7 +663,7 @@ struct VehicleView: View {
                 Text("共享车辆")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.label)
-                Text("主题、仪表壁纸与车辆设置仅车主可用")
+                Text("仪表壁纸与车辆设置仅车主可用")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.secondary)
             }

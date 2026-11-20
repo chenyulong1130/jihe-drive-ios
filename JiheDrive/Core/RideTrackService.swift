@@ -62,10 +62,17 @@ enum RideTrackService {
             "pageSize": "\(pageSize)"
         ]
 
-        guard let response = try? await ZeehoClient.shared.get(
-            "/v1.0/app/cfmotoserverapp/ridetrack_v2",
-            query: query
-        ) else { return nil }
+        let response: [String: Any]
+        do {
+            response = try await ZeehoClient.shared.get(
+                "/v1.0/app/cfmotoserverapp/ridetrack_v2",
+                query: query
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            return nil
+        }
 
         let code = ZeehoClient.codeString(response["code"])
         guard code.isEmpty || code == "10000" else { return nil }
@@ -115,7 +122,16 @@ enum RideTrackService {
                 maxSpeed: Vehicle.doubleValue(item["maxSpeed"]),
                 startAddress: address(item["startAddr"] ?? item["startAddress"]),
                 endAddress: address(item["endAddr"] ?? item["endAddress"]),
-                speedSamples: samples.map { $0.speed }
+                speedSamples: samples.map { $0.speed },
+                accelTimes: Int(Vehicle.doubleValue(
+                    item["accelerationTimes"] ?? item["accelerationTimesDay"]
+                ) ?? 0),
+                brakeTimes: Int(Vehicle.doubleValue(
+                    item["brakesTimes"] ?? item["brakesTimesDay"] ?? item["brakeTimes"]
+                ) ?? 0),
+                bendTimes: Int(Vehicle.doubleValue(
+                    item["bendingTimes"] ?? item["bendingTimesDay"] ?? item["bendTimes"]
+                ) ?? 0)
             )
             return (start ?? "", track)
         }
@@ -151,14 +167,21 @@ enum RideTrackService {
             "vinNo": vin,
             "date": dottedDay.string(from: date)
         ]
-        guard let response = try? await ZeehoClient.shared.get(
-            "/v1.0/app/cfmotoserverapp/rideDayInfo",
-            query: query
-        ) else { return nil }
+        let response: [String: Any]
+        do {
+            response = try await ZeehoClient.shared.get(
+                "/v1.0/app/cfmotoserverapp/rideDayInfo",
+                query: query
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            return nil
+        }
 
         let code = ZeehoClient.codeString(response["code"])
         guard code.isEmpty || code == "10000" else { return nil }
-        guard let data = response["data"] as? [String: Any] else { return nil }
+        guard let data = unwrapMap(response["data"]) else { return nil }
 
         let maxSpeed = Vehicle.doubleValue(data["maxSpeed"])
             ?? Vehicle.doubleValue(data["maxSpeedDay"])
@@ -166,12 +189,20 @@ enum RideTrackService {
             ?? Vehicle.doubleValue(data["rideMaxSpeed"])
             ?? 0
         return DaySummary(
-            mileage: Vehicle.doubleValue(data["rideMileageDay"]) ?? 0,
-            minutes: Int(Vehicle.doubleValue(data["ridingTimeDayUnitMinute"]) ?? 0),
+            mileage: Vehicle.doubleValue(data["rideMileageDay"] ?? data["rideMileage"]) ?? 0,
+            minutes: Int(Vehicle.doubleValue(
+                data["ridingTimeDayUnitMinute"] ?? data["ridingTimeUnitMinute"]
+            ) ?? 0),
             maxSpeed: maxSpeed,
-            accelTimes: Int(Vehicle.doubleValue(data["accelerationTimesDay"]) ?? 0),
-            brakeTimes: Int(Vehicle.doubleValue(data["brakesTimesDay"]) ?? 0),
-            bendTimes: Int(Vehicle.doubleValue(data["bendingTimesDay"]) ?? 0)
+            accelTimes: Int(Vehicle.doubleValue(
+                data["accelerationTimesDay"] ?? data["accelerationTimes"]
+            ) ?? 0),
+            brakeTimes: Int(Vehicle.doubleValue(
+                data["brakesTimesDay"] ?? data["brakesTimes"] ?? data["brakeTimes"]
+            ) ?? 0),
+            bendTimes: Int(Vehicle.doubleValue(
+                data["bendingTimesDay"] ?? data["bendingTimes"] ?? data["bendTimes"]
+            ) ?? 0)
         )
     }
 
@@ -183,17 +214,27 @@ enum RideTrackService {
         let minutes: Int
     }
 
-    static func monthInfo(vin: String, month: Date = Date()) async -> [MonthDay] {
+    /// 失败/取消返回 nil，调用方应保留旧数据；空月返回 []
+    static func monthInfo(vin: String, month: Date = Date()) async -> [MonthDay]? {
         let query = [
             "vinNo": vin,
             "month": dottedMonth.string(from: month)
         ]
-        guard let response = try? await ZeehoClient.shared.get(
-            "/v1.0/app/cfmotoserverapp/rideMonthInfo",
-            query: query
-        ) else { return [] }
+        let response: [String: Any]
+        do {
+            response = try await ZeehoClient.shared.get(
+                "/v1.0/app/cfmotoserverapp/rideMonthInfo",
+                query: query
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            return await monthFromTracks(vin: vin, month: month)
+        }
         let code = ZeehoClient.codeString(response["code"])
-        guard code.isEmpty || code == "10000" else { return [] }
+        guard code.isEmpty || code == "10000" else {
+            return await monthFromTracks(vin: vin, month: month)
+        }
 
         let raw = response["data"]
         let list: [[String: Any]]
@@ -221,14 +262,16 @@ enum RideTrackService {
         return await monthFromTracks(vin: vin, month: month)
     }
 
-    private static func monthFromTracks(vin: String, month: Date) async -> [MonthDay] {
+    private static func monthFromTracks(vin: String, month: Date) async -> [MonthDay]? {
         let calendar = Calendar.current
         guard let start = calendar.date(from: calendar.dateComponents([.year, .month], from: month)),
               let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: start) else {
             return []
         }
         let end = min(monthEnd, Date())
-        guard let tracks = await tracks(vin: vin, from: start, to: end, pageSize: 80) else { return [] }
+        guard let tracks = await tracks(vin: vin, from: start, to: end, pageSize: 80) else {
+            return Task.isCancelled ? nil : []
+        }
 
         var buckets: [String: (km: Double, min: Int)] = [:]
         let display = DateFormatter()
@@ -271,17 +314,20 @@ enum RideTrackService {
         return formatter
     }()
 
-    /// 面板骑行卡权威数据源：homeRideInfo（最近）+ rideDayInfo（今日时长/极速）
-    static func rideExtra(vin: String) async -> RideExtra {
+    /// 面板骑行卡权威数据源：homeRideInfo（最近）+ rideDayInfo（今日时长/极速/行为）
+    /// 取消时返回 nil，调用方不要覆盖旧数据
+    static func rideExtra(vin: String) async -> RideExtra? {
+        if Task.isCancelled { return nil }
         var extra = RideExtra()
 
-        if let response = try? await ZeehoClient.shared.get(
-            "/v1.0/app/cfmotoserverapp/homeRideInfo",
-            query: ["vinNo": vin]
-        ) {
+        do {
+            let response = try await ZeehoClient.shared.get(
+                "/v1.0/app/cfmotoserverapp/homeRideInfo",
+                query: ["vinNo": vin]
+            )
             let code = ZeehoClient.codeString(response["code"])
             if code.isEmpty || code == "10000",
-               let data = response["data"] as? [String: Any] {
+               let data = unwrapMap(response["data"]) {
                 let mileages = (data["mileages"] as? [Any])?
                     .compactMap { Vehicle.doubleValue($0) }
                     .filter { $0 > 0 } ?? []
@@ -302,26 +348,43 @@ enum RideTrackService {
                         ?? Vehicle.doubleValue(data["highestSpeed"])
                 )
             }
+        } catch is CancellationError {
+            return nil
+        } catch {
+            // 主接口失败仍继续拉当日汇总
         }
 
+        if Task.isCancelled { return nil }
         if let day = await daySummary(vin: vin) {
-            // rideDayInfo 为今日权威
             if day.mileage > 0 { extra.todayKm = day.mileage }
-            if day.minutes > 0 { extra.todayMin = day.minutes }
-            if day.maxSpeed > 0 { extra.todayMaxSpeed = day.maxSpeed }
-            if day.accelTimes > 0 { extra.todayAccel = day.accelTimes }
-            if day.brakeTimes > 0 { extra.todayBrake = day.brakeTimes }
-            if day.bendTimes > 0 { extra.todayBend = day.bendTimes }
+            extra.todayMin = day.minutes > 0 ? day.minutes : extra.todayMin
+            extra.todayMaxSpeed = day.maxSpeed > 0 ? day.maxSpeed : extra.todayMaxSpeed
+            extra.todayAccel = day.accelTimes
+            extra.todayBrake = day.brakeTimes
+            extra.todayBend = day.bendTimes
+        } else if Task.isCancelled {
+            return nil
         }
 
-        // 仍无极速时，用今日行程轨迹采样兜底
-        if extra.todayMaxSpeed == nil {
-            if let tracks = await tracks(vin: vin, days: 1), !tracks.isEmpty {
-                let peak = tracks.compactMap { track -> Double? in
-                    if let max = track.maxSpeed, max > 0 { return max }
-                    return track.speedSamples.max()
-                }.max() ?? 0
-                if peak > 0 { extra.todayMaxSpeed = peak }
+        if extra.todayMaxSpeed == nil
+            || extra.todayAccel == nil
+            || (extra.todayAccel ?? 0) == 0 {
+            if let dayTracks = await tracks(vin: vin, days: 1), !dayTracks.isEmpty {
+                if extra.todayMaxSpeed == nil {
+                    let peak = dayTracks.compactMap { track -> Double? in
+                        if let max = track.maxSpeed, max > 0 { return max }
+                        return track.speedSamples.max()
+                    }.max() ?? 0
+                    if peak > 0 { extra.todayMaxSpeed = peak }
+                }
+                let accel = dayTracks.reduce(0) { $0 + $1.accelTimes }
+                let brake = dayTracks.reduce(0) { $0 + $1.brakeTimes }
+                let bend = dayTracks.reduce(0) { $0 + $1.bendTimes }
+                if accel > 0 { extra.todayAccel = accel }
+                if brake > 0 { extra.todayBrake = brake }
+                if bend > 0 { extra.todayBend = bend }
+            } else if Task.isCancelled {
+                return nil
             }
         }
 
@@ -363,6 +426,17 @@ enum RideTrackService {
                 speed: speed
             )
         }
+    }
+
+    private static func unwrapMap(_ raw: Any?) -> [String: Any]? {
+        if let dict = raw as? [String: Any] {
+            if let nested = dict["rideDayInfo"] as? [String: Any] { return nested }
+            if let nested = dict["day"] as? [String: Any] { return nested }
+            if let nested = dict["data"] as? [String: Any] { return nested }
+            return dict
+        }
+        if let list = raw as? [[String: Any]] { return list.first }
+        return nil
     }
 
     private static func text(_ raw: Any?) -> String? {
