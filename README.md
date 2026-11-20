@@ -136,6 +136,17 @@ appId / secret 在 `ZLink/Core/ZeehoSigner.swift`。
 
 不需要 `NSLocationWhenInUseUsageDescription`：这里只显示车辆位置，不取手机自身定位，少了权限请求也少了隐私说明。
 
+## 构建与安装
+
+无 Mac 也能出包：推送到 `main` 后 GitHub Actions（macos-15）自动跑 `xcodegen generate` + `xcodebuild`，产出未签名 ipa。
+
+- 运行记录：`https://github.com/chenyulong1130/zlink-ios/actions`
+- 产物：Actions 页面里的 `ZLink-unsigned-ipa`，结构是 `Payload/ZLink.app`（零嵌套动态库，自签不会漏签）
+- 本地安装：Windows 用 [Sideloadly](https://sideloadly.io/)，Apple ID 自签，7 天有效期，最多 3 个应用
+- 首次失败先看构建日志产物 `build-log`，里面是完整 `xcodebuild` 输出
+
+`project.yml` 是工程唯一来源，`.xcodeproj` 不入库，由 CI 现场生成。
+
 ## 免责
 
 非官方客户端，接口随时可能变更或加入风控；仅供个人调试，不要分发或商用。
