@@ -46,13 +46,15 @@ final class AppearanceStore: ObservableObject {
     private static let darkCanvas = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
 
     init() {
+        let saved: AppAppearance
         if let raw = UserDefaults.standard.string(forKey: Self.key),
-           let saved = AppAppearance(rawValue: raw) {
-            mode = saved
+           let value = AppAppearance(rawValue: raw) {
+            saved = value
         } else {
-            mode = .system
+            saved = .system
         }
-        resolvedScheme = Self.scheme(for: mode)
+        mode = saved
+        resolvedScheme = Self.scheme(for: saved)
         observeSystem()
         applyToWindows()
     }
