@@ -352,15 +352,17 @@ struct GlassTag: View {
     }
 }
 
-/// 环形进度
+/// 环形进度。充电中外圈会呼吸发光。
 struct RingProgress: View {
     let progress: Double
     var color: Color = Theme.brand
     var track: Color = Color(uiColor: .tertiarySystemFill)
     var lineWidth: CGFloat = 8
     var size: CGFloat = 54
+    var charging: Bool = false
 
     @State private var shown: Double = 0
+    @State private var glow = false
 
     var body: some View {
         ZStack {
@@ -371,13 +373,109 @@ struct RingProgress: View {
                 .trim(from: 0, to: max(0.001, min(1, shown)))
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .shadow(color: charging ? color.opacity(glow ? 0.75 : 0.22) : .clear, radius: charging ? 8 : 0)
         }
         .frame(width: size, height: size)
         .onAppear {
             withAnimation(Motion.gauge) { shown = max(0, min(1, progress)) }
+            if charging {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    glow = true
+                }
+            }
         }
         .onChange(of: progress) { _, value in
             withAnimation(Motion.gauge) { shown = max(0, min(1, value)) }
+        }
+        .onChange(of: charging) { _, value in
+            if value {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    glow = true
+                }
+            } else {
+                glow = false
+            }
+        }
+    }
+}
+
+/// 电量条：对齐小程序 en-bar。充电时绿色扫光 + 闪电图标脉冲。
+struct ChargingBar: View {
+    var progress: CGFloat
+    var charging: Bool
+    var width: CGFloat = 140
+    var height: CGFloat = 6
+    var track: Color
+    var fill: Color
+
+    @State private var shine: CGFloat = 0
+    @State private var boltPulse = false
+
+    private var fillWidth: CGFloat {
+        max(5, width * min(1, max(0, progress)))
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(track)
+                    .frame(width: width, height: height)
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [fill.opacity(0.68), fill],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: fillWidth, height: height)
+                    .overlay(alignment: .leading) {
+                        if charging {
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.clear, Color.white.opacity(0.65), .clear],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: 36, height: height)
+                                .offset(x: shine)
+                        }
+                    }
+                    .clipShape(Capsule())
+            }
+            .frame(width: width, height: height)
+            .clipShape(Capsule())
+
+            if charging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.green)
+                    .scaleEffect(boltPulse ? 1.18 : 0.88)
+                    .opacity(boltPulse ? 1 : 0.55)
+                    .shadow(color: Theme.green.opacity(boltPulse ? 0.7 : 0.2), radius: 4)
+            }
+        }
+        .onAppear { startMotion() }
+        .onChange(of: charging) { _, value in
+            if value { startMotion() } else {
+                shine = 0
+                boltPulse = false
+            }
+        }
+    }
+
+    private func startMotion() {
+        guard charging else { return }
+        shine = -24
+        withAnimation(.linear(duration: 1.15).repeatForever(autoreverses: false)) {
+            shine = width
+        }
+        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+            boltPulse = true
         }
     }
 }

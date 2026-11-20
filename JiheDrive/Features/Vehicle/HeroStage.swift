@@ -51,6 +51,20 @@ struct HeroStage: View {
 
     var body: some View {
         ZStack {
+            backdrop
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.94),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .allowsHitTesting(false)
+
             carLayer
 
             VStack(spacing: 0) {
@@ -59,32 +73,17 @@ struct HeroStage: View {
                     .padding(.top, 10)
                 statusRow
                     .padding(.top, 10)
-                // 中间空白让触摸落到下方 3D 层，可拖拽旋转
-                Spacer(minLength: hasTire ? 16 : 4)
+                Spacer(minLength: hasTire ? 12 : 0)
                     .allowsHitTesting(false)
                 tireStrip
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
-            .padding(.bottom, 18)
+            .padding(.bottom, hasTire ? 10 : 4)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
-        .background {
-            // 主题只淡出自身下沿，不把灰雾叠到车图上
-            backdrop
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.78),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-        }
+        .clipped()
     }
 
     // MARK: - 背景
@@ -151,8 +150,9 @@ struct HeroStage: View {
 
                 GeometryReader { geo in
                     CachedLoopingVideo(url: url)
-                        .frame(width: geo.size.width, height: geo.size.height)
+                        .frame(width: max(geo.size.width, 1), height: max(geo.size.height, 1))
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .allowsHitTesting(false)
             }
@@ -216,7 +216,7 @@ struct HeroStage: View {
     private var carTopPad: CGFloat { topInset + 96 }
     /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
-    private var carBottomPad: CGFloat { hasTire ? 92 : 28 }
+    private var carBottomPad: CGFloat { hasTire ? 52 : 8 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -254,6 +254,11 @@ struct HeroStage: View {
                             .blur(radius: 10)
                             .offset(y: 16)
 
+                        if vehicle.isCharging {
+                            ChargingGlow()
+                                .offset(y: 18)
+                        }
+
                         Group {
                             if let url = vehicle.imageURL {
                                 CachedRemoteImage(url: url, contentMode: .fit)
@@ -267,7 +272,7 @@ struct HeroStage: View {
                         .padding(.horizontal, 32)
                         .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.top, carTopPad - 8)
                     .padding(.bottom, carBottomPad)
                     .allowsHitTesting(false)
@@ -362,15 +367,16 @@ struct HeroStage: View {
     // MARK: - 电量（对齐小程序：电量% + 续航挤在左侧，短进度条 140×6）
 
     private var batteryBlock: some View {
+        let energy = vehicle.isCharging ? Theme.green : primary
         let content = VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("\(soc)")
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(primary)
+                    .foregroundStyle(energy)
                     .monospacedDigit()
                 Text("%")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(secondaryText)
+                    .foregroundStyle(vehicle.isCharging ? Theme.green.opacity(0.85) : secondaryText)
                     .padding(.trailing, 9)
 
                 Text("\(vehicle.rangeKm)")
@@ -382,20 +388,12 @@ struct HeroStage: View {
                     .foregroundStyle(secondaryText)
             }
 
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(primary.opacity(0.18))
-                    .frame(width: 140, height: 6)
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [socColor, socColor.opacity(0.75)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: max(5, 140 * socRatio), height: 6)
-            }
+            ChargingBar(
+                progress: socRatio,
+                charging: vehicle.isCharging,
+                track: primary.opacity(0.18),
+                fill: socColor
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -425,13 +423,7 @@ struct HeroStage: View {
             signalBars
 
             if vehicle.isCharging {
-                HStack(spacing: 4) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("充电中")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(Theme.green)
+                ChargingChip()
             }
 
             HStack(spacing: 4) {
@@ -547,5 +539,44 @@ struct HeroStage: View {
         DragGesture(minimumDistance: 6)
             .onChanged { _ in onInteract?(true) }
             .onEnded { _ in onInteract?(false) }
+    }
+}
+
+/// 车底充电光晕
+private struct ChargingGlow: View {
+    @State private var pulse = false
+
+    var body: some View {
+        Ellipse()
+            .fill(Theme.green.opacity(pulse ? 0.42 : 0.14))
+            .frame(width: 268, height: 22)
+            .blur(radius: 16)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            }
+    }
+}
+
+/// 状态行「充电中」小标
+private struct ChargingChip: View {
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .scaleEffect(pulse ? 1.15 : 0.9)
+            Text("充电中")
+                .font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(Theme.green)
+        .shadow(color: Theme.green.opacity(pulse ? 0.55 : 0.15), radius: 6)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }

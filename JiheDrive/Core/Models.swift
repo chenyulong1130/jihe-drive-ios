@@ -80,6 +80,40 @@ struct Vehicle: Identifiable, Hashable {
         )
     }
 
+    /// 用 V2 / batteryInfo 覆盖电量、续航、充电态（对齐小程序双源合并）
+    func withBattery(_ battery: BatteryInfo) -> Vehicle {
+        Vehicle(
+            vinNo: vinNo,
+            name: name,
+            modelName: modelName,
+            soc: battery.level > 0 ? battery.level : soc,
+            rangeKm: battery.rangeKm ?? rangeKm,
+            totalMileKm: totalMileKm,
+            isOnline: isOnline,
+            onlineKnown: onlineKnown,
+            isLocked: isLocked,
+            isCharging: battery.isCharging || isCharging,
+            signalLevel: signalLevel,
+            signalText: signalText,
+            latitude: latitude,
+            longitude: longitude,
+            locationTime: locationTime,
+            address: address,
+            imageURL: imageURL,
+            monthMileage: monthMileage,
+            monthRideMinutes: monthRideMinutes,
+            tireFrontKpa: tireFrontKpa,
+            tireRearKpa: tireRearKpa,
+            voltage: battery.voltage > 0 ? battery.voltage : voltage,
+            temperature: battery.temperature != 0 ? battery.temperature : temperature,
+            cycleCount: battery.cycleCount ?? cycleCount,
+            model3DURL: model3DURL,
+            wallpaperOutlines: wallpaperOutlines,
+            isCarMaster: isCarMaster,
+            shareNickName: shareNickName
+        )
+    }
+
     /// 接口给的是 glb/gltf 时用 model-viewer 渲染
     var isGLBModel: Bool {
         guard let url = model3DURL else { return false }

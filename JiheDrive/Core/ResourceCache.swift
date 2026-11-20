@@ -25,12 +25,26 @@ enum ResourceCache {
         return dir
     }
 
-    static func file(for remote: URL, folder: String) async -> URL? {
-        if remote.isFileURL { return remote }
+    static func destination(for remote: URL, folder: String) -> URL {
         let dir = directory.appendingPathComponent(folder, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = remote.pathExtension.isEmpty ? "bin" : remote.pathExtension
-        let dest = dir.appendingPathComponent(hash(remote.absoluteString) + "." + ext)
+        return dir.appendingPathComponent(hash(remote.absoluteString) + "." + ext)
+    }
+
+    static func existingFile(for remote: URL, folder: String) -> URL? {
+        if remote.isFileURL { return remote }
+        let dest = destination(for: remote, folder: folder)
+        if let size = try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int,
+           size > 256 {
+            return dest
+        }
+        return nil
+    }
+
+    static func file(for remote: URL, folder: String) async -> URL? {
+        if remote.isFileURL { return remote }
+        let dest = destination(for: remote, folder: folder)
         if let size = try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int,
            size > 256 {
             return dest
@@ -146,9 +160,15 @@ struct CachedLoopingVideo: View {
         .task(id: url.absoluteString) {
             if url.isFileURL {
                 local = url
-            } else {
-                local = await ResourceCache.file(for: url, folder: "videos") ?? url
+                return
             }
+            if let cached = ResourceCache.existingFile(for: url, folder: "videos") {
+                local = cached
+                return
+            }
+            // 先播远程，后台缓存；播放中途不切换本地文件，避免黑一下
+            local = url
+            _ = await ResourceCache.file(for: url, folder: "videos")
         }
     }
 }

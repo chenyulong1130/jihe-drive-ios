@@ -243,6 +243,14 @@ final class AppModel: ObservableObject {
                 items = [BatteryInfo.fallback(from: vehicle)]
             }
             batteries = items
+            if let battery = items.first, let current = selectedVehicle, current.vinNo == vin {
+                let patched = current.withBattery(battery)
+                if detailVehicle?.vinNo == vin {
+                    detailVehicle = (detailVehicle ?? current).withBattery(battery)
+                } else {
+                    detailVehicle = patched
+                }
+            }
             if items.isEmpty {
                 batteryError = "云端暂未返回电池数据"
             }

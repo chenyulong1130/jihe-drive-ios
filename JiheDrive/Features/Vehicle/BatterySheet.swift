@@ -81,16 +81,23 @@ struct BatterySheet: View {
                             color: tint,
                             track: Theme.surfaceAlt,
                             lineWidth: 10,
-                            size: 108
+                            size: 108,
+                            charging: charging
                         )
                         VStack(spacing: 0) {
                             Text("\(level)")
                                 .font(.system(size: 32, weight: .semibold, design: .rounded))
-                                .foregroundStyle(Theme.label)
+                                .foregroundStyle(charging ? Theme.green : Theme.label)
                                 .monospacedDigit()
                             Text("%")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Theme.secondary)
+                        }
+                        if charging {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Theme.green)
+                                .offset(y: 38)
                         }
                     }
 
@@ -289,7 +296,8 @@ struct BatterySheet: View {
                         color: tint,
                         track: Color(uiColor: .tertiarySystemFill),
                         lineWidth: 8,
-                        size: 92
+                        size: 92,
+                        charging: battery.isCharging
                     )
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
                         Text("\(battery.level)")

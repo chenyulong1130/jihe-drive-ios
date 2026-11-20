@@ -80,19 +80,20 @@ final class LoopingPlayerView: UIView {
         CATransaction.setDisableActions(true)
         playerLayer.frame = bounds
         CATransaction.commit()
+        resumeIfNeeded()
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil && shouldPlay {
-            queue?.play()
+        if window != nil {
+            resumeIfNeeded()
         }
     }
 
     func load(url: URL, muted: Bool) {
         queue?.isMuted = muted
         guard loadedURL != url else {
-            if shouldPlay { queue?.play() }
+            resumeIfNeeded()
             return
         }
         stop()
@@ -109,15 +110,22 @@ final class LoopingPlayerView: UIView {
         player.isMuted = muted
         player.volume = 0
         player.actionAtItemEnd = .advance
-        player.automaticallyWaitsToMinimizeStalling = false
+        player.automaticallyWaitsToMinimizeStalling = !url.isFileURL
         player.preventsDisplaySleepDuringVideoPlayback = false
 
         looper = AVPlayerLooper(player: player, templateItem: item)
         playerLayer.player = player
         queue = player
+        resumeIfNeeded()
+        DispatchQueue.main.async { [weak self] in
+            self?.resumeIfNeeded()
+        }
+    }
 
-        if window != nil && shouldPlay {
-            player.play()
+    private func resumeIfNeeded() {
+        guard shouldPlay else { return }
+        if queue?.timeControlStatus != .playing {
+            queue?.play()
         }
     }
 

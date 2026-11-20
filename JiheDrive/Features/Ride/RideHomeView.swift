@@ -20,7 +20,12 @@ struct RideHomeView: View {
                 header
                 monthChip
                     .padding(.top, 8)
-                    .padding(.bottom, 18)
+                    .padding(.bottom, 12)
+
+                if !groups.isEmpty {
+                    monthHero
+                        .padding(.bottom, 8)
+                }
 
                 if model.selectedVehicle == nil {
                     Text("先在车辆页登录并选择一台车")
@@ -141,6 +146,57 @@ struct RideHomeView: View {
         }
     }
 
+    private var monthHero: some View {
+        let km = groups.reduce(0.0) { $0 + $1.totalKm }
+        let days = groups.filter { !$0.tracks.isEmpty }.count
+        let peak = groups.map(\.totalKm).max() ?? 0
+        let avg = days > 0 ? km / Double(days) : 0
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("本月里程")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(formatKm(km))
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                Text("km")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+            }
+            HStack(spacing: 0) {
+                monthStat("\(days)", "天", "骑行天数")
+                monthStat(formatKm(avg), "km", "日均里程")
+                monthStat(formatKm(peak), "km", "单日最长")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Theme.surface)
+        )
+        .shadow(color: Theme.cardShadow, radius: 12, y: 3)
+    }
+
+    private func monthStat(_ value: String, _ unit: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                Text(unit)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: - Day
 
     private func daySection(_ group: RideDayGroup) -> some View {
@@ -150,86 +206,85 @@ struct RideHomeView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.label)
                 Spacer(minLength: 8)
-                Text("\(formatKm(group.totalKm))km  \(durationLabel(group.totalMin))")
-                    .font(.system(size: 13))
+                Text("\(group.tracks.count)次 · \(formatKm(group.totalKm))km")
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
                     .monospacedDigit()
             }
-            .padding(.top, 6)
+            .padding(.top, 8)
 
-            ForEach(group.tracks) { track in
-                Button {
-                    selected = track
-                } label: {
-                    rideCard(track)
+            VStack(spacing: 0) {
+                ForEach(Array(group.tracks.enumerated()), id: \.element.id) { index, track in
+                    Button {
+                        selected = track
+                    } label: {
+                        rideRow(track)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+                    if index < group.tracks.count - 1 {
+                        HairLine(inset: 86)
+                    }
                 }
-                .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
             }
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.surface)
+            )
+            .shadow(color: Theme.cardShadow, radius: 10, y: 2)
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
     }
 
-    private func rideCard(_ track: RideTrack) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(timeRange(track))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
-                    .monospacedDigit()
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.tertiary)
-            }
+    private func rideRow(_ track: RideTrack) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            thumb(track)
+                .frame(width: 72, height: 72)
 
-            HStack(alignment: .center, spacing: 14) {
-                thumb(track)
-                    .frame(width: 72, height: 72)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(timeRange(track))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                        .monospacedDigit()
+                    Spacer(minLength: 6)
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(formatKm(track.mileage))
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
-                            .foregroundStyle(Theme.label)
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.brand)
                             .monospacedDigit()
                         Text("km")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.secondary)
                     }
-
-                    HStack(spacing: 0) {
-                        metric(socText(track), "耗电量")
-                        metric("\(track.durationMinutes)min", "耗时")
-                        metric(avgEnergyText(track), "平均能耗")
-                    }
                 }
-                Spacer(minLength: 0)
+
+                HStack(spacing: 0) {
+                    rideMetric(durationLabel(track.durationMinutes), "耗时")
+                    rideMetric(speedText(avgSpeed(track)), "均速")
+                    rideMetric(speedText(peakSpeed(track)), "极速")
+                }
+
+                if let route = routeText(track) {
+                    Text(route)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.tertiary)
+                        .lineLimit(1)
+                }
             }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.tertiary)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Theme.surface)
-        )
-        .shadow(color: Theme.cardShadow, radius: 14, y: 3)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
     }
 
-    private func thumb(_ track: RideTrack) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(hex: 0xF2F4F7))
-            RouteThumbnail(points: track.points)
-            if let url = track.thumbnailURL {
-                CachedRemoteImage(url: url, contentMode: .fill)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private func metric(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func rideMetric(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
             Text(value)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.label)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -239,6 +294,18 @@ struct RideHomeView: View {
                 .foregroundStyle(Theme.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func thumb(_ track: RideTrack) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(hex: 0xF2F4F7))
+            RouteThumbnail(points: track.points)
+            if let url = track.thumbnailURL {
+                CachedRemoteImage(url: url, contentMode: .fill)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Data
@@ -283,16 +350,41 @@ struct RideHomeView: View {
         defer { loading = false }
 
         async let daysTask = RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor)
-        async let tracksTask = RideTrackService.monthTracks(vin: vehicle.vinNo, month: monthAnchor)
-        let days = await daysTask
-        let tracks = await tracksTask
-
+        let tracksResult = await RideTrackService.monthTracks(vin: vehicle.vinNo, month: monthAnchor)
+        let days = await daysTask ?? []
         if Task.isCancelled { return }
-        if tracks == nil, days == nil {
-            errorText = "骑行数据加载失败"
+
+        var tracks = tracksResult ?? []
+        if tracks.isEmpty, days.contains(where: { $0.mileage > 0 }) {
+            tracks = await Self.tracksForDays(vin: vehicle.vinNo, days: days)
+        }
+        if Task.isCancelled { return }
+        if tracks.isEmpty {
+            if days.contains(where: { $0.mileage > 0 }) {
+                errorText = "行程明细加载失败，下拉刷新"
+            }
+            groups = []
             return
         }
-        groups = Self.buildGroups(days: days ?? [], tracks: tracks ?? [])
+        groups = Self.buildGroups(days: days, tracks: tracks)
+    }
+
+    private static func tracksForDays(vin: String, days: [RideTrackService.MonthDay]) async -> [RideTrack] {
+        let ridden = days.filter { $0.mileage > 0 }.prefix(18)
+        guard !ridden.isEmpty else { return [] }
+        return await withTaskGroup(of: [RideTrack].self, returning: [RideTrack].self) { group in
+            for day in ridden {
+                guard let date = dotted.date(from: day.date) else { continue }
+                group.addTask {
+                    await RideTrackService.tracks(vin: vin, from: date, to: date, pageSize: 20) ?? []
+                }
+            }
+            var collected: [RideTrack] = []
+            for await batch in group {
+                collected.append(contentsOf: batch)
+            }
+            return collected
+        }
     }
 
     private static func buildGroups(days: [RideTrackService.MonthDay], tracks: [RideTrack]) -> [RideDayGroup] {
@@ -302,17 +394,14 @@ struct RideHomeView: View {
             let key = track.dayKey ?? today
             bucket[key, default: []].append(track)
         }
-        for day in days where day.mileage > 0 && bucket[day.date] == nil {
-            bucket[day.date] = []
-        }
 
         let keys = bucket.keys.sorted(by: >)
         return keys.compactMap { key in
             let list = (bucket[key] ?? []).sorted { ($0.startTime ?? "") > ($1.startTime ?? "") }
+            guard !list.isEmpty else { return nil }
             let day = days.first(where: { $0.date == key })
             let km = day?.mileage ?? list.reduce(0) { $0 + $1.mileage }
             let minutes = day?.minutes ?? list.reduce(0) { $0 + $1.durationMinutes }
-            guard km > 0 || minutes > 0 || !list.isEmpty else { return nil }
             return RideDayGroup(
                 id: key,
                 title: dayTitle(key, today: today),
@@ -332,6 +421,38 @@ struct RideHomeView: View {
         return "\(month)月\(String(format: "%02d", day))日"
     }
 
+    private func routeText(_ track: RideTrack) -> String? {
+        let start = track.startAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let end = track.endAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !start.isEmpty, !end.isEmpty, start != end {
+            return "\(start) → \(end)"
+        }
+        if !start.isEmpty { return start }
+        if !end.isEmpty { return end }
+        return nil
+    }
+
+    private func avgSpeed(_ track: RideTrack) -> Double? {
+        let hours = Double(track.durationMinutes) / 60.0
+        if hours > 0.02, track.mileage > 0 {
+            return track.mileage / hours
+        }
+        let samples = track.speedSamples.filter { $0 > 0.5 }
+        guard !samples.isEmpty else { return nil }
+        return samples.reduce(0, +) / Double(samples.count)
+    }
+
+    private func peakSpeed(_ track: RideTrack) -> Double? {
+        if let max = track.maxSpeed, max > 0 { return max }
+        if let peak = track.speedSamples.max(), peak > 0 { return peak }
+        return nil
+    }
+
+    private func speedText(_ value: Double?) -> String {
+        guard let value, value > 0 else { return "--" }
+        return String(format: "%.0f km/h", value)
+    }
+
     private func timeRange(_ track: RideTrack) -> String {
         let start = track.startTime ?? "--:--"
         if let end = track.endTime, !end.isEmpty, end != start {
@@ -340,24 +461,13 @@ struct RideHomeView: View {
         return start
     }
 
-    private func socText(_ track: RideTrack) -> String {
-        if let soc = track.socUsed, soc > 0 {
-            return String(format: soc >= 10 ? "%.0f%%" : "%.1f%%", soc)
-        }
-        return "--"
-    }
-
-    private func avgEnergyText(_ track: RideTrack) -> String {
-        guard let soc = track.socUsed, soc > 0, track.mileage > 0.05 else { return "--" }
-        return String(format: "%.1f%%/km", soc / track.mileage)
-    }
-
     private func formatKm(_ km: Double) -> String {
         if km >= 100 { return String(format: "%.0f", km) }
         return String(format: "%.1f", km)
     }
 
     private func durationLabel(_ minutes: Int) -> String {
+        guard minutes > 0 else { return "--" }
         if minutes >= 60 {
             let hours = Double(minutes) / 60.0
             return String(format: hours >= 10 ? "%.0fh" : "%.1fh", hours)

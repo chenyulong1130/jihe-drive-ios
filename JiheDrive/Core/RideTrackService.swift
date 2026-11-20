@@ -101,14 +101,24 @@ enum RideTrackService {
         return parse(response["data"])
     }
 
-    /// data 可能是 [{ dayTime, historyList: [...] }]，也可能直接是行程数组
+    /// data 可能是 [{ dayTime, historyList: [...] }]，也可能是单日对象或 { list: [...] }
     static func parse(_ data: Any?) -> [RideTrack] {
         let groups: [[String: Any]] = {
             if let array = data as? [[String: Any]] { return array }
-            if let dict = data as? [String: Any], let list = dict["list"] as? [[String: Any]] {
+            if let mixed = data as? [Any] {
+                return mixed.compactMap { $0 as? [String: Any] }
+            }
+            guard let dict = data as? [String: Any] else { return [] }
+            if let list = dict["list"] as? [[String: Any]]
+                ?? dict["records"] as? [[String: Any]]
+                ?? dict["dayList"] as? [[String: Any]] {
                 return list
             }
-            return []
+            if dict["historyList"] != nil || dict["rideId"] != nil || dict["trajectory"] != nil {
+                return [dict]
+            }
+            let numbered = dict.keys.compactMap(Int.init).sorted().compactMap { dict["\($0)"] as? [String: Any] }
+            return numbered
         }()
 
         var items: [[String: Any]] = []
@@ -140,6 +150,10 @@ enum RideTrackService {
             let start = text(item["startTime"] ?? item["beginTime"] ?? item["rideBeginTime"])
             let end = text(item["endTime"] ?? item["finishTime"] ?? item["rideEndTime"])
             let energy = parseEnergy(item)
+            let sampleSpeeds = samples.map(\.speed)
+            let peak = Vehicle.doubleValue(item["maxSpeed"])
+                ?? Vehicle.doubleValue(item["highestSpeed"])
+                ?? sampleSpeeds.max()
             let track = RideTrack(
                 id: text(item["rideId"] ?? item["id"]) ?? "ride-\(index)",
                 startTime: display(start),
@@ -147,10 +161,10 @@ enum RideTrackService {
                 durationMinutes: max(minutes, points.count > 1 ? 1 : 0),
                 points: points,
                 endTime: display(end),
-                maxSpeed: Vehicle.doubleValue(item["maxSpeed"]),
+                maxSpeed: peak.flatMap { $0 > 0 ? $0 : nil },
                 startAddress: address(item["startAddr"] ?? item["startAddress"]),
                 endAddress: address(item["endAddr"] ?? item["endAddress"]),
-                speedSamples: samples.map { $0.speed },
+                speedSamples: sampleSpeeds,
                 accelTimes: Int(Vehicle.doubleValue(
                     item["accelerationTimes"] ?? item["accelerationTimesDay"]
                 ) ?? 0),
@@ -417,8 +431,8 @@ enum RideTrackService {
             return nil
         }
 
-        // 车辆页只需要今日汇总；加速次数为 0 是正常值，不必再拉一天行程明细。
-        let needTracks = extra.todayKm == nil && extra.todayMin == nil
+        // 今日里程有了但时长/极速仍缺时，再用当天行程补齐
+        let needTracks = extra.todayMin == nil || extra.todayMaxSpeed == nil
         if needTracks {
             if let dayTracks = await tracks(vin: vin, days: 1), !dayTracks.isEmpty {
                 let mins = dayTracks.reduce(0) { $0 + $1.durationMinutes }
