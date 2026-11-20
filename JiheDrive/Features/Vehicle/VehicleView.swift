@@ -140,7 +140,6 @@ struct VehicleView: View {
             topInset: proxy.safeAreaInsets.top + 4,
             height: max(390, fullHeight * 0.46)
                 + ((model.tire?.hasData == true) ? 36 : 0),
-            canSwitchVehicle: model.vehicles.count > 1,
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -168,7 +167,8 @@ struct VehicleView: View {
             onOpenBattery: {
                 showBattery = true
             },
-            onInteract: { pinningHero = $0 }
+            onInteract: { pinningHero = $0 },
+            canSwitchVehicle: model.vehicles.count > 1
         )
     }
 
