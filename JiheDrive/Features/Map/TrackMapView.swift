@@ -39,6 +39,7 @@ struct TrackMapView: View {
             .padding(.bottom, 14)
         }
         .background(Theme.groupedBackground)
+        .sheetChrome()
         .onAppear { LocationPermissionRequester.shared.request() }
         .confirmationDialog("选择导航应用", isPresented: $showNavOptions, titleVisibility: .visible) {
             if let coordinate {
@@ -60,7 +61,7 @@ struct TrackMapView: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
-            circleButton(icon: "chevron.left") { dismiss() }
+            circleButton(icon: "chevron.down") { dismiss() }
             Spacer(minLength: 0)
             circleButton(icon: "location.fill") { recenterToken += 1 }
         }
@@ -80,7 +81,6 @@ struct TrackMapView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(vehicle.name)
                     .font(.system(size: 14, weight: .bold))
-                    .kerning(-0.2)
                     .foregroundStyle(Theme.label)
                     .lineLimit(1)
 
@@ -116,9 +116,9 @@ struct TrackMapView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.9), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(0.45), lineWidth: 0.8)
         )
-        .shadow(color: Theme.ink.opacity(0.1), radius: 14, x: 0, y: 5)
+        .shadow(color: Theme.ink.opacity(0.10), radius: 16, x: 0, y: 6)
     }
 
     private var emptyHint: some View {
@@ -148,8 +148,8 @@ struct TrackMapView: View {
                 .foregroundStyle(Theme.label)
                 .frame(width: 40, height: 40)
                 .background(Circle().fill(.ultraThinMaterial))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
-                .shadow(color: Theme.ink.opacity(0.12), radius: 10, x: 0, y: 3)
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.45), lineWidth: 0.8))
+                .shadow(color: Theme.ink.opacity(0.10), radius: 12, x: 0, y: 4)
         }
         .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
     }

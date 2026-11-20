@@ -14,9 +14,7 @@ struct VehicleDetailView: View {
     private var battery: BatteryInfo? { model.batteries.first }
 
     var body: some View {
-        VStack(spacing: 0) {
-            SheetHeader(title: "车辆详情", subtitle: vehicle.name, onClose: { dismiss() })
-
+        SheetShell(title: "车辆详情", subtitle: vehicle.name, onClose: { dismiss() }) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 12) {
                     profileCard
@@ -30,7 +28,7 @@ struct VehicleDetailView: View {
                 .padding(.bottom, 30)
             }
         }
-        .background(Theme.groupedBackground.ignoresSafeArea())
+        .sheetChrome()
         .sheet(isPresented: $showSettings) {
             VehicleSettingsView(vehicle: vehicle)
         }

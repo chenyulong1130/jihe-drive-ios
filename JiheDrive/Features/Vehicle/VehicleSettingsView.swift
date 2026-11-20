@@ -9,13 +9,11 @@ struct VehicleSettingsView: View {
     @State private var toast: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            SheetHeader(
-                title: "车辆设置",
-                subtitle: vehicle.name,
-                onClose: { dismiss() }
-            )
-
+        SheetShell(
+            title: "车辆设置",
+            subtitle: vehicle.name,
+            onClose: { dismiss() }
+        ) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
                     if store.loading && store.raw.isEmpty {
@@ -63,7 +61,7 @@ struct VehicleSettingsView: View {
                 .padding(.bottom, 32)
             }
         }
-        .background(Theme.groupedBackground.ignoresSafeArea())
+        .sheetChrome()
         .overlay(alignment: .bottom) {
             if let toast {
                 ToastView(text: toast)

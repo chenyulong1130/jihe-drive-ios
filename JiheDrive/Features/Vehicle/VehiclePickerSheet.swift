@@ -22,8 +22,7 @@ struct VehiclePickerSheet: View {
                 .padding(.bottom, 28)
             }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
+        .sheetChrome(detents: [.medium, .large])
     }
 
     private func row(_ vehicle: Vehicle) -> some View {
@@ -80,7 +79,11 @@ struct VehiclePickerSheet: View {
             .frame(minHeight: 76)
             .background(
                 RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                    .fill(Theme.surface)
+                    .fill(selected ? Theme.brand.opacity(0.06) : Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                    .strokeBorder(selected ? Theme.brand.opacity(0.32) : Color.clear, lineWidth: 1)
             )
             .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
         }

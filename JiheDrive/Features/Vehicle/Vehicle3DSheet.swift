@@ -22,6 +22,7 @@ struct Vehicle3DSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background(Theme.groupedBackground.ignoresSafeArea())
+        .sheetChrome()
         .task(id: vehicle.vinNo) {
             if vehicle.isGLBModel {
                 await loadGLB()

@@ -76,6 +76,7 @@ struct ThemeSheet: View {
             }
             }
         }
+        .sheetChrome()
     }
 
     // MARK: - 我的

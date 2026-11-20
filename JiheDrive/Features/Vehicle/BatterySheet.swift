@@ -46,8 +46,7 @@ struct BatterySheet: View {
             }
             .refreshable { await load() }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
+        .sheetChrome(detents: [.medium, .large])
         .task { await load() }
     }
 

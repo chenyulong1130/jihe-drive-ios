@@ -438,20 +438,21 @@ struct SheetHeader: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Capsule()
-                .fill(Theme.opaqueSeparator)
+                .fill(Theme.opaqueSeparator.opacity(0.55))
                 .frame(width: 36, height: 5)
-                .padding(.top, 8)
+                .padding(.top, 6)
 
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(Theme.title2)
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Theme.label)
+                        .lineLimit(1)
                     if let subtitle {
                         Text(subtitle)
-                            .font(.system(size: 15))
+                            .font(.system(size: 13))
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
                     }
@@ -461,16 +462,23 @@ struct SheetHeader: View {
 
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Theme.secondary)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 32, height: 32)
                         .background(Circle().fill(Theme.surfaceAlt))
                 }
                 .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
                 .accessibilityLabel("关闭")
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Theme.page)
             .padding(.bottom, 10)
+        }
+        // 磨砂底：内容从头部下方滚过时是一层玻璃，而不是硬切
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Theme.separator.opacity(0.7))
+                .frame(height: 0.5)
         }
     }
 }
@@ -494,10 +502,23 @@ struct SheetShell<Content: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            SheetHeader(title: title, subtitle: subtitle, onClose: onClose)
-            content
-        }
-        .background(Theme.groupedBackground.ignoresSafeArea())
+        // safeAreaInset 而不是 VStack：头部固定在顶部，滚动内容从它下面穿过去
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Theme.groupedBackground.ignoresSafeArea())
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SheetHeader(title: title, subtitle: subtitle, onClose: onClose)
+            }
+    }
+}
+
+extension View {
+    /// 统一弹窗外观：自带把手（所以隐藏系统把手）+ 大圆角 + 与页面同色的底
+    func sheetChrome(detents: Set<PresentationDetent> = [.large]) -> some View {
+        self
+            .presentationDetents(detents)
+            .presentationDragIndicator(.hidden)
+            .presentationCornerRadius(28)
+            .presentationBackground(Theme.groupedBackground)
     }
 }
