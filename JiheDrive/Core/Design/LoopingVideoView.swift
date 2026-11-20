@@ -18,6 +18,12 @@ struct LoopingVideoView: UIViewRepresentable {
         view.load(url: url, muted: muted)
     }
 
+    /// 视频层按父视图给的大小铺满，绝不反过来撑大布局
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: LoopingPlayerView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
     static func dismantleUIView(_ view: LoopingPlayerView, coordinator: ()) {
         view.stop()
     }

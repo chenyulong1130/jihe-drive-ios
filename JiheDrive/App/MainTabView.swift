@@ -54,6 +54,9 @@ struct MainTabView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
+            // 三个页面同时存在，必须把各自尺寸钳到屏幕内，否则任一页过宽会把整页撑开
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipped()
             .opacity(tab == target ? 1 : 0)
             .scaleEffect(tab == target ? 1 : 0.985)
             .allowsHitTesting(tab == target)

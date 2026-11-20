@@ -18,6 +18,12 @@ struct Vehicle: Identifiable, Hashable {
     /// 胎压，统一换算成 kPa 存，展示时除 100 得到 bar
     let tireFrontKpa: Double?
     let tireRearKpa: Double?
+    /// 车辆接口里带的电池读数，电池详情接口失败时兜底
+    let voltage: Double?
+    let temperature: Double?
+    let cycleCount: Int?
+    /// 官方 3D 模型地址（部分车型才有）
+    let model3DURL: URL?
 
     var id: String { vinNo }
 
@@ -28,6 +34,32 @@ struct Vehicle: Identifiable, Hashable {
             return nil
         }
         return Coordinate(latitude: latitude, longitude: longitude)
+    }
+
+    /// 车辆列表只有概要，首页接口返回的细节补进来（胎压、电压、3D 模型等）
+    func merged(with detail: Vehicle) -> Vehicle {
+        Vehicle(
+            vinNo: vinNo,
+            name: detail.name == "我的车辆" ? name : detail.name,
+            soc: detail.soc > 0 ? detail.soc : soc,
+            rangeKm: detail.rangeKm > 0 ? detail.rangeKm : rangeKm,
+            totalMileKm: detail.totalMileKm > 0 ? detail.totalMileKm : totalMileKm,
+            isOnline: isOnline,
+            isLocked: isLocked,
+            isCharging: detail.isCharging || isCharging,
+            signalLevel: detail.signalLevel > 0 ? detail.signalLevel : signalLevel,
+            latitude: detail.latitude ?? latitude,
+            longitude: detail.longitude ?? longitude,
+            locationTime: detail.locationTime ?? locationTime,
+            imageURL: detail.imageURL ?? imageURL,
+            monthMileage: detail.monthMileage ?? monthMileage,
+            tireFrontKpa: detail.tireFrontKpa ?? tireFrontKpa,
+            tireRearKpa: detail.tireRearKpa ?? tireRearKpa,
+            voltage: detail.voltage ?? voltage,
+            temperature: detail.temperature ?? temperature,
+            cycleCount: detail.cycleCount ?? cycleCount,
+            model3DURL: detail.model3DURL ?? model3DURL
+        )
     }
 }
 
@@ -60,14 +92,63 @@ extension Vehicle {
         self.locationTime = location?["locationTime"] as? String
         self.imageURL = Self.firstString(json, keys: ["customImage", "vehicleScalePicUrl", "vehiclePicUrl", "vehicleBackPicUrl", "pic", "imageUrl"]).flatMap(URL.init(string:))
         self.monthMileage = Self.dashValue(json["rideMileageMonth"])
+        let fields = Self.merge(json, iot)
         self.tireFrontKpa = Self.pressure(json, iot, keys: [
             "frontTirePressure", "frontTyrePressure", "tirePressureFront",
             "FrontTirePressure", "frontTirePress", "tireFrontPressure"
-        ])
+        ]) ?? Self.sniffPressure(fields, front: true)
         self.tireRearKpa = Self.pressure(json, iot, keys: [
             "rearTirePressure", "rearTyrePressure", "tirePressureRear",
             "RearTirePressure", "rearTirePress", "tireRearPressure"
-        ])
+        ]) ?? Self.sniffPressure(fields, front: false)
+
+        let voltage = Self.doubleValue(
+            json["batteryVoltage"] ?? json["voltage"] ?? iot["BatteryVoltage"] ?? iot["Voltage"]
+        )
+        self.voltage = (voltage ?? 0) > 0 ? voltage : nil
+
+        let temperature = Self.doubleValue(
+            json["batteryTemp"] ?? json["batteryTemperature"] ?? iot["BatteryTemp"] ?? iot["Temperature"] ?? iot["temp"]
+        )
+        self.temperature = (temperature ?? 0) != 0 ? temperature : nil
+
+        let cycle = Self.intValue(
+            json["cycleCount"] ?? json["batteryCycleCount"] ?? iot["CycleCount"] ?? iot["BatteryCycleCount"]
+        )
+        self.cycleCount = cycle > 0 ? cycle : nil
+
+        self.model3DURL = Self.firstString(json, keys: [
+            "model3dUrl", "model3DUrl", "model3durl", "threeDModelUrl",
+            "vehicle3dUrl", "modelUrl", "arModelUrl", "vehicleModel"
+        ]).flatMap(URL.init(string:))
+    }
+
+    /// 顶层字段 + iot 字段合并，便于按关键字模糊匹配
+    private static func merge(_ json: [String: Any], _ iot: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for (key, value) in iot { out[key.lowercased()] = value }
+        for (key, value) in json where !(value is [String: Any]) && !(value is [Any]) {
+            out[key.lowercased()] = value
+        }
+        return out
+    }
+
+    /// 车型差异太大，按关键字兜底找胎压：键名同时含 tire/tyre 与 press/kpa/bar
+    private static func sniffPressure(_ fields: [String: Any], front: Bool) -> Double? {
+        for (key, value) in fields {
+            let k = key.lowercased()
+            guard k.contains("tire") || k.contains("tyre") else { continue }
+            guard k.contains("press") || k.contains("kpa") || k.contains("bar") else { continue }
+
+            let isFront = k.contains("front") || k.contains("qf") || k.contains("frt")
+            let isRear = k.contains("rear") || k.contains("back") || k.contains("hb") || k.contains("rr")
+            guard front ? isFront : isRear else { continue }
+
+            if let value = doubleValue(value), value > 0 {
+                return value <= 10 ? value * 100 : value
+            }
+        }
+        return nil
     }
 
     /// 胎压原始值可能是 bar（2.4）或 kPa（240），统一成 kPa

@@ -19,19 +19,15 @@ struct VehicleView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            VStack(spacing: 14) {
                 if let vehicle = model.selectedVehicle {
-                    hero(vehicle).staggerIn(0)
-                    actionPanel(vehicle).staggerIn(1)
-                    if vehicle.soc <= 20 && !vehicle.isCharging && vehicle.isOnline {
-                        lowBatteryNotice(vehicle).staggerIn(1)
-                    }
-                    batteryTireCard(vehicle).staggerIn(2)
-                    mapCard(vehicle).staggerIn(3)
-                    SectionHeader("我的骑行")
-                    rideCard(vehicle).staggerIn(4)
-                    SectionHeader("车辆信息")
-                    infoCard(vehicle).staggerIn(5)
+                    hero(vehicle)
+                    actionCard(vehicle)
+                    batteryCard(vehicle)
+                    tireCard(vehicle)
+                    locationCard(vehicle)
+                    rideCard(vehicle)
+                    infoCard(vehicle)
                     footer(vehicle)
                 } else if model.loading {
                     loadingState
@@ -41,12 +37,12 @@ struct VehicleView: View {
 
                 if let error = model.errorMessage {
                     SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
-                        .padding(.top, 12)
                 }
             }
             .padding(.horizontal, Theme.page)
-            .padding(.top, 6)
-            .padding(.bottom, 120)
+            .padding(.top, 4)
+            .padding(.bottom, 130)
+            .frame(maxWidth: .infinity)
         }
         .refreshable { await model.refreshAll() }
         .overlay(alignment: .bottom) {
@@ -73,6 +69,7 @@ struct VehicleView: View {
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
             await model.loadBattery(vin: vin)
+            await model.loadDetail(vin: vin)
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             guard oldPhase == .background, newPhase == .active else { return }
@@ -102,228 +99,280 @@ struct VehicleView: View {
 
     // MARK: - 操作区
 
-    private func actionPanel(_ vehicle: Vehicle) -> some View {
-        VStack(spacing: 12) {
-            PowerButton(
-                locked: vehicle.isLocked,
-                busy: busy == "lock",
-                enabled: busy == nil
-            ) {
-                let queued = !vehicle.isOnline
-                run(
-                    "lock",
-                    success: queued ? "车辆离线，指令已排队" : "指令已发送，等待车辆响应"
-                ) {
-                    try await model.toggleLock(vehicle)
-                }
-            }
+    private func actionCard(_ vehicle: Vehicle) -> some View {
+        let locked = vehicle.isLocked
 
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    actionTile(icon: "light.beacon.max.fill", title: "寻车", tint: Theme.orange, key: "find") {
-                        try await model.findVehicle(vehicle)
+        return AppleCard(padding: 12) {
+            VStack(spacing: 12) {
+                Button {
+                    let queued = !vehicle.isOnline
+                    run(
+                        "lock",
+                        success: queued ? "车辆离线，指令已排队" : (locked ? "已发送解锁指令" : "已发送锁车指令")
+                    ) {
+                        try await model.toggleLock(vehicle)
                     }
-                    actionTile(icon: "shippingbox.fill", title: "开坐垫", tint: Theme.teal, key: "cushion") {
-                        try await model.openCushion(vehicle)
+                } label: {
+                    HStack(spacing: 8) {
+                        if busy == "lock" {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: locked ? "lock.open.fill" : "lock.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        Text(locked ? "一键解锁" : "点击锁车")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: locked
+                                        ? [Color(hex: 0x0A84FF), Color(hex: 0x0066E0)]
+                                        : [Color(hex: 0xFF9F0A), Color(hex: 0xF07C00)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
                     }
                 }
-                HStack(spacing: 10) {
-                    actionTile(
+                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.02))
+                .disabled(busy != nil)
+
+                HStack(spacing: 0) {
+                    quickItem(icon: "light.beacon.max.fill", title: "寻车", tint: Theme.orange) {
+                        run("find") { try await model.findVehicle(vehicle) }
+                    }
+                    quickItem(icon: "shippingbox.fill", title: "开坐垫", tint: Theme.teal) {
+                        run("cushion") { try await model.openCushion(vehicle) }
+                    }
+                    quickItem(
                         icon: "battery.75percent",
                         title: "电池",
                         tint: Theme.green,
-                        key: nil,
-                        hint: model.batteries.first.map { "\($0.level)%" }
+                        detail: model.batteries.first.map { "\($0.level)%" }
                     ) {
                         showBattery = true
                     }
-                    actionTile(icon: "cube.fill", title: "3D 看车", tint: Theme.indigo, key: nil) {
+                    quickItem(icon: "cube.transparent.fill", title: "3D 看车", tint: Theme.indigo) {
                         show3D = true
                     }
                 }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Theme.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
-        )
-        .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 8)
-        .padding(.top, 12)
     }
 
-    private func actionTile(
+    private func quickItem(
         icon: String,
         title: String,
         tint: Color,
-        key: String?,
-        hint: String? = nil,
-        action: @escaping () async throws -> Void
+        detail: String? = nil,
+        action: @escaping () -> Void
     ) -> some View {
-        Button {
-            guard let key else {
-                runLocal(action)
-                return
-            }
-            run(key, action: action)
-        } label: {
-            HStack(spacing: 7) {
+        Button(action: action) {
+            VStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .fill(tint.opacity(0.14))
-                        .frame(width: 28, height: 28)
-
-                    if let key, busy == key {
-                        ProgressView().scaleEffect(0.55)
-                    } else {
-                        Image(systemName: icon)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(tint)
-                    }
+                        .fill(tint.opacity(0.13))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(tint)
                 }
-
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                    if let hint {
-                        Text(hint)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(Theme.secondary)
-                    }
-                }
-
-                Spacer(minLength: 0)
+                Text(title)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text(detail ?? " ")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 9)
-            .frame(height: 44)
             .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Theme.surfaceAlt)
-            )
+            .contentShape(Rectangle())
         }
-        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0.01))
-        .disabled(busy != nil && key != nil)
+        .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+        .disabled(busy != nil)
     }
 
-    // MARK: - 电池与胎压
+    // MARK: - 电池
 
-    private func batteryTireCard(_ vehicle: Vehicle) -> some View {
+    private func batteryCard(_ vehicle: Vehicle) -> some View {
         let battery = model.batteries.first
-        let tint = (battery?.isCharging ?? vehicle.isCharging) ? Theme.green : Theme.brand
+        let charging = battery?.isCharging ?? vehicle.isCharging
+        let tint = charging ? Theme.green : Theme.brand
+        let level = min(max(battery?.level ?? vehicle.soc, 0), 100)
 
-        return AppleCard {
+        return AppleCard(onTap: { showBattery = true }) {
             VStack(spacing: 14) {
                 CardTitle(
-                    text: "电池与胎压",
+                    text: "电池",
                     icon: "bolt.batteryblock.fill",
                     tint: tint,
-                    trailing: battery?.stateText ?? "详情"
+                    trailing: battery?.stateText ?? (charging ? "充电中" : "详情")
                 )
 
-                HStack(alignment: .center, spacing: 14) {
+                HStack(spacing: 18) {
                     ZStack {
                         RingProgress(
-                            progress: Double(min(max(vehicle.soc, 0), 100)) / 100,
+                            progress: Double(level) / 100,
                             color: tint,
                             track: Color(uiColor: .tertiarySystemFill),
-                            lineWidth: 6,
-                            size: 62
+                            lineWidth: 7,
+                            size: 78
                         )
-                        VStack(spacing: 0) {
-                            Text("\(min(max(vehicle.soc, 0), 100))%")
-                                .font(.system(size: 15, weight: .semibold))
+                        VStack(spacing: -2) {
+                            Text("\(level)")
+                                .font(.system(size: 24, weight: .semibold))
                                 .foregroundStyle(Theme.label)
                                 .monospacedDigit()
+                            Text("%")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Theme.secondary)
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 18) {
-                            compactStat(title: "电压", value: battery.map { String(format: "%.1f V", $0.voltage) } ?? "--")
-                            compactStat(title: "温度", value: battery.map { String(format: "%.0f ℃", $0.temperature) } ?? "--")
-                            compactStat(title: "循环", value: cycleText(battery))
-                        }
-
-                        HairLine()
-
-                        HStack(spacing: 14) {
-                            tireColumn(title: "前轮", kpa: vehicle.tireFrontKpa)
-                            tireColumn(title: "后轮", kpa: vehicle.tireRearKpa)
-                        }
+                    VStack(alignment: .leading, spacing: 9) {
+                        statRow("续航", value: "\(vehicle.rangeKm) km")
+                        statRow("电压", value: voltageText(battery, vehicle))
+                        statRow("温度", value: temperatureText(battery, vehicle))
+                        statRow("循环", value: cycleText(battery, vehicle))
                     }
 
                     Spacer(minLength: 0)
                 }
 
-                Button {
-                    showBattery = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("查看电池详情")
-                            .font(.system(size: 13, weight: .medium))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .foregroundStyle(Theme.brand)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Theme.brand.opacity(0.09))
-                    )
+                if let hint = batteryHint(vehicle) {
+                    SoftBanner(text: hint, icon: "exclamationmark.circle.fill", tone: Theme.orange)
                 }
-                .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
             }
         }
-        .padding(.top, 12)
+    }
+
+    private func statRow(_ title: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(Theme.footnote)
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 30, alignment: .leading)
+            Text(value)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.label)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    private func voltageText(_ battery: BatteryInfo?, _ vehicle: Vehicle) -> String {
+        let value = (battery?.voltage ?? vehicle.voltage) ?? 0
+        guard value > 0 else { return "—" }
+        return String(format: "%.1f V", value)
+    }
+
+    private func temperatureText(_ battery: BatteryInfo?, _ vehicle: Vehicle) -> String {
+        let value = (battery?.temperature ?? vehicle.temperature) ?? 0
+        guard value != 0 else { return "—" }
+        return String(format: "%.0f ℃", value)
+    }
+
+    private func cycleText(_ battery: BatteryInfo?, _ vehicle: Vehicle) -> String {
+        if let cycle = battery?.cycleCount, cycle > 0 { return "\(cycle) 次" }
+        if let cycle = vehicle.cycleCount, cycle > 0 { return "\(cycle) 次" }
+        return "—"
+    }
+
+    private func batteryHint(_ vehicle: Vehicle) -> String? {
+        if vehicle.soc <= 20 && !vehicle.isCharging && vehicle.isOnline {
+            return "电量仅剩 \(vehicle.soc)%，建议尽快充电"
+        }
+        return nil
+    }
+
+    // MARK: - 胎压
+
+    private func tireCard(_ vehicle: Vehicle) -> some View {
+        AppleCard {
+            VStack(spacing: 14) {
+                CardTitle(
+                    text: "胎压",
+                    icon: "circle.dashed",
+                    tint: Theme.indigo,
+                    trailing: tireStatus(vehicle)
+                )
+
+                HStack(spacing: 12) {
+                    tireColumn(title: "前轮", kpa: vehicle.tireFrontKpa)
+                    Rectangle()
+                        .fill(Theme.separator)
+                        .frame(width: 0.5, height: 54)
+                    tireColumn(title: "后轮", kpa: vehicle.tireRearKpa)
+                }
+
+                if !vehicle.hasTirePressure {
+                    Text("该车型未上报胎压数据")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
     }
 
     private func tireColumn(title: String, kpa: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(title)
-                    .font(Theme.caption)
+                    .font(Theme.footnote)
                     .foregroundStyle(Theme.secondary)
                 Spacer(minLength: 0)
-                Text(tireValue(kpa))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(tireTint(kpa))
-                    .monospacedDigit()
-                Text("bar")
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(Theme.tertiary)
+                if let kpa {
+                    Text(String(format: "%.1f", kpa / 100))
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(tireTint(kpa))
+                        .monospacedDigit()
+                    Text("bar")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.tertiary)
+                } else {
+                    Text("—")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Theme.tertiary)
+                }
             }
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Theme.surfaceAlt)
-                        .frame(height: 5)
+                        .frame(height: 6)
                     Capsule()
                         .fill(tireTint(kpa))
-                        .frame(width: max(4, proxy.size.width * tireRatio(kpa)), height: 5)
+                        .frame(width: max(6, proxy.size.width * tireRatio(kpa)), height: 6)
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func tireValue(_ kpa: Double?) -> String {
-        guard let kpa else { return "--" }
-        return String(format: "%.1f", kpa / 100)
+    private func tireStatus(_ vehicle: Vehicle) -> String {
+        guard vehicle.hasTirePressure else { return "无数据" }
+        let values = [vehicle.tireFrontKpa, vehicle.tireRearKpa].compactMap { $0 }
+        if values.contains(where: { $0 < 180 }) { return "偏低" }
+        if values.contains(where: { $0 < 210 || $0 > 290 }) { return "注意" }
+        return "正常"
     }
 
     private func tireRatio(_ kpa: Double?) -> CGFloat {
-        guard let kpa else { return 0 }
+        guard let kpa else { return 0.02 }
         return CGFloat(min(1, max(0.04, kpa / 320)))
     }
 
@@ -334,33 +383,16 @@ struct VehicleView: View {
         return Theme.green
     }
 
-    private func cycleText(_ battery: BatteryInfo?) -> String {
-        guard let battery, let cycle = battery.cycleCount else { return "--" }
-        return "\(cycle)"
-    }
-
-    private func compactStat(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(Theme.caption)
-                .foregroundStyle(Theme.secondary)
-            Text(value)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Theme.label)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-    }
-
     // MARK: - 位置
 
-    private func mapCard(_ vehicle: Vehicle) -> some View {
-        ZStack(alignment: .bottom) {
-            mapBody(vehicle)
+    private func locationCard(_ vehicle: Vehicle) -> some View {
+        VStack(spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                mapBody(vehicle)
+                    .frame(height: 150)
+                    .frame(maxWidth: .infinity)
 
-            HStack(spacing: 8) {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     Image(systemName: "mappin.circle.fill")
                         .font(.system(size: 11, weight: .medium))
                     Text(locationLabel(vehicle))
@@ -370,35 +402,35 @@ struct VehicleView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Capsule(style: .continuous).fill(.regularMaterial))
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text("展开")
-                        .font(Theme.captionStrong)
-                }
-                .foregroundStyle(Theme.brand)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule(style: .continuous).fill(.regularMaterial))
+                .padding(10)
             }
-            .padding(10)
+
+            HStack(spacing: 8) {
+                Text("车辆位置")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Spacer(minLength: 0)
+                Text("查看地图")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.brand)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Theme.brand)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 46)
         }
-        .frame(height: 164)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
-        .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onTapGesture { showMap = true }
-        .padding(.top, 12)
     }
 
     @ViewBuilder
     private func mapBody(_ vehicle: Vehicle) -> some View {
         if let coordinate = vehicle.coordinate {
             VehicleMapView(coordinate: coordinate, interactive: false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
         } else {
             ZStack {
@@ -425,12 +457,14 @@ struct VehicleView: View {
     private func rideCard(_ vehicle: Vehicle) -> some View {
         AppleCard {
             VStack(spacing: 14) {
-                CardTitle(text: "骑行数据", trailing: "本月")
+                CardTitle(text: "骑行", icon: "figure.outdoor.cycle", tint: Theme.brand, trailing: "本月")
 
-                HStack(spacing: 10) {
-                    MetricChip(title: "本月里程", value: vehicle.monthMileage ?? "--", unit: "km")
-                    MetricChip(title: "总里程", value: String(format: "%.0f", vehicle.totalMileKm), unit: "km")
-                    MetricChip(title: "可行驶", value: "\(vehicle.rangeKm)", unit: "km")
+                HStack(spacing: 0) {
+                    rideStat(title: "本月里程", value: vehicle.monthMileage ?? "—", unit: "km")
+                    rideDivider
+                    rideStat(title: "总里程", value: String(format: "%.0f", vehicle.totalMileKm), unit: "km")
+                    rideDivider
+                    rideStat(title: "可行驶", value: "\(vehicle.rangeKm)", unit: "km")
                 }
 
                 Button {
@@ -438,7 +472,7 @@ struct VehicleView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "play.circle.fill")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 16, weight: .semibold))
                         Text("轨迹回放")
                             .font(.system(size: 14, weight: .semibold))
                         Spacer(minLength: 0)
@@ -447,42 +481,73 @@ struct VehicleView: View {
                     }
                     .foregroundStyle(Theme.brand)
                     .padding(.horizontal, 12)
-                    .frame(height: 42)
+                    .frame(height: 44)
                     .frame(maxWidth: .infinity)
-                    .background(
+                    .background {
                         RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(Theme.brand.opacity(0.09))
-                    )
+                            .fill(Theme.brand.opacity(0.08))
+                    }
                 }
                 .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
             }
         }
     }
 
+    private func rideStat(title: String, value: String, unit: String) -> some View {
+        VStack(spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            Text(title)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var rideDivider: some View {
+        Rectangle()
+            .fill(Theme.separator)
+            .frame(width: 0.5, height: 26)
+    }
+
+    // MARK: - 车辆信息
+
     private func infoCard(_ vehicle: Vehicle) -> some View {
         AppleCard {
-            VStack(spacing: 12) {
+            VStack(spacing: 0) {
+                CardTitle(text: "车辆信息")
+                    .padding(.bottom, 12)
+
                 InfoRow(title: "VIN", value: vehicle.vinNo, mono: true)
-                HairLine()
-                InfoRow(title: "状态", value: vehicle.isOnline ? "在线" : "离线", valueColor: vehicle.isOnline ? Theme.green : Theme.secondary)
-                HairLine()
-                InfoRow(title: "车锁", value: vehicle.isLocked ? "已上锁" : "未上锁", valueColor: vehicle.isLocked ? Theme.label : Theme.orange)
-                HairLine()
-                InfoRow(title: "充电", value: vehicle.isCharging ? "充电中" : "未充电", valueColor: vehicle.isCharging ? Theme.green : Theme.label)
-                HairLine()
+                HairLine().padding(.vertical, 10)
+                InfoRow(
+                    title: "状态",
+                    value: vehicle.isOnline ? "在线" : "离线",
+                    valueColor: vehicle.isOnline ? Theme.green : Theme.secondary
+                )
+                HairLine().padding(.vertical, 10)
                 InfoRow(title: "信号", value: "\(vehicle.signalLevel) 级")
-                HairLine()
-                InfoRow(title: "最后位置", value: coordinateText(vehicle))
+                HairLine().padding(.vertical, 10)
+                InfoRow(title: "最后定位", value: coordinateText(vehicle))
             }
         }
     }
 
     private func footer(_ vehicle: Vehicle) -> some View {
-        Text("总里程 \(String(format: "%.0f", vehicle.totalMileKm)) km · 数据来自极核云端")
-            .font(Theme.footnote)
+        Text("数据来自极核云端 · 下拉刷新")
+            .font(Theme.caption)
             .foregroundStyle(Theme.tertiary)
             .frame(maxWidth: .infinity)
-            .padding(.top, 16)
+            .padding(.top, 2)
     }
 
     // MARK: - 状态
@@ -514,36 +579,20 @@ struct VehicleView: View {
         .padding(.top, 150)
     }
 
-    private func lowBatteryNotice(_ vehicle: Vehicle) -> some View {
-        SoftBanner(
-            text: "电量仅剩 \(vehicle.soc)%，建议尽快充电",
-            icon: "battery.25percent",
-            tone: Theme.orange
-        )
-        .padding(.top, 12)
-    }
-
     // MARK: - 工具
 
     private func coordinateText(_ vehicle: Vehicle) -> String {
         guard let coordinate = vehicle.coordinate else { return "暂无坐标" }
-        return String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)
+        return String(format: "%.4f, %.4f", coordinate.latitude, coordinate.longitude)
     }
 
     private func shortTime(_ raw: String?) -> String {
-        guard let raw, !raw.isEmpty else { return "--" }
+        guard let raw, !raw.isEmpty else { return "—" }
         let parts = raw.split(separator: " ")
         guard parts.count == 2 else { return String(raw.prefix(11)) }
         let date = parts[0].count >= 10 ? parts[0].suffix(5) : parts[0]
         let time = parts[1].count >= 5 ? parts[1].prefix(5) : parts[1]
         return "\(date) \(time)"
-    }
-
-    /// 只做页面跳转的按钮，不发送指令
-    private func runLocal(_ action: @escaping () async throws -> Void) {
-        Task {
-            do { try await action() } catch { showToast(error.localizedDescription) }
-        }
     }
 
     private func run(

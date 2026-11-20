@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var batteryLoading = false
     @Published var batteryError: String?
     @Published private(set) var loading = false
+    @Published private(set) var detailVehicle: Vehicle?
     @Published var selectedVin: String? {
         didSet {
             UserDefaults.standard.set(selectedVin, forKey: Self.vinKey)
@@ -16,6 +17,7 @@ final class AppModel: ObservableObject {
             // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度
             batteries = []
             batteryError = nil
+            detailVehicle = nil
         }
     }
     @Published var errorMessage: String?
@@ -32,10 +34,15 @@ final class AppModel: ObservableObject {
     }
 
     var selectedVehicle: Vehicle? {
+        let base: Vehicle?
         if let selectedVin, let hit = vehicles.first(where: { $0.vinNo == selectedVin }) {
-            return hit
+            base = hit
+        } else {
+            base = vehicles.first
         }
-        return vehicles.first
+        guard let base else { return nil }
+        guard let detail = detailVehicle, detail.vinNo == base.vinNo else { return base }
+        return base.merged(with: detail)
     }
 
     func bootstrap() async {
@@ -151,7 +158,38 @@ final class AppModel: ObservableObject {
         await loadVehicles()
         if let vin = selectedVehicle?.vinNo {
             await loadBattery(vin: vin)
+            await loadDetail(vin: vin)
         }
+    }
+
+    /// 车辆首页接口：胎压、电压、温度、3D 模型这类细节只有这里带
+    func loadDetail(vin: String) async {
+        do {
+            let response = try await client.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)")
+            let code = ZeehoClient.codeString(response["code"])
+            if !code.isEmpty && code != "10000" { return }
+            guard var json = Self.detailPayload(response) else { return }
+            json["vinNo"] = vin
+            if let nested = json["vehicleInfo"] as? [String: Any] {
+                json.merge(nested) { current, _ in current }
+            }
+            guard let parsed = Vehicle(json: json) else { return }
+            guard selectedVin == nil || selectedVin == vin else { return }
+            detailVehicle = parsed
+        } catch is CancellationError {
+            // 切车打断，忽略
+        } catch let error as URLError where error.code == .cancelled {
+            // 同上
+        } catch {
+            // 细节接口失败不影响主流程，页面回落到列表字段
+        }
+    }
+
+    private static func detailPayload(_ response: [String: Any]) -> [String: Any]? {
+        let raw = response["data"] ?? response
+        if let dict = raw as? [String: Any] { return dict }
+        if let first = (raw as? [[String: Any]])?.first { return first }
+        return nil
     }
 
     // MARK: - 电池
