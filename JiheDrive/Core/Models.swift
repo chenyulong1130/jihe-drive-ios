@@ -31,6 +31,13 @@ struct Vehicle: Identifiable, Hashable {
 
     var hasTirePressure: Bool { tireFrontKpa != nil || tireRearKpa != nil }
 
+    /// 接口给的是 glb/gltf 时用 model-viewer 渲染
+    var isGLBModel: Bool {
+        guard let url = model3DURL else { return false }
+        let ext = url.pathExtension.lowercased()
+        return ext == "glb" || ext == "gltf"
+    }
+
     var coordinate: Coordinate? {
         guard let latitude, let longitude, latitude != 0, longitude != 0 else {
             return nil
@@ -126,10 +133,11 @@ extension Vehicle {
 
         // 先按已知字段取，取不到就递归扫整份 JSON，找任何指向模型文件的地址
         let explicitModel = Self.firstString(json, keys: [
-            "model3dUrl", "model3DUrl", "model3durl", "threeDModelUrl",
-            "vehicle3dUrl", "modelUrl", "arModelUrl", "vehicleModel",
-            "model3d", "3dModelUrl", "threeDUrl", "sceneUrl",
-            "modelPath", "modelAddress", "carModelUrl", "gltfUrl"
+            // 与安卓版一致的优先顺序
+            "vehiclePic3dUrl", "vehiclePic3d", "vehicle3dUrl", "vehiclePic3DUrl",
+            "model3dUrl", "model3DUrl", "modelUrl", "model3durl", "threeDModelUrl",
+            "arModelUrl", "vehicleModel", "model3d", "3dModelUrl", "threeDUrl",
+            "sceneUrl", "modelPath", "modelAddress", "carModelUrl", "gltfUrl"
         ]).flatMap(URL.init(string:))
         self.model3DURL = explicitModel ?? Self.findModelURL(in: json)
     }

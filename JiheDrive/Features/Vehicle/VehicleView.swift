@@ -8,6 +8,7 @@ struct VehicleView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var model3D = VehicleModelLoader()
+    @State private var heroGLB: URL?
 
     @State private var busy: String?
     @State private var toast: String?
@@ -71,7 +72,7 @@ struct VehicleView: View {
             async let tire: Void = model.loadTire(vin: vin)
             _ = await (battery, detail, tire)
             // 详情接口回来后才可能有 3D 模型地址
-            model3D.load(model.selectedVehicle?.model3DURL)
+            await loadHeroModel()
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             guard oldPhase == .background, newPhase == .active else { return }
@@ -91,6 +92,7 @@ struct VehicleView: View {
             videoPoster: videoStore.poster,
             photo: wallpaperStore.image,
             modelScene: model3D.scene,
+            modelGLBFile: heroGLB,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             topInset: proxy.safeAreaInsets.top + 10,
@@ -112,6 +114,18 @@ struct VehicleView: View {
                 showTheme = true
             }
         )
+    }
+
+    /// glb 走 model-viewer，其余格式交给 SceneKit
+    private func loadHeroModel() async {
+        guard let vehicle = model.selectedVehicle, let url = vehicle.model3DURL else { return }
+        if vehicle.isGLBModel {
+            if heroGLB == nil {
+                heroGLB = try? await GLBModelStore.localFile(for: url)
+            }
+        } else {
+            model3D.load(url)
+        }
     }
 
     // MARK: - 内容（连续面板，无卡片、无阴影）

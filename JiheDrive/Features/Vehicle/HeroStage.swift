@@ -24,6 +24,8 @@ struct HeroStage: View {
     let videoPoster: UIImage?
     let photo: UIImage?
     let modelScene: SCNScene?
+    /// 接口给的是 glb 时就地渲染（与安卓版同一套 model-viewer）
+    var modelGLBFile: URL? = nil
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
     var tireFrontBar: Double? = nil
     var tireRearBar: Double? = nil
@@ -175,7 +177,15 @@ struct HeroStage: View {
 
     @ViewBuilder
     private var carLayer: some View {
-        if let modelScene {
+        if let modelGLBFile {
+            Color.clear
+                .overlay {
+                    ModelViewerWebView(glbFile: modelGLBFile, interactive: false, autoRotate: true)
+                }
+                .padding(.top, 88)
+                .padding(.bottom, 96)
+                .allowsHitTesting(false)
+        } else if let modelScene {
             VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
                 .padding(.top, 92)
                 .padding(.bottom, 96)

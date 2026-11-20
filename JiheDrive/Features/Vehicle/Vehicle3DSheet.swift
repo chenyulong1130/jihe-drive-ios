@@ -8,6 +8,8 @@ struct Vehicle3DSheet: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var loader = VehicleModelLoader()
     @State private var resetToken = 0
+    @State private var glbFile: URL?
+    @State private var glbFailed = false
 
     private var modelURL: URL? { vehicle.model3DURL }
 
@@ -21,7 +23,11 @@ struct Vehicle3DSheet: View {
         }
         .background(Theme.groupedBackground.ignoresSafeArea())
         .task(id: vehicle.vinNo) {
-            loader.load(modelURL)
+            if vehicle.isGLBModel {
+                await loadGLB()
+            } else {
+                loader.load(modelURL)
+            }
         }
     }
 
@@ -54,7 +60,7 @@ struct Vehicle3DSheet: View {
             VStack {
                 header
                 Spacer(minLength: 0)
-                if loader.scene != nil {
+                if vehicle.model3DURL != nil {
                     hint
                 }
             }
@@ -73,7 +79,9 @@ struct Vehicle3DSheet: View {
 
     @ViewBuilder
     private var stageContent: some View {
-        if let scene = loader.scene {
+        if vehicle.isGLBModel {
+            glbStage
+        } else if let scene = loader.scene {
             VehicleSceneView(scene: scene, interactive: true, autoSpin: true)
                 .id(resetToken)
         } else {
@@ -101,6 +109,47 @@ struct Vehicle3DSheet: View {
             default:
                 photoStage
             }
+        }
+    }
+
+    @ViewBuilder
+    private var glbStage: some View {
+        if let glbFile {
+            Color.clear
+                .overlay {
+                    ModelViewerWebView(glbFile: glbFile, interactive: true, autoRotate: false)
+                        .id(resetToken)
+                }
+        } else if glbFailed {
+            VStack(spacing: 10) {
+                Image(systemName: "cube.transparent")
+                    .font(.system(size: 30, weight: .light))
+                Text("模型下载失败")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("接口返回的 GLB 地址无法访问，检查网络后重试")
+                    .font(.system(size: 11.5))
+                    .multilineTextAlignment(.center)
+                    .opacity(0.72)
+                    .padding(.horizontal, 20)
+            }
+            .foregroundStyle(.white.opacity(0.9))
+        } else {
+            VStack(spacing: 10) {
+                ProgressView().tint(.white)
+                Text("正在下载车辆模型")
+                    .font(Theme.footnote)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+        }
+    }
+
+    private func loadGLB() async {
+        guard let url = modelURL, vehicle.isGLBModel else { return }
+        if glbFile != nil { return }
+        do {
+            glbFile = try await GLBModelStore.localFile(for: url)
+        } catch {
+            glbFailed = true
         }
     }
 
@@ -148,14 +197,14 @@ struct Vehicle3DSheet: View {
                 Text(vehicle.name)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
-                Text(loader.scene != nil ? "官方 3D 模型" : "官方车辆图片")
+                Text(vehicle.model3DURL != nil ? "官方 3D 模型" : "官方车辆图片")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.62))
             }
 
             Spacer(minLength: 8)
 
-            if loader.scene != nil {
+            if vehicle.model3DURL != nil {
                 Button {
                     withAnimation(Motion.quick) { resetToken += 1 }
                 } label: {
