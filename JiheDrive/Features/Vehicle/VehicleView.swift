@@ -39,7 +39,7 @@ struct VehicleView: View {
             .ignoresSafeArea(edges: .top)
             .refreshable { await model.refreshAll() }
         }
-        .background(Theme.groupedBackground)
+        .background(Theme.surface)
         .overlay(alignment: .bottom) {
             if let message = toast {
                 ToastView(text: message)
@@ -110,95 +110,104 @@ struct VehicleView: View {
         )
     }
 
-    // MARK: - 内容
+    // MARK: - 内容（连续面板，无卡片、无阴影）
 
     private func content(_ vehicle: Vehicle) -> some View {
-        VStack(spacing: 12) {
-            actionCard(vehicle)
-            detailPanel(vehicle)
+        VStack(spacing: 0) {
+            HairLine()
+            actionBlock(vehicle)
+            HairLine()
+            batteryBlock(vehicle)
+            HairLine()
+            locationBlock(vehicle)
+            HairLine()
+            rideBlock(vehicle)
+            HairLine()
+            infoBlock(vehicle)
 
             if let error = model.errorMessage {
                 SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
             }
 
             Text("数据来自极核云端 · 下拉刷新")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.tertiary)
-                .padding(.top, 2)
+                .padding(.vertical, 18)
         }
-        .padding(.horizontal, Theme.page)
-        .padding(.top, 14)
     }
 
     // MARK: - 操作
 
-    private func actionCard(_ vehicle: Vehicle) -> some View {
+    private func actionBlock(_ vehicle: Vehicle) -> some View {
         let locked = vehicle.isLocked
 
-        return AppleCard(padding: 12) {
-            VStack(spacing: 10) {
-                Button {
-                    let queued = !vehicle.isOnline
-                    run(
-                        "lock",
-                        success: queued ? "车辆离线，指令已排队" : (locked ? "已发送解锁指令" : "已发送锁车指令")
-                    ) {
-                        try await model.toggleLock(vehicle)
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        if busy == "lock" {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .tint(.white)
-                                .scaleEffect(0.8)
-                        } else {
-                            Image(systemName: locked ? "lock.open.fill" : "lock.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                        }
-                        Text(locked ? "一键解锁" : "点击锁车")
+        return VStack(spacing: 14) {
+            Button {
+                let queued = !vehicle.isOnline
+                run(
+                    "lock",
+                    success: queued ? "车辆离线，指令已排队" : (locked ? "已发送解锁指令" : "已发送锁车指令")
+                ) {
+                    try await model.toggleLock(vehicle)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if busy == "lock" {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: locked ? "lock.open.fill" : "lock.fill")
                             .font(.system(size: 16, weight: .semibold))
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: locked
-                                        ? [Color(hex: 0x0A84FF), Color(hex: 0x0066E0)]
-                                        : [Color(hex: 0xFF9F0A), Color(hex: 0xF07C00)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                    }
+                    Text(locked ? "一键解锁" : "点击锁车")
+                        .font(.system(size: 16, weight: .semibold))
                 }
-                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.02))
-                .disabled(busy != nil)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: locked
+                                    ? [Color(hex: 0x0A84FF), Color(hex: 0x0066E0)]
+                                    : [Color(hex: 0xFF9F0A), Color(hex: 0xF07C00)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
+            }
+            .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.02))
+            .disabled(busy != nil)
 
-                HStack(spacing: 0) {
-                    quickItem(icon: "light.beacon.max.fill", title: "寻车", tint: Theme.orange) {
-                        run("find") { try await model.findVehicle(vehicle) }
-                    }
-                    quickItem(icon: "shippingbox.fill", title: "开坐垫", tint: Theme.teal) {
-                        run("cushion") { try await model.openCushion(vehicle) }
-                    }
-                    quickItem(
-                        icon: "battery.75percent",
-                        title: "电池",
-                        tint: Theme.green,
-                        detail: model.batteries.first.map { "\($0.level)%" }
-                    ) {
-                        showBattery = true
-                    }
-                    quickItem(icon: "cube.transparent.fill", title: "3D 看车", tint: Theme.indigo) {
-                        show3D = true
-                    }
+            HStack(spacing: 0) {
+                quickItem(icon: "light.beacon.max.fill", title: "寻车", tint: Theme.orange) {
+                    run("find") { try await model.findVehicle(vehicle) }
+                }
+                quickItem(icon: "shippingbox.fill", title: "开坐垫", tint: Theme.teal) {
+                    run("cushion") { try await model.openCushion(vehicle) }
+                }
+                quickItem(
+                    icon: "battery.75percent",
+                    title: "电池",
+                    tint: Theme.green,
+                    detail: model.batteries.first.map { "\($0.level)%" }
+                ) {
+                    showBattery = true
+                }
+                quickItem(icon: "cube.transparent.fill", title: "3D 看车", tint: Theme.indigo) {
+                    show3D = true
                 }
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
     }
 
     private func quickItem(
@@ -212,7 +221,7 @@ struct VehicleView: View {
             VStack(spacing: 5) {
                 ZStack {
                     Circle()
-                        .fill(tint.opacity(0.13))
+                        .fill(tint.opacity(0.12))
                         .frame(width: 44, height: 44)
                     Image(systemName: icon)
                         .font(.system(size: 16, weight: .medium))
@@ -235,86 +244,69 @@ struct VehicleView: View {
         .disabled(busy != nil)
     }
 
-    // MARK: - 明细面板（一整块，分隔线分区）
+    // MARK: - 电池
 
-    private func detailPanel(_ vehicle: Vehicle) -> some View {
-        AppleCard(padding: 0) {
-            VStack(spacing: 0) {
-                batterySection(vehicle)
-                HairLine(inset: 16)
-                locationSection(vehicle)
-                HairLine(inset: 16)
-                rideSection(vehicle)
-                HairLine(inset: 16)
-                infoSection(vehicle)
-            }
-        }
-    }
-
-    private func batterySection(_ vehicle: Vehicle) -> some View {
+    private func batteryBlock(_ vehicle: Vehicle) -> some View {
         let battery = model.batteries.first
         let charging = battery?.isCharging ?? vehicle.isCharging
         let level = min(max(battery?.level ?? vehicle.soc, 0), 100)
         let tint = charging ? Theme.green : Theme.brand
 
-        return Button {
-            showBattery = true
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(tint)
-                        .frame(width: 6, height: 6)
-                    Text("电池")
-                        .font(.system(size: 15, weight: .semibold))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 6, height: 6)
+                Text("电池")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Text(battery?.stateText ?? (charging ? "充电中" : "正常"))
+                    .font(Theme.caption)
+                    .foregroundStyle(tint)
+                Spacer(minLength: 0)
+                Text("详情")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+
+            HStack(alignment: .center, spacing: 16) {
+                ZStack {
+                    RingProgress(
+                        progress: Double(level) / 100,
+                        color: tint,
+                        track: Theme.surfaceAlt,
+                        lineWidth: 5,
+                        size: 54
+                    )
+                    Text("\(level)")
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                    Text(battery?.stateText ?? (charging ? "充电中" : "正常"))
-                        .font(Theme.caption)
-                        .foregroundStyle(tint)
-                    Spacer(minLength: 0)
-                    Text("详情")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.tertiary)
+                        .monospacedDigit()
                 }
 
-                HStack(alignment: .center, spacing: 14) {
-                    ZStack {
-                        RingProgress(
-                            progress: Double(level) / 100,
-                            color: tint,
-                            track: Theme.surfaceAlt,
-                            lineWidth: 5,
-                            size: 52
-                        )
-                        Text("\(level)")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                            .monospacedDigit()
+                VStack(spacing: 10) {
+                    HStack(spacing: 12) {
+                        cell("续航", "\(vehicle.rangeKm) km")
+                        cell("电压", voltageText(battery, vehicle))
                     }
-
-                    VStack(spacing: 9) {
-                        HStack(spacing: 10) {
-                            cell("续航", "\(vehicle.rangeKm) km")
-                            cell("电压", voltageText(battery, vehicle))
-                        }
-                        HStack(spacing: 10) {
-                            cell("温度", temperatureText(battery, vehicle))
-                            cell("循环", cycleText(battery, vehicle))
-                        }
+                    HStack(spacing: 12) {
+                        cell("温度", temperatureText(battery, vehicle))
+                        cell("循环", cycleText(battery, vehicle))
                     }
-                }
-
-                if let hint = batteryHint(vehicle) {
-                    SoftBanner(text: hint, icon: "exclamationmark.circle.fill", tone: Theme.orange)
                 }
             }
-            .padding(16)
-            .contentShape(Rectangle())
+
+            if let hint = batteryHint(vehicle) {
+                SoftBanner(text: hint, icon: "exclamationmark.circle.fill", tone: Theme.orange)
+            }
         }
-        .buttonStyle(PressableStyle(scale: 0.995, brightness: 0))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .contentShape(Rectangle())
+        .onTapGesture { showBattery = true }
     }
 
     private func cell(_ title: String, _ value: String) -> some View {
@@ -332,8 +324,10 @@ struct VehicleView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func locationSection(_ vehicle: Vehicle) -> some View {
-        VStack(spacing: 0) {
+    // MARK: - 位置
+
+    private func locationBlock(_ vehicle: Vehicle) -> some View {
+        VStack(spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "location.fill")
                     .font(.system(size: 12, weight: .semibold))
@@ -349,17 +343,14 @@ struct VehicleView: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.tertiary)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
 
             mapBody(vehicle)
-                .frame(height: 128)
+                .frame(height: 140)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .contentShape(Rectangle())
         .onTapGesture { showMap = true }
     }
@@ -384,7 +375,9 @@ struct VehicleView: View {
         }
     }
 
-    private func rideSection(_ vehicle: Vehicle) -> some View {
+    // MARK: - 骑行
+
+    private func rideBlock(_ vehicle: Vehicle) -> some View {
         Button {
             showReplay = true
         } label: {
@@ -416,13 +409,16 @@ struct VehicleView: View {
                     Capsule(style: .continuous).fill(Theme.brand.opacity(0.10))
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.995, brightness: 0))
     }
 
-    private func infoSection(_ vehicle: Vehicle) -> some View {
+    // MARK: - 车辆信息
+
+    private func infoBlock(_ vehicle: Vehicle) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 10) {
                 HStack(spacing: 4) {
@@ -448,7 +444,9 @@ struct VehicleView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 
     // MARK: - 电池文案
