@@ -35,6 +35,7 @@ struct HeroStage: View {
     let onPickVehicle: () -> Void
     let onOpenWallpaper: () -> Void
     let onOpenTheme: () -> Void
+    let onOpenCushion: () -> Void
 
     private var onDark: Bool { !selection.isDefault }
 
@@ -61,6 +62,7 @@ struct HeroStage: View {
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
+        .overlay(alignment: .topTrailing) { seatButton }
         .background { backdrop }
         .clipShape(
             UnevenRoundedRectangle(
@@ -270,6 +272,21 @@ struct HeroStage: View {
                 .accessibilityLabel(label)
         }
         .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+    }
+
+    /// 车图右上角的坐垫按钮（与小程序一致：悬浮在车身上方）
+    private var seatButton: some View {
+        Button(action: onOpenCushion) {
+            SeatIcon(size: 19)
+                .foregroundStyle(primary)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(glass))
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+        .padding(.top, topInset + 48)
+        .padding(.trailing, 18)
+        .accessibilityLabel("打开坐垫")
     }
 
     // MARK: - 电量进度条 + 续航

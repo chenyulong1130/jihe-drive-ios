@@ -241,22 +241,14 @@ struct RideHomeView: View {
         errorText = nil
         defer { loading = false }
 
-        var results: [RideTrack] = []
-        var lastError: String?
-
-        for offset in 0..<days {
-            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: Date()) else { continue }
-            if let track = await RideTrackService.track(vin: vehicle.vinNo, day: day) {
-                results.append(track)
-            }
+        guard let items = await RideTrackService.tracks(vin: vehicle.vinNo, days: days) else {
+            tracks = []
+            errorText = "骑行记录接口没有返回数据，检查网络后下拉重试。"
+            return
         }
 
-        if results.isEmpty, let firstDay = Calendar.current.date(byAdding: .day, value: -days, to: Date()) {
-            lastError = "已查询 \(days) 天（至 \(dayText(firstDay))），云端没有返回轨迹。若官方 App 能看到行程，说明该账号的轨迹接口参数不同，告诉我我再对接。"
-        }
-
-        tracks = results
-        errorText = lastError
+        tracks = items
+        errorText = items.isEmpty ? "最近 \(days) 天云端没有骑行记录。" : nil
     }
 
     private func dayText(_ date: Date) -> String {
