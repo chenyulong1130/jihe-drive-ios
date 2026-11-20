@@ -131,7 +131,7 @@ struct ReplayMap: UIViewRepresentable {
             }
             map.setVisibleMapRect(
                 rect,
-                edgePadding: UIEdgeInsets(top: 120, left: 48, bottom: 260, right: 48),
+                edgePadding: UIEdgeInsets(top: 100, left: 48, bottom: 150, right: 48),
                 animated: false
             )
         }

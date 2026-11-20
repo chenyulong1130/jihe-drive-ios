@@ -171,7 +171,8 @@ private struct LiquidTabBar: View {
                 )
         )
         .shadow(color: Color.black.opacity(0.16), radius: 24, x: 0, y: 10)
-        .padding(.horizontal, 16)
+        .frame(maxWidth: 320)
+        .padding(.horizontal, 20)
         .padding(.bottom, 8)
     }
 

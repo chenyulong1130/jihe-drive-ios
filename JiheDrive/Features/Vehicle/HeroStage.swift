@@ -52,8 +52,10 @@ struct HeroStage: View {
             VStack(spacing: 0) {
                 topRow
                 batteryBlock
-                    .padding(.top, 14)
-                Spacer(minLength: 8)
+                    .padding(.top, 12)
+                statusRow
+                    .padding(.top, 8)
+                Spacer(minLength: 6)
                 tireStrip
             }
             .padding(.horizontal, 18)
@@ -214,11 +216,11 @@ struct HeroStage: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 230)
+                .frame(height: 206)
                 .shadow(color: Color.black.opacity(onDark ? 0.30 : 0.10), radius: 18, x: 0, y: 12)
             }
             .frame(maxWidth: .infinity)
-            .offset(y: 26)
+            .offset(y: 34)
             .allowsHitTesting(false)
         }
     }
@@ -252,12 +254,12 @@ struct HeroStage: View {
             }
             .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
 
-            statusTag
+            Spacer(minLength: 8)
 
-            Spacer(minLength: 6)
-
-            circleAction(icon: "photo.on.rectangle.angled", label: "壁纸", action: onOpenWallpaper)
-            circleAction(icon: "play.rectangle.fill", label: "主题", action: onOpenTheme)
+            HStack(spacing: 8) {
+                circleAction(icon: "photo.on.rectangle.angled", label: "壁纸", action: onOpenWallpaper)
+                circleAction(icon: "play.rectangle.fill", label: "主题", action: onOpenTheme)
+            }
         }
     }
 
@@ -292,35 +294,31 @@ struct HeroStage: View {
     // MARK: - 电量进度条 + 续航
 
     private var batteryBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 9) {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(primary.opacity(0.18))
-                        .frame(height: 9)
+                        .frame(height: 10)
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: [socColor, socColor.opacity(0.78)],
+                                colors: [socColor, socColor.opacity(0.75)],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
-                        .frame(width: max(9, proxy.size.width * socRatio), height: 9)
+                        .frame(width: max(10, proxy.size.width * socRatio), height: 10)
                 }
             }
-            .frame(height: 9)
+            .frame(height: 10)
 
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(soc)")
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(primary)
                     .monospacedDigit()
                 Text("%")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(secondaryText)
-
-                Text(chargeHint)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(secondaryText)
 
@@ -330,7 +328,7 @@ struct HeroStage: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(secondaryText)
                 Text("\(vehicle.rangeKm)")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(primary)
                     .monospacedDigit()
                 Text("km")
@@ -338,6 +336,40 @@ struct HeroStage: View {
                     .foregroundStyle(secondaryText)
             }
         }
+    }
+
+    /// 状态换到电池下面一行
+    private var statusRow: some View {
+        HStack(spacing: 12) {
+            statusItem(
+                icon: vehicle.isOnline ? "wifi" : "wifi.slash",
+                text: vehicle.isOnline ? "在线" : "离线",
+                tint: vehicle.isOnline ? Theme.green : secondaryText
+            )
+            statusItem(
+                icon: "cellularbars",
+                text: "信号 \(vehicle.signalLevel)",
+                tint: secondaryText
+            )
+            statusItem(
+                icon: vehicle.isCharging ? "bolt.fill" : (vehicle.isLocked ? "lock.fill" : "lock.open.fill"),
+                text: vehicle.isCharging ? "充电中" : (vehicle.isLocked ? "已上锁" : "未上锁"),
+                tint: vehicle.isCharging
+                    ? Theme.green
+                    : (vehicle.isLocked ? primary.opacity(0.9) : Theme.orange)
+            )
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func statusItem(icon: String, text: String, tint: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 9.5, weight: .semibold))
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(tint)
     }
 
     private var soc: Int { min(max(vehicle.soc, 0), 100) }
@@ -426,28 +458,4 @@ struct HeroStage: View {
         return Theme.green
     }
 
-    // MARK: - 状态
-
-    private var statusTag: some View {
-        let tag: (String, String, Color) = {
-            if vehicle.isCharging { return ("充电中", "bolt.fill", Theme.green) }
-            if !vehicle.isOnline { return ("离线", "wifi.slash", secondaryText) }
-            if !vehicle.isLocked { return ("未锁", "lock.open.fill", Theme.orange) }
-            return ("已锁", "lock.fill", primary)
-        }()
-
-        return HStack(spacing: 3) {
-            Image(systemName: tag.1)
-                .font(.system(size: 9, weight: .semibold))
-            Text(tag.0)
-                .font(.system(size: 10.5, weight: .medium))
-        }
-        .foregroundStyle(tag.2)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background {
-            Capsule(style: .continuous)
-                .fill(tag.2.opacity(onDark ? 0.22 : 0.10))
-        }
-    }
 }

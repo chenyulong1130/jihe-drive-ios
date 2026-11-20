@@ -107,7 +107,7 @@ struct VehicleView: View {
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             topInset: proxy.safeAreaInsets.top + 10,
-            height: max(430, fullHeight * 0.56),
+            height: max(440, fullHeight * 0.60),
             cornerRadius: 30,
             onPickVehicle: {
                 if model.vehicles.count > 1 {
