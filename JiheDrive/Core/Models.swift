@@ -117,12 +117,38 @@ extension Vehicle {
         )
         self.cycleCount = cycle > 0 ? cycle : nil
 
-        self.model3DURL = Self.firstString(json, keys: [
+        // 先按已知字段取，取不到就递归扫整份 JSON，找任何指向模型文件的地址
+        let explicitModel = Self.firstString(json, keys: [
             "model3dUrl", "model3DUrl", "model3durl", "threeDModelUrl",
             "vehicle3dUrl", "modelUrl", "arModelUrl", "vehicleModel",
             "model3d", "3dModelUrl", "threeDUrl", "sceneUrl",
             "modelPath", "modelAddress", "carModelUrl", "gltfUrl"
         ]).flatMap(URL.init(string:))
+        self.model3DURL = explicitModel ?? Self.findModelURL(in: json)
+    }
+
+    /// 在整份响应里递归找模型文件地址（不同车型字段名不统一）
+    private static func findModelURL(in value: Any) -> URL? {
+        if let text = value as? String {
+            let lower = text.lowercased()
+            guard lower.hasPrefix("http") || lower.hasPrefix("/") else { return nil }
+            let extensions = [".glb", ".gltf", ".usdz", ".usd", ".obj", ".dae", ".ply", ".scn"]
+            guard extensions.contains(where: { lower.contains($0) }) else { return nil }
+            return URL(string: text)
+        }
+        if let dict = value as? [String: Any] {
+            for child in dict.values {
+                if let hit = findModelURL(in: child) { return hit }
+            }
+            return nil
+        }
+        if let array = value as? [Any] {
+            for child in array {
+                if let hit = findModelURL(in: child) { return hit }
+            }
+            return nil
+        }
+        return nil
     }
 
     /// 顶层字段 + iot 字段合并，便于按关键字模糊匹配

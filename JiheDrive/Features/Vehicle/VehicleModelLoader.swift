@@ -65,7 +65,7 @@ final class VehicleModelLoader: ObservableObject {
 
         var text: String {
             switch self {
-            case .unsupported(let ext): return "暂不支持 .\(ext) 格式"
+            case .unsupported(let ext): return "接口返回 .\(ext) 格式，iOS 原生只能加载 USDZ / USD"
             case .empty: return "模型文件为空"
             }
         }
@@ -78,7 +78,7 @@ final class VehicleModelLoader: ObservableObject {
 
     nonisolated private static func download(_ url: URL) async throws -> URL {
         let ext = url.pathExtension.lowercased()
-        if !["usdz", "usd", "scn", "dae", "obj"].contains(ext) {
+        if !["usdz", "usd", "scn", "dae", "obj", "ply"].contains(ext) {
             throw ModelError.unsupported(ext.isEmpty ? "bin" : ext)
         }
         if url.isFileURL { return url }
