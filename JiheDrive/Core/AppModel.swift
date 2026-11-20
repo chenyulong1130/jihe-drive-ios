@@ -20,7 +20,7 @@ final class AppModel: ObservableObject {
     }
     @Published var errorMessage: String?
 
-    private static let vinKey = "zlink.selected.vin"
+    private static let vinKey = "jihe.selected.vin"
 
     private let client: ZeehoClient
 
@@ -106,9 +106,52 @@ final class AppModel: ObservableObject {
     func logout() {
         client.clearSession()
         vehicles = []
+        batteries = []
         selectedVin = nil
         errorMessage = nil
+        batteryError = nil
         isLoggedIn = false
+    }
+
+    /// 直接粘贴 token 登录：先用车辆列表验证一次，无效就不落库
+    func loginWithToken(_ raw: String) async throws {
+        let trimmed = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "bearer ", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 8 else {
+            throw ZeehoError.decoding("Token 不完整，检查是否复制全了")
+        }
+
+        client.token = trimmed
+        do {
+            let response = try await client.get("/v1.0/app/cfmotoserverapp/vehicle/list")
+            let code = ZeehoClient.codeString(response["code"])
+            guard code.isEmpty || code == "10000" else {
+                client.clearSession()
+                throw ZeehoError.server(
+                    code: code,
+                    message: ZeehoClient.errorText(response) ?? "Token 无效或已过期"
+                )
+            }
+            vehicles = Vehicle.list(from: response)
+            if selectedVin == nil { selectedVin = vehicles.first?.vinNo }
+            if (client.userId ?? "").isEmpty, let id = Self.userId(from: response["data"]) {
+                client.userId = id
+            }
+            errorMessage = nil
+            isLoggedIn = true
+        } catch {
+            client.clearSession()
+            throw error
+        }
+    }
+
+    func refreshAll() async {
+        await loadVehicles()
+        if let vin = selectedVehicle?.vinNo {
+            await loadBattery(vin: vin)
+        }
     }
 
     // MARK: - 电池

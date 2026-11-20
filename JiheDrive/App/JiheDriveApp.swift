@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ZLinkApp: App {
+struct JiheDriveApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()

@@ -81,7 +81,7 @@ final class ThemeStore: ObservableObject {
         didSet { UserDefaults.standard.set(selectedID, forKey: Self.key) }
     }
 
-    private static let key = "zlink.vehicle.theme"
+    private static let key = "jihe.vehicle.backdrop"
 
     init() {
         selectedID = UserDefaults.standard.string(forKey: Self.key) ?? ""
@@ -97,7 +97,21 @@ final class ThemeStore: ObservableObject {
             if let kind = AnimatedBackdropKind(rawValue: selectedID) {
                 return .animated(kind)
             }
+            if let wallpaper = WallpaperCatalog.item(id: selectedID) {
+                return .builtin(wallpaper)
+            }
             return .theme(VehicleThemeCatalog.theme(id: selectedID))
+        }
+    }
+
+    /// 用于设置页展示
+    var displayName: String {
+        switch selection {
+        case .video: return "我的视频"
+        case .photo: return "我的照片"
+        case .animated(let kind): return kind.name
+        case .builtin(let wallpaper): return wallpaper.name
+        case .theme(let theme): return theme.name
         }
     }
 

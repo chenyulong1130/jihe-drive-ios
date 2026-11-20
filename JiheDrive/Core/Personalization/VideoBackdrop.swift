@@ -14,7 +14,7 @@ struct VideoTransfer: Transferable {
         } importing: { received in
             let ext = received.file.pathExtension.isEmpty ? "mp4" : received.file.pathExtension
             let copy = FileManager.default.temporaryDirectory
-                .appendingPathComponent("zlink-video-\(UUID().uuidString).\(ext)")
+                .appendingPathComponent("jihe-video-\(UUID().uuidString).\(ext)")
             try? FileManager.default.removeItem(at: copy)
             try FileManager.default.copyItem(at: received.file, to: copy)
             return VideoTransfer(url: copy)

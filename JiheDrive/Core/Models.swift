@@ -15,8 +15,13 @@ struct Vehicle: Identifiable, Hashable {
     let locationTime: String?
     let imageURL: URL?
     let monthMileage: String?
+    /// 胎压，统一换算成 kPa 存，展示时除 100 得到 bar
+    let tireFrontKpa: Double?
+    let tireRearKpa: Double?
 
     var id: String { vinNo }
+
+    var hasTirePressure: Bool { tireFrontKpa != nil || tireRearKpa != nil }
 
     var coordinate: Coordinate? {
         guard let latitude, let longitude, latitude != 0, longitude != 0 else {
@@ -55,6 +60,25 @@ extension Vehicle {
         self.locationTime = location?["locationTime"] as? String
         self.imageURL = Self.firstString(json, keys: ["customImage", "vehicleScalePicUrl", "vehiclePicUrl", "vehicleBackPicUrl", "pic", "imageUrl"]).flatMap(URL.init(string:))
         self.monthMileage = Self.dashValue(json["rideMileageMonth"])
+        self.tireFrontKpa = Self.pressure(json, iot, keys: [
+            "frontTirePressure", "frontTyrePressure", "tirePressureFront",
+            "FrontTirePressure", "frontTirePress", "tireFrontPressure"
+        ])
+        self.tireRearKpa = Self.pressure(json, iot, keys: [
+            "rearTirePressure", "rearTyrePressure", "tirePressureRear",
+            "RearTirePressure", "rearTirePress", "tireRearPressure"
+        ])
+    }
+
+    /// 胎压原始值可能是 bar（2.4）或 kPa（240），统一成 kPa
+    private static func pressure(_ json: [String: Any], _ iot: [String: Any], keys: [String]) -> Double? {
+        for key in keys {
+            guard let raw = json[key] ?? iot[key],
+                  let value = doubleValue(raw),
+                  value > 0 else { continue }
+            return value <= 10 ? value * 100 : value
+        }
+        return nil
     }
 
     static func list(from response: [String: Any]) -> [Vehicle] {

@@ -9,7 +9,7 @@ final class KeychainStore {
         case userId = "zeeho_user_id"
     }
 
-    private let service = "com.liruixin.zlink"
+    private let service = "com.liruixin.jihedrive"
 
     func value(for key: Key) -> String? {
         let query: [String: Any] = [

@@ -26,8 +26,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project ZLink.xcodeproj \
-            -scheme ZLink \
+            -project JiheDrive.xcodeproj \
+            -scheme JiheDrive \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
@@ -49,14 +49,14 @@ jobs:
           set -euo pipefail
           APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
           echo "app: $APP_PATH"
-          rm -rf Payload ZLink-unsigned.ipa
+          rm -rf Payload JiheDrive-unsigned.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -qry ZLink-unsigned.ipa Payload
-          ls -lh ZLink-unsigned.ipa
+          zip -qry JiheDrive-unsigned.ipa Payload
+          ls -lh JiheDrive-unsigned.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ZLink-unsigned-ipa
-          path: ZLink-unsigned.ipa
+          name: JiheDrive-unsigned
+          path: JiheDrive-unsigned.ipa
           if-no-files-found: error

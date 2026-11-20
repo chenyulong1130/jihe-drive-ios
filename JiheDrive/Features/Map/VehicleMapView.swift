@@ -166,7 +166,7 @@ final class VehicleAnnotation: NSObject, MKAnnotation {
 }
 
 final class VehiclePinView: MKAnnotationView {
-    static let reuseID = "zlink-vehicle-pin"
+    static let reuseID = "jihe-vehicle-pin"
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)

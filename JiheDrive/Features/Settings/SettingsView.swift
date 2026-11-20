@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var themeStore: ThemeStore
     @EnvironmentObject private var videoStore: VideoBackdropStore
+    @EnvironmentObject private var wallpaperStore: WallpaperStore
 
     @State private var showPicker = false
     @State private var showTheme = false
@@ -166,7 +167,7 @@ struct SettingsView: View {
         AppleCard(padding: EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)) {
             VStack(spacing: 0) {
                 row(
-                    icon: "play.rectangle.on.rectangle",
+                    icon: "photo.stack",
                     title: "车辆背景",
                     detail: backdropDetail
                 ) {
@@ -177,12 +178,7 @@ struct SettingsView: View {
     }
 
     private var backdropShort: String {
-        switch themeStore.selection {
-        case .video: return "视频"
-        case .photo: return "照片"
-        case .animated(let kind): return kind.name
-        case .theme(let theme): return theme.name
-        }
+        themeStore.displayName
     }
 
     private var backdropDetail: String {
@@ -190,11 +186,13 @@ struct SettingsView: View {
         case .video:
             return videoStore.hasVideo ? "视频 · 循环播放" : "视频未设置"
         case .photo:
-            return "照片"
+            return wallpaperStore.hasWallpaper ? "照片" : "照片未设置"
         case .animated(let kind):
             return "动态 · \(kind.name)"
+        case .builtin(let wallpaper):
+            return "内置 · \(wallpaper.name)"
         case .theme(let theme):
-            return theme.name
+            return "云端 · \(theme.name)"
         }
     }
 
