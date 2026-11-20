@@ -190,7 +190,8 @@ struct ReplayMap: UIViewRepresentable {
             view.canShowCallout = false
             view.image = markerImage(for: kind)
             view.centerOffset = CGPoint(x: 0, y: kind == "车" ? 0 : -14)
-            view.zPriority = kind == "车" ? .max : .defaultHigh
+            // MKAnnotationView.ZPriority 只有 min / max，中间用数值
+            view.zPriority = kind == "车" ? .max : MKAnnotationView.ZPriority(rawValue: 750)
             return view
         }
 
