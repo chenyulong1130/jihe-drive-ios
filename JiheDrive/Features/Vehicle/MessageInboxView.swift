@@ -20,7 +20,8 @@ struct MessageInboxView: View {
             VStack(spacing: 0) {
                 filterBar
                     .padding(.horizontal, Theme.page)
-                    .padding(.bottom, 8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
 
                 if store.loading && store.items.isEmpty {
                     ProgressView()
@@ -127,9 +128,11 @@ struct MessageInboxView: View {
             Text("暂无消息")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.label)
-            Text("系统通知会显示在这里")
+            Text(store.error ?? "官方有新通知时会自动出现，前台约每 2 分钟同步一次")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -9,6 +9,8 @@ struct ChargeActivityAttributes: ActivityAttributes {
         var charging: Bool
         var etaText: String
         var vehicleName: String
+        var batteryName: String
+        var currentAmps: Double?
         var updatedAt: Date
     }
 

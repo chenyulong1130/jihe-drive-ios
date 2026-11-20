@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 import SwiftUI
 
-/// 消息收件箱：list_v2 拉取、未读角标、本地通知。
+/// 消息收件箱：list_v2 拉取、未读角标、本地通知。前台约 2 分钟轮询一次。
 @MainActor
 final class MessageStore: ObservableObject {
     @Published private(set) var items: [InboxMessage] = []
@@ -23,11 +23,22 @@ final class MessageStore: ObservableObject {
         error = nil
         defer { loading = false }
 
+        guard let uid = ZeehoClient.shared.userId, !uid.isEmpty else {
+            error = "缺少用户 ID，无法拉消息"
+            return
+        }
+
         var collected: [InboxMessage] = []
+        var lastFail: String?
         // 文档明确 kind=3 系统消息；1/2 一并拉，空结果忽略
         for kind in [3, 2, 1] {
-            let page = await fetchPage(kind: kind)
-            collected.append(contentsOf: page)
+            let page = await fetchPage(kind: kind, userId: uid)
+            switch page {
+            case .success(let list):
+                collected.append(contentsOf: list)
+            case .failure(let message):
+                if kind == 3 { lastFail = message }
+            }
         }
         var unique: [String: InboxMessage] = [:]
         for item in collected { unique[item.id] = item }
@@ -40,6 +51,10 @@ final class MessageStore: ObservableObject {
             var copy = item
             if localRead.contains(item.id) { copy.unread = false }
             return copy
+        }
+
+        if items.isEmpty, let lastFail {
+            error = lastFail
         }
 
         if !seeded {
@@ -64,26 +79,31 @@ final class MessageStore: ObservableObject {
 
     // MARK: - Network
 
-    private func fetchPage(kind: Int) async -> [InboxMessage] {
-        guard let uid = ZeehoClient.shared.userId, !uid.isEmpty else { return [] }
+    private enum FetchResult {
+        case success([InboxMessage])
+        case failure(String)
+    }
+
+    private func fetchPage(kind: Int, userId: String) async -> FetchResult {
         let query = [
-            "userId": uid,
+            "userId": userId,
             "messageKind": "\(kind)",
             "page": "1",
             "pageSize": "20"
         ]
-        guard let res = try? await ZeehoClient.shared.get(
-            "/v1.0/mine/cfmotoservermine/app/Message/list_v2",
-            query: query
-        ) else { return [] }
-        let code = ZeehoClient.codeString(res["code"])
-        if !code.isEmpty, code != "10000" {
-            if kind == 3 {
-                error = ZeehoClient.errorText(res) ?? "消息加载失败"
+        do {
+            let res = try await ZeehoClient.shared.get(
+                "/v1.0/mine/cfmotoservermine/app/Message/list_v2",
+                query: query
+            )
+            let code = ZeehoClient.codeString(res["code"])
+            if !code.isEmpty, code != "10000" {
+                return .failure(ZeehoClient.errorText(res) ?? "消息加载失败 (\(code))")
             }
-            return []
+            return .success(InboxMessage.parseList(res))
+        } catch {
+            return .failure(error.localizedDescription)
         }
-        return InboxMessage.parseList(res)
     }
 
     private func postRead(_ id: String) async {

@@ -113,6 +113,20 @@ struct VehicleView: View {
             await loadHeroModel()
             await signin.syncWidget(model: model, ride: rideExtra)
             syncChargeIsland()
+
+            // 前台约 90 秒轻量刷新车辆/电池/消息（胎压仍靠进页与下拉）
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                guard !Task.isCancelled else { break }
+                guard scenePhase == .active else { continue }
+                await model.refreshQuiet()
+                await messages.refresh()
+                syncChargeIsland()
+                if let current = model.selectedVehicle?.vinNo {
+                    await loadRideSummary(vin: current)
+                    await signin.syncWidget(model: model, ride: rideExtra)
+                }
+            }
         }
         .onChange(of: model.selectedVehicle?.soc) { _, _ in
             WidgetSnapshot.publish(from: model, signin: signin, ride: rideExtra)
@@ -416,7 +430,7 @@ struct VehicleView: View {
             locationCard(vehicle)
             rideCard(vehicle)
         }
-        .frame(height: 176)
+        .frame(height: 188)
     }
 
     private func locationCard(_ vehicle: Vehicle) -> some View {
@@ -441,14 +455,15 @@ struct VehicleView: View {
             .buttonStyle(PressableStyle(scale: 1, brightness: 0))
 
             HStack(alignment: .center, spacing: 6) {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(locationLabel(vehicle))
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !locationTimeLabel(vehicle).isEmpty {
                         Text(locationTimeLabel(vehicle))
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(Theme.tertiary)
                             .lineLimit(1)
                     }
@@ -464,9 +479,9 @@ struct VehicleView: View {
                 .buttonStyle(.plain)
                 .disabled(vehicle.coordinate == nil)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
@@ -485,7 +500,7 @@ struct VehicleView: View {
         Button {
             showReplay = true
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("骑行记录")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.label)
@@ -494,49 +509,42 @@ struct VehicleView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         SkeletonBar(width: 72, height: 12)
                         SkeletonBar(height: 22)
-                        SkeletonBar(height: 22)
                         SkeletonBar(height: 28, radius: 8)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
-                    HStack(spacing: 0) {
-                        rideStat(
-                            value: rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—",
-                            unit: "km",
-                            label: "最近骑行"
-                        )
-                        rideStat(
-                            value: rideExtra?.lastMin.map { RideTrackService.durationText($0) } ?? "—",
-                            unit: "",
-                            label: "耗时"
-                        )
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    HairLine()
-
-                    HStack(spacing: 0) {
-                        rideStat(
+                    VStack(spacing: 8) {
+                        rideWaveRow(
                             value: rideExtra?.todayKm.map { String(format: "%.1f", $0) } ?? "—",
                             unit: "km",
-                            label: "今日里程"
+                            label: "今日里程",
+                            tint: Theme.brand
                         )
-                        rideStat(
-                            value: rideExtra?.todayMaxSpeed.map { formatSpeed($0) } ?? "—",
-                            unit: "km/h",
-                            label: "速度"
-                        )
-                        rideStat(
-                            value: rideExtra?.todayMin.map { RideTrackService.durationText($0) } ?? "—",
-                            unit: "",
-                            label: "时长"
-                        )
+
+                        HStack(spacing: 0) {
+                            rideStat(
+                                value: rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—",
+                                unit: "km",
+                                label: "最近"
+                            )
+                            rideStat(
+                                value: rideExtra?.todayMaxSpeed.map { formatSpeed($0) } ?? "—",
+                                unit: "km/h",
+                                label: "极速"
+                            )
+                            rideStat(
+                                value: rideExtra?.todayMin.map { RideTrackService.durationText($0) } ?? "—",
+                                unit: "",
+                                label: "时长"
+                            )
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .background {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Theme.surface)
@@ -876,17 +884,12 @@ private struct MiniSparkline: View {
     }
 
     private func points(in size: CGSize) -> [CGPoint] {
-        let series: [CGFloat] = {
-            let raw = values.filter { $0 >= 0 }
-            if raw.count >= 2 {
-                let peak = max(raw.max() ?? 1, 0.1)
-                return raw.suffix(10).map { CGFloat($0 / peak) * 0.82 + 0.12 }
-            }
-            return [0.28, 0.46, 0.38, 0.62, 0.48, 0.78, 0.58]
-        }()
-        guard series.count > 1, size.width > 0, size.height > 0 else { return [] }
+        let raw = values.filter { $0 >= 0 }
+        guard raw.count >= 2, size.width > 0, size.height > 0 else { return [] }
+        let peak = max(raw.max() ?? 1, 0.1)
+        let series = raw.suffix(10).map { CGFloat($0 / peak) * 0.82 + 0.12 }
         return series.enumerated().map { index, value in
-            let x = size.width * CGFloat(index) / CGFloat(series.count - 1)
+            let x = size.width * CGFloat(index) / CGFloat(max(series.count - 1, 1))
             let y = size.height * (1 - value)
             return CGPoint(x: x, y: y)
         }

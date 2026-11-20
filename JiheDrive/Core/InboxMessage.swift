@@ -75,8 +75,16 @@ struct InboxMessage: Identifiable, Hashable {
     private static func items(in data: Any) -> [[String: Any]] {
         if let list = data as? [[String: Any]] { return list }
         guard let map = data as? [String: Any] else { return [] }
-        for key in ["list", "records", "rows", "data", "messageList", "result"] {
+        for key in ["list", "records", "rows", "data", "messageList", "result", "content", "items"] {
             if let list = map[key] as? [[String: Any]] { return list }
+            if let nested = map[key] {
+                let dug = items(in: nested)
+                if !dug.isEmpty { return dug }
+            }
+        }
+        if let page = map["page"] ?? map["pageInfo"] ?? map["pageResult"] {
+            let dug = items(in: page)
+            if !dug.isEmpty { return dug }
         }
         return []
     }

@@ -171,6 +171,15 @@ final class AppModel: ObservableObject {
         WidgetSnapshot.publish(from: self, ride: nil)
     }
 
+    /// 前台轻量轮询：车辆首页 + 电池，不刷胎压/列表
+    func refreshQuiet() async {
+        guard isLoggedIn, let vin = selectedVehicle?.vinNo else { return }
+        async let battery: Void = loadBattery(vin: vin, quiet: true)
+        async let detail: Void = loadDetail(vin: vin)
+        _ = await (battery, detail)
+        WidgetSnapshot.publish(from: self, ride: nil)
+    }
+
     /// 胎压传感器接口，独立于车辆详情，失败不影响主流程
     func loadTire(vin: String) async {
         let reading = await TireService.fetch(vin: vin)

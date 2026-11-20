@@ -31,6 +31,7 @@ struct DashboardWallpaperSheet: View {
         ) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
+                    Color.clear.frame(height: 2)
                     PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
                         HStack(spacing: 10) {
                             Image(systemName: "plus.circle.fill")

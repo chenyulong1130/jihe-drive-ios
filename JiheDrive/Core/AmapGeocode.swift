@@ -28,6 +28,8 @@ enum AmapGeocode {
     /// 列表/卡片用短地址：去掉省市区前缀，超长截断
     static func compact(_ text: String?, limit: Int = 12) -> String? {
         guard var out = readableAddress(text) else { return nil }
+        out = out.replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
+        out = out.replacingOccurrences(of: #"（[^）]*）"#, with: "", options: .regularExpression)
         if let range = out.range(of: #"^.{1,8}?(省|自治区|特别行政区)"#, options: .regularExpression) {
             out.removeSubrange(range)
         }
@@ -40,6 +42,27 @@ enum AmapGeocode {
         out = out.replacingOccurrences(of: " ", with: "")
         out = out.trimmingCharacters(in: CharacterSet(charactersIn: "·，,、-"))
         guard !out.isEmpty else { return readableAddress(text) }
+        if out.count > limit {
+            return String(out.prefix(limit)) + "…"
+        }
+        return out
+    }
+
+    /// 行程起终点：再压短，去掉括号说明后截断
+    static func placeShort(_ text: String?, limit: Int = 10) -> String? {
+        guard var out = compact(text, limit: max(limit + 8, 24)) else { return nil }
+        out = out.replacingOccurrences(of: "…", with: "")
+        for sep in ["街道", "镇", "乡"] {
+            if let range = out.range(of: sep), range.upperBound < out.endIndex {
+                let rest = String(out[range.upperBound...])
+                if rest.count >= 2 {
+                    out = rest
+                    break
+                }
+            }
+        }
+        out = out.trimmingCharacters(in: CharacterSet(charactersIn: "·，,、-"))
+        guard !out.isEmpty else { return compact(text, limit: limit) }
         if out.count > limit {
             return String(out.prefix(limit)) + "…"
         }

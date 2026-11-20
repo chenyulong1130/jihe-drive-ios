@@ -639,7 +639,7 @@ struct SheetHeader: View {
                 .accessibilityLabel("关闭")
             }
             .padding(.horizontal, Theme.page)
-            .padding(.bottom, 10)
+            .padding(.bottom, 14)
         }
         // 磨砂底：内容从头部下方滚过时是一层玻璃，而不是硬切
         .background(.bar)
@@ -674,7 +674,7 @@ struct SheetShell<Content: View>: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Theme.groupedBackground.ignoresSafeArea())
-            .safeAreaInset(edge: .top, spacing: 0) {
+            .safeAreaInset(edge: .top, spacing: 12) {
                 SheetHeader(title: title, subtitle: subtitle, onClose: onClose)
             }
     }

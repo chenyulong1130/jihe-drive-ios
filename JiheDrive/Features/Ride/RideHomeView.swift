@@ -299,47 +299,43 @@ struct RideHomeView: View {
     }
 
     private func rideRow(_ track: RideTrack, checked: Bool) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             if selecting {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(checked ? Theme.brand : Theme.tertiary)
-                    .padding(.top, 2)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(timeRange(track))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
                     .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
                 thumb(track)
-                    .frame(width: 72, height: 72)
+                    .frame(width: 68, height: 68)
             }
-            .frame(width: 86, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Spacer(minLength: 0)
                     Text(formatKm(track.mileage))
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.brand)
                         .monospacedDigit()
                     Text("km")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.secondary)
+                    Spacer(minLength: 0)
                     if !selecting {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.tertiary)
-                            .padding(.leading, 2)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 5) {
-                    placeLine(title: "起点", text: startText(track), tint: Color(hex: 0x22C55E))
-                    placeLine(title: "终点", text: endText(track), tint: Color(hex: 0xF97316))
+                VStack(alignment: .leading, spacing: 4) {
+                    placeLine(text: startText(track), tint: Color(hex: 0x22C55E))
+                    placeLine(text: endText(track), tint: Color(hex: 0xF97316))
                 }
 
                 HStack(spacing: 0) {
@@ -348,36 +344,30 @@ struct RideHomeView: View {
                     rideMetric(speedText(peakSpeed(track)), "极速")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
         .contentShape(Rectangle())
     }
 
-    private func placeLine(title: String, text: String, tint: Color) -> some View {
-        HStack(alignment: .top, spacing: 6) {
+    private func placeLine(text: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
             Circle()
                 .fill(tint)
                 .frame(width: 6, height: 6)
-                .padding(.top, 5)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.tertiary)
-                Text(text)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Theme.label)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.label)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func rideMetric(_ value: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(Theme.label)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -521,11 +511,11 @@ struct RideHomeView: View {
     }
 
     private func startText(_ track: RideTrack) -> String {
-        AmapGeocode.compact(track.startAddress, limit: 18) ?? "未记录起点"
+        AmapGeocode.placeShort(track.startAddress, limit: 11) ?? "未记录起点"
     }
 
     private func endText(_ track: RideTrack) -> String {
-        AmapGeocode.compact(track.endAddress, limit: 18) ?? "未记录终点"
+        AmapGeocode.placeShort(track.endAddress, limit: 11) ?? "未记录终点"
     }
 
     private func avgSpeed(_ track: RideTrack) -> Double? {

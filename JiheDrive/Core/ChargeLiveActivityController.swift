@@ -10,12 +10,18 @@ enum ChargeLiveActivityController {
         let soc = min(max(battery?.level ?? vehicle.soc, 0), 100)
         let range = battery?.rangeKm ?? vehicle.rangeKm
         let eta = etaText(battery: battery, charging: charging)
+        let batteryName = {
+            let name = battery?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return name.isEmpty ? "动力电池" : name
+        }()
         let state = ChargeActivityAttributes.ContentState(
             soc: soc,
             rangeKm: range,
             charging: charging,
             etaText: eta,
             vehicleName: vehicle.name,
+            batteryName: batteryName,
+            currentAmps: battery?.current,
             updatedAt: Date()
         )
         let stale = Date().addingTimeInterval(45 * 60)

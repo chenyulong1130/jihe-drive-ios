@@ -82,63 +82,65 @@ struct JiheDriveWidgetEntryView: View {
         .containerBackground(for: .widget) { widgetBackground }
     }
 
-    // MARK: - Medium（对齐 Scriptable：顶栏 + 今日骑行/积分 + 电量/按钮 | 车图）
+    // MARK: - Medium：左栏标题/骑行/电量/按钮，右栏车图
 
     private var medium: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            headerRow(titleSize: 13)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                headerRow(titleSize: 12)
 
-            HStack(alignment: .firstTextBaseline) {
-                Text(todayRideLine)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x6B7280))
+                Text("今日骑行")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x94A3B8))
+                Text(todayRideData)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x0F172A))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Spacer(minLength: 6)
+                    .minimumScaleFactor(0.8)
+
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text("\(snap.soc)")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Color(hex: 0x0F172A))
+                        .monospacedDigit()
+                    Text("%")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(hex: 0x9AA4B2))
+                    Text("\(snap.rangeKm) km")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(hex: 0x6B7280))
+                    if snap.charging {
+                        Text("充")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color(hex: 0x0369A1))
+                    }
+                }
+                .padding(.top, 1)
+
+                progress
+
+                controlBar
+                    .padding(.top, 4)
+
                 pointsInline
+                    .padding(.top, 2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(alignment: .bottom, spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(snap.soc)")
-                            .font(.system(size: 28, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Color(hex: 0x0F172A))
-                            .monospacedDigit()
-                        Text("%")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0x9AA4B2))
-                        Text("\(snap.rangeKm) km")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(hex: 0x6B7280))
-                        if snap.charging {
-                            Text("充电中")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Color(hex: 0x0369A1))
-                        }
-                    }
-                    progress
-                    controlBar
-                        .padding(.top, 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                vehicleImage
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if !tireLabel.isEmpty {
+                    Text("胎压 \(tireLabel)")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color(hex: 0x9AA4B2))
+                        .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    vehicleImage
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if !tireLabel.isEmpty {
-                        Text("胎压 \(tireLabel)")
-                            .font(.system(size: 8))
-                            .foregroundStyle(Color(hex: 0x9AA4B2))
-                            .lineLimit(1)
-                    }
-                }
-                .frame(width: 138)
             }
-            .frame(maxHeight: .infinity)
+            .frame(width: 118)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Small
@@ -247,9 +249,16 @@ struct JiheDriveWidgetEntryView: View {
 
     private var todayRideLine: String {
         if snap.todayKm > 0.01 || snap.todayMin > 0 || snap.maxSpeed > 0 {
-            return "今日骑行 \(fmtKm(snap.todayKm)) km · \(durationLabel(snap.todayMin)) · \(snap.maxSpeed) km/h"
+            return "今日骑行 \(todayRideData)"
         }
         return "今日暂无骑行"
+    }
+
+    private var todayRideData: String {
+        if snap.todayKm > 0.01 || snap.todayMin > 0 || snap.maxSpeed > 0 {
+            return "\(fmtKm(snap.todayKm)) km · \(durationLabel(snap.todayMin)) · \(snap.maxSpeed) km/h"
+        }
+        return "暂无骑行"
     }
 
     private func fmtKm(_ value: Double) -> String {
@@ -341,23 +350,23 @@ struct JiheDriveWidgetEntryView: View {
     }
 
     private var controlBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             controlButton(
                 intent: WidgetLockIntent(),
-                symbol: "power",
-                tint: snap.locked ? Color(hex: 0x30D158) : Color(hex: 0xFF9F0A),
-                label: snap.locked ? "开机" : "关机"
+                symbol: snap.locked ? "lock.open.fill" : "lock.fill",
+                tint: snap.locked ? Color(hex: 0x16A34A) : Color(hex: 0xEA580C),
+                label: snap.locked ? "开机" : "关锁"
             )
             controlButton(
                 intent: WidgetCushionIntent(),
-                symbol: "chair.lounge.fill",
-                tint: Color(hex: 0x0F172A),
+                symbol: "rectangle.portrait.bottomhalf.filled",
+                tint: Color(hex: 0x334155),
                 label: "坐垫"
             )
             controlButton(
                 intent: WidgetFindIntent(),
-                symbol: "light.beacon.max.fill",
-                tint: Color(hex: 0x0F172A),
+                symbol: "speaker.wave.2.fill",
+                tint: Color(hex: 0x2563EB),
                 label: "寻车"
             )
             Spacer(minLength: 0)
@@ -371,25 +380,22 @@ struct JiheDriveWidgetEntryView: View {
         label: String
     ) -> some View {
         Button(intent: intent) {
-            VStack(spacing: 3) {
-                Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.white.opacity(0.95)))
-                    .overlay(
-                        Circle().strokeBorder(Color(hex: 0xE2E8F0), lineWidth: 0.8)
-                    )
-                Text(label)
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x64748B))
-                    .lineLimit(1)
-            }
-            .frame(minWidth: 36)
-            .contentShape(Rectangle())
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(tint.opacity(0.18), lineWidth: 0.8)
+                )
+                .contentShape(Rectangle())
+                .accessibilityLabel(label)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 
     private var vehicleImage: some View {
