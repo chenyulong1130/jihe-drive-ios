@@ -188,11 +188,6 @@ struct VehicleView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
-
-            Text("数据来自极核云端 · 下拉刷新")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.tertiary)
-                .padding(.bottom, 4)
         }
         .padding(.horizontal, 16)
         .padding(.top, 18)
@@ -762,9 +757,6 @@ struct VehicleView: View {
             Text("账号下还没有车辆")
                 .font(Theme.headline)
                 .foregroundStyle(Theme.label)
-            Text("请先在极核官方 App 绑定车辆")
-                .font(Theme.footnote)
-                .foregroundStyle(Theme.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 150)

@@ -15,7 +15,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
-                LargeTitle("我的", subtitle: "账号 · 车辆 · 个性化")
+                LargeTitle("我的")
                     .staggerIn(0)
 
                 accountCard.staggerIn(1)
@@ -29,12 +29,9 @@ struct SettingsView: View {
                 SectionHeader("个性化")
                 personalSection.staggerIn(4)
 
-                SectionHeader("关于")
-                aboutCard.staggerIn(5)
-
                 logoutButton
                     .padding(.top, 24)
-                    .staggerIn(6)
+                    .staggerIn(5)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -62,15 +59,9 @@ struct SettingsView: View {
 
     private var appearanceSection: some View {
         AppleCard(padding: EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14)) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("显示模式")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
-
-                HStack(spacing: 8) {
-                    ForEach(AppAppearance.allCases) { mode in
-                        appearanceChip(mode)
-                    }
+            HStack(spacing: 8) {
+                ForEach(AppAppearance.allCases) { mode in
+                    appearanceChip(mode)
                 }
             }
         }
@@ -243,7 +234,7 @@ struct SettingsView: View {
                 row(
                     icon: "photo.on.rectangle",
                     title: "仪表壁纸",
-                    detail: "同步到车机仪表盘"
+                    detail: ""
                 ) {
                     if model.selectedVehicle != nil {
                         showDashboardWallpaper = true
@@ -269,28 +260,6 @@ struct SettingsView: View {
             return "内置 · \(wallpaper.name)"
         case .theme(let theme):
             return "云端 · \(theme.name)"
-        }
-    }
-
-    // MARK: - 关于
-
-    private var aboutCard: some View {
-        AppleCard {
-            VStack(alignment: .leading, spacing: 12) {
-                InfoRow(title: "版本", value: Bundle.main.shortVersion)
-                HairLine()
-                InfoRow(title: "接口", value: "tapi.zeehoev.com", mono: true)
-                HairLine()
-                InfoRow(title: "构建", value: "unsigned · sideload")
-                HairLine()
-                InfoRow(title: "登录凭据", value: maskedToken, mono: true)
-
-                Text("非官方客户端，仅供个人调试使用。接口由极核云端提供，随时可能变更。")
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            }
         }
     }
 
@@ -373,18 +342,5 @@ struct SettingsView: View {
                 .lineLimit(1)
         }
         .frame(minHeight: 48)
-    }
-
-    private var maskedToken: String {
-        guard let token = ZeehoClient.shared.token, !token.isEmpty else { return "--" }
-        return "\(token.prefix(8))…(\(token.count) 位)"
-    }
-}
-
-extension Bundle {
-    var shortVersion: String {
-        let version = infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
-        let build = infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "\(version) (\(build))"
     }
 }

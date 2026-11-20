@@ -24,7 +24,7 @@ struct ThemeSheet: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {
-        SheetShell(title: "车辆背景", subtitle: themeStore.displayName, onClose: { dismiss() }) {
+        SheetShell(title: "车辆背景", onClose: { dismiss() }) {
             ScrollViewReader { reader in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
@@ -33,11 +33,6 @@ struct ThemeSheet: View {
 
                     SectionHeader("动态视频主题")
                         .id("theme")
-                    Text("循环静音播放，与 Flutter / 小程序同一批主题")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 8)
                     LazyVGrid(columns: columns, spacing: 12) {
                         defaultThemeCell
                         ForEach(VehicleThemeCatalog.videoThemes) { theme in
@@ -64,13 +59,6 @@ struct ThemeSheet: View {
                         SoftBanner(text: error, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                             .padding(.top, 14)
                     }
-
-                    Text("本地视频/照片只保存在本机；云端主题在线播放，不改车机仪表壁纸。")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 20)
-                        .padding(.horizontal, 8)
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.bottom, 32)
@@ -97,7 +85,7 @@ struct ThemeSheet: View {
                 mediaRow(
                     icon: "video.fill",
                     title: "我的视频",
-                    detail: videoStore.hasVideo ? "循环静音播放" : "选择一段视频当背景",
+                    detail: videoStore.hasVideo ? "已设置" : "未设置",
                     active: themeStore.selectedID == ThemeStore.videoID,
                     busy: working == "video"
                 )
@@ -110,7 +98,7 @@ struct ThemeSheet: View {
                 mediaRow(
                     icon: "photo.fill",
                     title: "我的照片",
-                    detail: wallpaperStore.hasWallpaper ? "铺满主视觉区域" : "选择一张照片当背景",
+                    detail: wallpaperStore.hasWallpaper ? "已设置" : "未设置",
                     active: themeStore.selectedID == ThemeStore.photoID,
                     busy: working == "photo"
                 )

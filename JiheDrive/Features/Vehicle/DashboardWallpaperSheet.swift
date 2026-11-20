@@ -25,7 +25,6 @@ struct DashboardWallpaperSheet: View {
     var body: some View {
         SheetShell(
             title: "仪表壁纸",
-            subtitle: "上传后同步到车机仪表，不影响 App 主页背景",
             onClose: { dismiss() }
         ) {
             ScrollView(showsIndicators: false) {
@@ -71,7 +70,7 @@ struct DashboardWallpaperSheet: View {
                     if let errorText {
                         SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                     } else if !loading && items.isEmpty {
-                        Text("暂无云端壁纸，点上方按钮制作 HOME / SPEED 仪表壁纸")
+                        Text("暂无壁纸")
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -83,12 +82,6 @@ struct DashboardWallpaperSheet: View {
                             }
                         }
                     }
-
-                    Text("设为仪表使用中请在「极核」官方 App 操作；本页可预览、上传与删除。")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.tertiary)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 8)
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.bottom, 28)
@@ -156,13 +149,8 @@ struct DashboardWallpaperSheet: View {
         }) {
             ScrollView {
                 VStack(spacing: 16) {
-                    previewBlock(title: "主页 HOME", url: item.homeURL, ratio: 1024 / 600)
-                    previewBlock(title: "速度卡 SPEED", url: item.speedURL, ratio: 307 / 460)
-
-                    Text("如需设为仪表当前壁纸，请打开极核官方 App 操作。")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.tertiary)
-                        .multilineTextAlignment(.center)
+                    previewBlock(title: "主页", url: item.homeURL, ratio: 1024 / 600)
+                    previewBlock(title: "速度卡", url: item.speedURL, ratio: 307 / 460)
 
                     Button(role: .destructive) {
                         Task { await delete(item) }

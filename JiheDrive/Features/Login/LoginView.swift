@@ -56,15 +56,9 @@ struct LoginView: View {
                         .padding(.top, 20)
                         .staggerIn(1)
 
-                    Text("连接你的极核")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                        .padding(.top, 4)
-                        .staggerIn(2)
-
                     modeSwitch
                         .padding(.top, 26)
-                        .staggerIn(3)
+                        .staggerIn(2)
 
                     Group {
                         if mode == .phone {
@@ -101,22 +95,7 @@ struct LoginView: View {
                     .padding(.top, 18)
                     .staggerIn(4)
 
-                    if mode == .token {
-                        Text("Token 可在极核 H5 / 官方 App 的请求头 Authorization 里取到，只保存在本机钥匙串。")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.tertiary)
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 12)
-                            .padding(.horizontal, 8)
-                    }
-
-                    Spacer(minLength: 28)
-
-                    Text("非官方客户端 · 数据来自极核云端")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.tertiary)
-                        .padding(.bottom, 20)
-                        .staggerIn(5)
+                    Spacer(minLength: 40)
                 }
                 .padding(.horizontal, 22)
             }
