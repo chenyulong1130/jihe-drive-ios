@@ -16,7 +16,7 @@ struct VehicleTheme: Identifiable, Hashable {
 
 enum VehicleThemeCatalog {
     static let all: [VehicleTheme] = [
-        VehicleTheme(id: "", name: "极核蓝", desc: "默认 · 深海渐变", colors: [Color(hex: 0x07203D), Color(hex: 0x0A4A8A), Color(hex: 0x0B6BCB)], posterURL: nil),
+        VehicleTheme(id: "", name: "透明", desc: "无背景 · 跟随界面", colors: [Color(hex: 0x07203D), Color(hex: 0x0A4A8A), Color(hex: 0x0B6BCB)], posterURL: nil),
         VehicleTheme(id: "g-mint", name: "氧气", desc: "青蓝 · 清爽", colors: [Color(hex: 0x062B2A), Color(hex: 0x0C6E63), Color(hex: 0x14A38B)], posterURL: nil),
         VehicleTheme(id: "g-violet", name: "暮光", desc: "靛紫 · 夜行", colors: [Color(hex: 0x191033), Color(hex: 0x3B2A7A), Color(hex: 0x6A4BD6)], posterURL: nil),
         VehicleTheme(id: "g-ember", name: "熔岩", desc: "橙红 · 热血", colors: [Color(hex: 0x2A0E0A), Color(hex: 0x8A2B12), Color(hex: 0xD9571F)], posterURL: nil),
