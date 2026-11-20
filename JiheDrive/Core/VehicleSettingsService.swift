@@ -239,8 +239,8 @@ final class VehicleSettingsStore: ObservableObject {
             raw = try await VehicleSettingsService.fetch(vin: vin)
         } catch VehicleSettingError.message(let text) {
             error = text
-        } catch {
-            error = error.localizedDescription
+        } catch let failure {
+            error = failure.localizedDescription
         }
     }
 
@@ -272,9 +272,9 @@ final class VehicleSettingsStore: ObservableObject {
 
         do {
             try await VehicleSettingsService.write(vin: vin, item: item, value: value)
-        } catch {
+        } catch let failure {
             raw = previous
-            self.error = error.localizedDescription
+            self.error = failure.localizedDescription
         }
         busyKey = nil
     }
