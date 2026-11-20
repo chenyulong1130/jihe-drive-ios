@@ -64,19 +64,19 @@ struct HeroStage: View {
         .frame(maxWidth: .infinity)
         .background { backdrop }
         .overlay(alignment: .bottom) {
-            // 向下淡入内容区，避免硬切（对齐 Flutter 76%→100% 透明）
+            // 向下淡入内容区（对齐小程序 mask），不要圆角盖板
             LinearGradient(
                 colors: [
                     Color.clear,
-                    (onDark ? Color.black.opacity(0.22) : Theme.groupedBackground.opacity(0.55))
+                    (onDark ? Theme.groupedBackground.opacity(0.35) : Theme.groupedBackground.opacity(0.75)),
+                    Theme.groupedBackground
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 72)
+            .frame(height: 88)
             .allowsHitTesting(false)
         }
-        .clipped()
     }
 
     // MARK: - 背景
@@ -147,11 +147,14 @@ struct HeroStage: View {
                     Color(hex: 0x0B1A16)
                 }
 
-                Color.clear.overlay {
+                GeometryReader { geo in
                     LoopingVideoView(url: url)
+                        .frame(width: geo.size.width, height: geo.size.height)
                 }
+                .clipped()
                 .allowsHitTesting(false)
             }
+            .clipped()
             .overlay(scrim)
         } else {
             placeholderBackdrop.overlay(scrim)
@@ -215,6 +218,9 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
+    /// 车图顶距：躲开顶栏 + 电量区（对齐 Flutter headerSlack≈100 / 小程序 header 下方）
+    private var carTopPad: CGFloat { topInset + 108 }
+
     @ViewBuilder
     private var carLayer: some View {
         ZStack(alignment: .topTrailing) {
@@ -224,13 +230,13 @@ struct HeroStage: View {
                         .overlay {
                             ModelViewerWebView(glbFile: modelGLBFile, interactive: false, autoRotate: true)
                         }
-                        .padding(.top, 96)
-                        .padding(.bottom, 88)
+                        .padding(.top, carTopPad)
+                        .padding(.bottom, 72)
                         .allowsHitTesting(false)
                 } else if let modelScene {
                     VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
-                        .padding(.top, 100)
-                        .padding(.bottom, 88)
+                        .padding(.top, carTopPad)
+                        .padding(.bottom, 72)
                         .allowsHitTesting(false)
                 } else {
                     ZStack {
@@ -254,11 +260,12 @@ struct HeroStage: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 210)
+                        .frame(height: 220)
                         .shadow(color: Color.black.opacity(onDark ? 0.30 : 0.10), radius: 18, x: 0, y: 12)
                     }
                     .frame(maxWidth: .infinity)
-                    .offset(y: 28)
+                    .padding(.top, carTopPad)
+                    .padding(.bottom, 56)
                     .allowsHitTesting(false)
                 }
             }
@@ -276,7 +283,7 @@ struct HeroStage: View {
                     .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-            .padding(.top, 96)
+            .padding(.top, carTopPad - 8)
             .padding(.trailing, 16)
             .accessibilityLabel("打开坐垫")
         }
@@ -348,48 +355,45 @@ struct HeroStage: View {
         .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
     }
 
-    // MARK: - 电量
+    // MARK: - 电量（对齐小程序：电量% + 续航挤在左侧，短进度条 140×6）
 
     private var batteryBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("\(soc)")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(primary)
                     .monospacedDigit()
                 Text("%")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(secondaryText)
-
-                Spacer(minLength: 12)
+                    .padding(.trailing, 9)
 
                 Text("\(vehicle.rangeKm)")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(primary)
                     .monospacedDigit()
-                Text(" km")
-                    .font(.system(size: 12, weight: .medium))
+                Text("km")
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(secondaryText)
             }
 
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(primary.opacity(0.18))
-                        .frame(height: 4)
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [socColor, socColor.opacity(0.72)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(primary.opacity(0.18))
+                    .frame(width: 140, height: 6)
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [socColor, socColor.opacity(0.75)],
+                            startPoint: .leading,
+                            endPoint: .trailing
                         )
-                        .frame(width: max(6, proxy.size.width * socRatio), height: 4)
-                }
+                    )
+                    .frame(width: max(5, 140 * socRatio), height: 6)
             }
-            .frame(height: 4)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var statusRow: some View {

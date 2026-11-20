@@ -21,7 +21,11 @@ struct ThemeSheet: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var working: String?
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    /// 两列固定比例，避免三列 + scaledToFill 把格子撑乱
+    private let columns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
 
     var body: some View {
         SheetShell(title: "车辆背景", onClose: { dismiss() }) {
@@ -193,27 +197,8 @@ struct ThemeSheet: View {
         return Button {
             withAnimation(Motion.quick) { themeStore.select(wallpaper.id) }
         } label: {
-            VStack(spacing: 6) {
-                ZStack(alignment: .topTrailing) {
-                    BuiltInWallpaperView(wallpaper: wallpaper)
-                        .frame(height: 92)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
-                        )
-
-                    if selected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(.white, Theme.brand)
-                            .padding(6)
-                    }
-                }
-
-                Text(wallpaper.name)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(selected ? Theme.brand : Theme.secondary)
+            themeTile(selected: selected, name: wallpaper.name) {
+                BuiltInWallpaperView(wallpaper: wallpaper)
             }
         }
         .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
@@ -224,33 +209,8 @@ struct ThemeSheet: View {
         return Button {
             withAnimation(Motion.quick) { themeStore.select(kind.rawValue) }
         } label: {
-            VStack(spacing: 6) {
-                ZStack(alignment: .topTrailing) {
-                    AnimatedBackdrop(kind: kind)
-                        .frame(height: 92)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
-                        )
-                        .overlay(alignment: .bottomLeading) {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .padding(6)
-                        }
-
-                    if selected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(.white, Theme.brand)
-                            .padding(6)
-                    }
-                }
-
-                Text(kind.name)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(selected ? Theme.brand : Theme.secondary)
+            themeTile(selected: selected, name: kind.name, badge: "waveform") {
+                AnimatedBackdrop(kind: kind)
             }
         }
         .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
@@ -264,30 +224,13 @@ struct ThemeSheet: View {
             withAnimation(Motion.quick) { themeStore.select("") }
             dismiss()
         } label: {
-            VStack(spacing: 6) {
+            themeTile(selected: selected, name: "默认") {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Theme.surfaceAlt)
-                        .frame(height: 92)
+                    Theme.surfaceAlt
                     Image(systemName: "circle.slash")
                         .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(Theme.secondary)
-                    if selected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(.white, Theme.brand)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                            .padding(6)
-                    }
                 }
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
-                )
-
-                Text("默认")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(selected ? Theme.brand : Theme.secondary)
             }
         }
         .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
@@ -298,36 +241,55 @@ struct ThemeSheet: View {
         return Button {
             withAnimation(Motion.quick) { themeStore.select(theme.id) }
         } label: {
-            VStack(spacing: 6) {
-                ZStack(alignment: .topTrailing) {
-                    Group {
-                        if let poster = theme.posterURL {
-                            AsyncImage(url: poster) { phase in
-                                if let image = phase.image {
-                                    image.resizable().scaledToFill()
-                                } else {
-                                    LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
-                                }
+            themeTile(selected: selected, name: theme.name, badge: "play.circle.fill") {
+                Group {
+                    if let poster = theme.posterURL {
+                        AsyncImage(url: poster) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            default:
+                                LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
                             }
-                        } else {
-                            LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
                         }
+                    } else {
+                        LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
                     }
-                    .frame(height: 92)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
-                    )
-                    .overlay(alignment: .bottomLeading) {
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 14, weight: .semibold))
+                }
+            }
+        }
+        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+    }
+
+    /// 封面放在固定比例盒子里再裁切，防止 LazyVGrid 被图片理想尺寸撑歪
+    private func themeTile<Content: View>(
+        selected: Bool,
+        name: String,
+        badge: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 6) {
+            Color.clear
+                .aspectRatio(1.24, contentMode: .fit)
+                .overlay {
+                    content()
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                }
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
+                )
+                .overlay(alignment: .bottomLeading) {
+                    if let badge {
+                        Image(systemName: badge)
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.92))
                             .padding(6)
                     }
-
+                }
+                .overlay(alignment: .topTrailing) {
                     if selected {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 17))
@@ -336,13 +298,12 @@ struct ThemeSheet: View {
                     }
                 }
 
-                Text(theme.name)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(selected ? Theme.brand : Theme.secondary)
-                    .lineLimit(1)
-            }
+            Text(name)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(selected ? Theme.brand : Theme.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
     }
 
     // MARK: - 导入

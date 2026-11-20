@@ -190,20 +190,10 @@ struct VehicleView: View {
             .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
         }
         .padding(.horizontal, 16)
-        .padding(.top, 18)
+        .padding(.top, 14)
         .padding(.bottom, 8)
-        .background {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 28,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 28,
-                style: .continuous
-            )
-            .fill(Theme.groupedBackground)
-            .shadow(color: Theme.cardShadow, radius: 16, x: 0, y: -4)
-        }
-        .padding(.top, -18)
+        // 对齐小程序：内容区直角，靠英雄区底部渐隐过渡，不要圆角「盖」在视频上
+        .background(Theme.groupedBackground)
     }
 
     // MARK: - 寻车 / 解锁 / 设置

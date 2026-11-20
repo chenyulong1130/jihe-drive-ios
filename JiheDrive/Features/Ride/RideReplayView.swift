@@ -24,9 +24,11 @@ struct RideReplayView: View {
 
     private var speeds: [Double] { track.speedSamples }
 
-    /// 回放时长：按采样点数（每点 0.12 秒），收敛到 4–45 秒
+    /// 回放时长：对齐小程序 playDur——按行程分钟压到 8~20 秒，短途不至于秒切完
     private var playbackSeconds: Double {
-        min(45, max(4, Double(track.points.count) * 0.12))
+        let byTrip = min(20, max(8, Double(max(track.durationMinutes, 1))))
+        let byPoints = min(30, max(8, Double(max(track.points.count, 1)) * 0.18))
+        return max(byTrip, byPoints)
     }
 
     private var currentSpeed: Double {

@@ -66,8 +66,20 @@ struct MainTabView: View {
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
                 .clipShape(HorizontalClip())
                 .contentShape(Rectangle())
-                // 必须 simultaneous：highPriority 会把 ScrollView 纵向滚动手势整段吃掉
-                .simultaneousGesture(pageDrag(width: w))
+
+                // 左右边缘热区翻页：中间区域（车图 / 3D / 列表）不再带动整页横滑
+                HStack(spacing: 0) {
+                    Color.clear
+                        .frame(width: 28)
+                        .contentShape(Rectangle())
+                        .gesture(pageDrag(width: w))
+                    Spacer(minLength: 0)
+                    Color.clear
+                        .frame(width: 28)
+                        .contentShape(Rectangle())
+                        .gesture(pageDrag(width: w))
+                }
+                .allowsHitTesting(true)
 
                 LiquidTabBar(tab: $tab)
             }
