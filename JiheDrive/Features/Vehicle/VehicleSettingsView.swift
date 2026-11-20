@@ -118,7 +118,7 @@ struct VehicleSettingsView: View {
                 ForEach(options) { option in
                     Button {
                         Task {
-                            await store.select(item: item, value: option.value)
+                            await store.select(item: item, newValue: option.value)
                             showToast("\(item.title)：\(option.label)")
                         }
                     } label: {

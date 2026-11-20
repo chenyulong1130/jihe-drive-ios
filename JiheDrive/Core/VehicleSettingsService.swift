@@ -254,9 +254,9 @@ final class VehicleSettingsStore: ObservableObject {
         await send(item: item, value: next)
     }
 
-    func select(item: VehicleSettingItem, value: String) async {
-        guard value != value(for: item) else { return }
-        await send(item: item, value: value)
+    func select(item: VehicleSettingItem, newValue: String) async {
+        guard newValue != value(for: item) else { return }
+        await send(item: item, value: newValue)
     }
 
     func runAction(item: VehicleSettingItem) async {
