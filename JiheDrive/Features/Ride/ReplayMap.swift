@@ -24,6 +24,10 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.update(map: map, progress: progress, follow: follow)
     }
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     final class Coordinator: NSObject, MKMapViewDelegate {
         private var allPoints: [CLLocationCoordinate2D] = []
         private var traveled: MKPolyline?

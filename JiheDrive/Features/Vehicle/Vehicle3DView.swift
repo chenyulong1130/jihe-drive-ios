@@ -62,7 +62,7 @@ struct Vehicle3DView: UIViewRepresentable {
 
         /// 环顾一圈，慢速自转
         private func spin() {
-            let rotate = SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 30)
+            let rotate = SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 30)
             bodyNode.runAction(.repeatForever(rotate))
         }
 
@@ -127,13 +127,13 @@ struct Vehicle3DView: UIViewRepresentable {
             // 车把 + 握把
             let bar = cylinder(radius: 0.022, height: 0.60, material: metal)
             bar.position = SCNVector3(0.57, 1.06, 0)
-            bar.eulerAngles = SCNVector3(.pi / 2, 0, 0)
+            bar.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
             root.addChildNode(bar)
 
             for z in [-0.28, 0.28] {
                 let grip = cylinder(radius: 0.032, height: 0.13, material: seat)
                 grip.position = SCNVector3(0.57, 1.06, Float(z))
-                grip.eulerAngles = SCNVector3(.pi / 2, 0, 0)
+                grip.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
                 root.addChildNode(grip)
             }
 
@@ -174,26 +174,25 @@ struct Vehicle3DView: UIViewRepresentable {
 
             let tyre = SCNTorus(ringRadius: 0.20, pipeRadius: 0.062)
             tyre.firstMaterial = rubber
-            tyre.radialSegmentCount = 48
             let tyreNode = SCNNode(geometry: tyre)
-            tyreNode.eulerAngles = SCNVector3(.pi / 2, 0, 0)
+            tyreNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
             node.addChildNode(tyreNode)
 
             let rim = SCNCylinder(radius: 0.145, height: 0.075)
             rim.firstMaterial = metal
             let rimNode = SCNNode(geometry: rim)
-            rimNode.eulerAngles = SCNVector3(.pi / 2, 0, 0)
+            rimNode.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
             node.addChildNode(rimNode)
 
             for index in 0..<5 {
                 let spoke = SCNBox(width: 0.022, height: 0.26, length: 0.018, chamferRadius: 0.008)
                 spoke.firstMaterial = metal
                 let spokeNode = SCNNode(geometry: spoke)
-                spokeNode.eulerAngles = SCNVector3(0, 0, Float(index) * .pi / 5)
+                spokeNode.eulerAngles = SCNVector3(0, 0, Float(index) * Float.pi / 5)
                 node.addChildNode(spokeNode)
             }
 
-            let spin = SCNAction.rotateBy(x: 0, y: 0, z: -.pi * 2, duration: 2.2)
+            let spin = SCNAction.rotateBy(x: 0, y: 0, z: -CGFloat.pi * 2, duration: 2.2)
             node.runAction(.repeatForever(spin))
             return node
         }

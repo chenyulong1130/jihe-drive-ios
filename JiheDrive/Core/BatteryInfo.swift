@@ -72,7 +72,7 @@ struct BatteryInfo: Identifiable, Hashable {
             chargeMinutes: chargeSeconds > 0 ? chargeSeconds / 60 : nil,
             fullChargeText: fullCharge?.isEmpty == true ? nil : fullCharge,
             cycleCount: cycle > 0 ? cycle : nil,
-            capacity: (capacity ?? 0) > 0 ? capacity : nil
+            capacity: capacity > 0 ? capacity : nil
         )
     }
 
