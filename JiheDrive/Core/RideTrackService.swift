@@ -56,14 +56,30 @@ enum RideTrackService {
         }
         let end = min(last, Date())
         var all: [RideTrack] = []
-        for page in 1...8 {
+        var seen = Set<String>()
+        // 接口按天分组翻页：第一页常常只有 1 号几天行程（< pageSize），不能当「已经拉完」
+        for page in 1...16 {
             guard let batch = await tracks(vin: vin, from: start, to: end, page: page, pageSize: 50) else {
                 return all.isEmpty ? nil : all
             }
-            all.append(contentsOf: batch)
-            if batch.count < 50 { break }
+            if batch.isEmpty { break }
+            var added = 0
+            for track in batch where seen.insert(track.id).inserted {
+                all.append(track)
+                added += 1
+            }
+            if added == 0 { break }
         }
         return all
+    }
+
+    static func durationText(_ minutes: Int) -> String {
+        guard minutes > 0 else { return "--" }
+        if minutes < 60 { return "\(minutes)min" }
+        let hours = minutes / 60
+        let rest = minutes % 60
+        if rest == 0 { return "\(hours)h" }
+        return "\(hours)h\(rest)min"
     }
 
     /// 按日期区间拉按次行程（日期/月份均横线，对齐 miniapp fetchTripTrack）
@@ -131,7 +147,7 @@ enum RideTrackService {
             if let history {
                 for row in history {
                     var copy = row
-                    if copy["dayTime"] == nil, let day { copy["dayTime"] = day }
+                    if let day { copy["_groupDay"] = day }
                     items.append(copy)
                 }
             } else if group["rideId"] != nil || group["trajectory"] != nil {
@@ -181,7 +197,8 @@ enum RideTrackService {
                         ?? item["thumbUrl"]
                         ?? item["rideThumbnail"]
                 ),
-                dayKey: dayKey(item["dayTime"] ?? item["date"] ?? start),
+                dayKey: dayKey(start)
+                    ?? dayKey(item["dayTime"] ?? item["date"] ?? item["_groupDay"]),
                 socUsed: energy.soc,
                 energyWh: energy.wh
             )
@@ -309,7 +326,7 @@ enum RideTrackService {
 
         let parsed = list.compactMap { item -> MonthDay? in
             let rawDate = text(item["date"] ?? item["dayTime"] ?? item["rideDate"]) ?? ""
-            let date = rawDate.replacingOccurrences(of: "-", with: ".")
+            let date = dottedDate(rawDate)
             let mileage = Vehicle.doubleValue(item["rideMileage"] ?? item["rideMileageDay"] ?? item["mileage"]) ?? 0
             let minutes = Int(Vehicle.doubleValue(item["ridingTimeUnitMinute"] ?? item["ridingTimeDayUnitMinute"]) ?? 0)
             guard !date.isEmpty else { return nil }
@@ -562,15 +579,21 @@ enum RideTrackService {
         return (soc, wh)
     }
 
-    private static func dayKey(_ raw: Any?) -> String? {
-        guard let text = text(raw) else { return nil }
-        let normalized = text
+    private static func dottedDate(_ raw: String) -> String {
+        let normalized = raw
             .replacingOccurrences(of: "/", with: ".")
             .replacingOccurrences(of: "-", with: ".")
-        guard let match = normalized.range(of: #"\d{4}\.\d{2}\.\d{2}"#, options: .regularExpression) else {
-            return nil
-        }
-        return String(normalized[match])
+        let parts = normalized.split { $0 == "." || $0 == " " || $0 == "T" }
+            .prefix(3)
+            .compactMap { Int($0) }
+        guard parts.count >= 3, parts[0] >= 2000, parts[0] < 2100 else { return "" }
+        return String(format: "%04d.%02d.%02d", parts[0], parts[1], parts[2])
+    }
+
+    private static func dayKey(_ raw: Any?) -> String? {
+        guard let text = text(raw), !text.isEmpty else { return nil }
+        let value = dottedDate(text)
+        return value.isEmpty ? nil : value
     }
 
     /// "2026.11.13 08:12:33" / ISO8601 → "08:12"（列表按日分组，条目不再重复日期）

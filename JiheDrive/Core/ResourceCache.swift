@@ -149,26 +149,12 @@ struct CachedRemoteImage: View {
 
 struct CachedLoopingVideo: View {
     let url: URL
-    @State private var local: URL?
 
     var body: some View {
-        Group {
-            if let local {
-                LoopingVideoView(url: local, muted: true)
+        LoopingVideoView(url: ResourceCache.existingFile(for: url, folder: "videos") ?? url, muted: true)
+            .task(id: url.absoluteString) {
+                guard !url.isFileURL else { return }
+                _ = await ResourceCache.file(for: url, folder: "videos")
             }
-        }
-        .task(id: url.absoluteString) {
-            if url.isFileURL {
-                local = url
-                return
-            }
-            if let cached = ResourceCache.existingFile(for: url, folder: "videos") {
-                local = cached
-                return
-            }
-            // 先播远程，后台缓存；播放中途不切换本地文件，避免黑一下
-            local = url
-            _ = await ResourceCache.file(for: url, folder: "videos")
-        }
     }
 }

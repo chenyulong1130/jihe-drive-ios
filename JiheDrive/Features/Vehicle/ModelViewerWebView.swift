@@ -9,6 +9,7 @@ struct ModelViewerWebView: UIViewRepresentable {
     var interactive: Bool = true
     var autoRotate: Bool = false
     var onDrag: ((Bool) -> Void)? = nil
+    var onReady: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -32,6 +33,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.addGestureRecognizer(pan)
 
         context.coordinator.onDrag = onDrag
+        context.coordinator.onReady = onReady
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
         return view
     }
@@ -39,6 +41,7 @@ struct ModelViewerWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {
         view.isUserInteractionEnabled = interactive
         context.coordinator.onDrag = onDrag
+        context.coordinator.onReady = onReady
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
     }
 
@@ -49,6 +52,7 @@ struct ModelViewerWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate {
         let scheme = ModelSchemeHandler()
         var onDrag: ((Bool) -> Void)?
+        var onReady: (() -> Void)?
         private var loadedFile: URL?
 
         private var loadedInteractive: Bool?
@@ -81,6 +85,12 @@ struct ModelViewerWebView: UIViewRepresentable {
             let html = ModelViewerAsset.html(interactive: interactive, autoRotate: autoRotate)
             let base = URL(string: "\(ModelSchemeHandler.scheme)://local/index.html")!
             view.loadHTMLString(html, baseURL: base)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                self?.onReady?()
+            }
         }
     }
 }

@@ -129,6 +129,76 @@ struct HairLine: View {
     }
 }
 
+struct SkeletonBar: View {
+    var width: CGFloat? = nil
+    var height: CGFloat = 12
+    var radius: CGFloat = 8
+
+    @State private var dim = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(Theme.surfaceAlt)
+            .opacity(dim ? 0.42 : 1)
+            .frame(width: width, height: height)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                    dim = true
+                }
+            }
+    }
+}
+
+struct RideListSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                SkeletonBar(width: 72, height: 12)
+                SkeletonBar(width: 128, height: 28, radius: 8)
+                HStack(spacing: 12) {
+                    SkeletonBar(height: 36, radius: 10)
+                    SkeletonBar(height: 36, radius: 10)
+                    SkeletonBar(height: 36, radius: 10)
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Theme.surface)
+            )
+
+            ForEach(0..<3, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 10) {
+                    SkeletonBar(width: 88, height: 14)
+                    VStack(spacing: 0) {
+                        ForEach(0..<2, id: \.self) { row in
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    SkeletonBar(width: 72, height: 12)
+                                    SkeletonBar(width: 72, height: 72, radius: 12)
+                                }
+                                VStack(alignment: .leading, spacing: 8) {
+                                    SkeletonBar(width: 96, height: 18)
+                                    SkeletonBar(height: 12)
+                                    SkeletonBar(width: 140, height: 10)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(12)
+                            if row == 0 { HairLine(inset: 12) }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Theme.surface)
+                    )
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
 struct IconBadge: View {
     let icon: String
     var color: Color = Theme.brand

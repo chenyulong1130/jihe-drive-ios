@@ -33,9 +33,8 @@ struct RideHomeView: View {
                         .foregroundStyle(Theme.secondary)
                         .padding(.top, 32)
                 } else if loading && groups.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 48)
+                    RideListSkeleton()
+                        .padding(.top, 4)
                 } else if let errorText, groups.isEmpty {
                     SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                         .padding(.top, 12)
@@ -222,7 +221,7 @@ struct RideHomeView: View {
                     }
                     .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
                     if index < group.tracks.count - 1 {
-                        HairLine(inset: 86)
+                        HairLine(inset: 12)
                     }
                 }
             }
@@ -236,30 +235,36 @@ struct RideHomeView: View {
     }
 
     private func rideRow(_ track: RideTrack) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            thumb(track)
-                .frame(width: 72, height: 72)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(timeRange(track))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                thumb(track)
+                    .frame(width: 76, height: 76)
+            }
+            .frame(width: 92, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(timeRange(track))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.label)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(formatKm(track.mileage))
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.brand)
                         .monospacedDigit()
+                    Text("km")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
                     Spacer(minLength: 6)
-                    HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(formatKm(track.mileage))
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                            .foregroundStyle(Theme.brand)
-                            .monospacedDigit()
-                        Text("km")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
-                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.tertiary)
                 }
 
                 HStack(spacing: 0) {
-                    rideMetric(durationLabel(track.durationMinutes), "耗时")
+                    rideMetric(RideTrackService.durationText(track.durationMinutes), "耗时")
                     rideMetric(speedText(avgSpeed(track)), "均速")
                     rideMetric(speedText(peakSpeed(track)), "极速")
                 }
@@ -267,17 +272,13 @@ struct RideHomeView: View {
                 if let route = routeText(track) {
                     Text(route)
                         .font(.system(size: 11))
-                        .foregroundStyle(Theme.tertiary)
-                        .lineLimit(1)
+                        .foregroundStyle(Theme.secondary)
+                        .lineLimit(2)
                 }
             }
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.tertiary)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 11)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 
@@ -355,8 +356,14 @@ struct RideHomeView: View {
         if Task.isCancelled { return }
 
         var tracks = tracksResult ?? []
-        if tracks.isEmpty, days.contains(where: { $0.mileage > 0 }) {
-            tracks = await Self.tracksForDays(vin: vehicle.vinNo, days: days)
+        let known = Set(tracks.compactMap(\.dayKey))
+        let missing = days.filter { $0.mileage > 0 && !known.contains($0.date) }
+        if !missing.isEmpty {
+            let extra = await Self.tracksForDays(vin: vehicle.vinNo, days: missing)
+            var seen = Set(tracks.map(\.id))
+            for track in extra where seen.insert(track.id).inserted {
+                tracks.append(track)
+            }
         }
         if Task.isCancelled { return }
         if tracks.isEmpty {
@@ -370,7 +377,7 @@ struct RideHomeView: View {
     }
 
     private static func tracksForDays(vin: String, days: [RideTrackService.MonthDay]) async -> [RideTrack] {
-        let ridden = days.filter { $0.mileage > 0 }.prefix(18)
+        let ridden = days.filter { $0.mileage > 0 }.prefix(31)
         guard !ridden.isEmpty else { return [] }
         return await withTaskGroup(of: [RideTrack].self, returning: [RideTrack].self) { group in
             for day in ridden {
@@ -464,15 +471,6 @@ struct RideHomeView: View {
     private func formatKm(_ km: Double) -> String {
         if km >= 100 { return String(format: "%.0f", km) }
         return String(format: "%.1f", km)
-    }
-
-    private func durationLabel(_ minutes: Int) -> String {
-        guard minutes > 0 else { return "--" }
-        if minutes >= 60 {
-            let hours = Double(minutes) / 60.0
-            return String(format: hours >= 10 ? "%.0fh" : "%.1fh", hours)
-        }
-        return "\(minutes)min"
     }
 
     private static let dotted: DateFormatter = {

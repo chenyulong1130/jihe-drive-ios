@@ -9,11 +9,13 @@ struct VehicleView: View {
 
     @StateObject private var model3D = VehicleModelLoader()
     @State private var heroGLB: URL?
+    @State private var loadedModelVin: String?
 
     @State private var busy: String?
     @State private var toast: String?
 
     @State private var rideExtra: RideTrackService.RideExtra?
+    @State private var rideLoading = false
     @State private var resolvedAddress: String?
     @StateObject private var signin = SigninStore()
 
@@ -49,6 +51,7 @@ struct VehicleView: View {
             .scrollDisabled(pinningHero)
             .refreshable { await reloadPage() }
         }
+        .ignoresSafeArea(edges: .top)
         .background(Theme.groupedBackground)
         .overlay(alignment: .bottom) {
             if let message = toast {
@@ -88,9 +91,11 @@ struct VehicleView: View {
         }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
-            // 切车先清掉上一台的模型，避免画面短暂串车；骑行数据等新结果再覆盖
-            heroGLB = nil
-            model3D.clear()
+            if loadedModelVin != vin {
+                heroGLB = nil
+                model3D.clear()
+                loadedModelVin = vin
+            }
             resolvedAddress = nil
             async let ride: Void = loadRideSummary(vin: vin)
             async let battery: Void = model.loadBattery(vin: vin)
@@ -132,9 +137,10 @@ struct VehicleView: View {
             modelGLBFile: heroGLB,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
-            topInset: proxy.safeAreaInsets.top + 10,
-            height: max(292, fullHeight * 0.34)
+            topInset: proxy.safeAreaInsets.top + 4,
+            height: max(390, fullHeight * 0.46)
                 + ((model.tire?.hasData == true) ? 36 : 0),
+            canSwitchVehicle: model.vehicles.count > 1,
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -181,10 +187,11 @@ struct VehicleView: View {
             return
         }
         if vehicle.isGLBModel {
-            model3D.clear()
-            let file = try? await GLBModelStore.localFile(for: url)
-            guard model.selectedVehicle?.vinNo == vin else { return }
-            heroGLB = file
+            if heroGLB == nil {
+                let file = try? await GLBModelStore.localFile(for: url)
+                guard model.selectedVehicle?.vinNo == vin else { return }
+                heroGLB = file
+            }
         } else {
             heroGLB = nil
             model3D.load(url)
@@ -200,6 +207,8 @@ struct VehicleView: View {
     }
 
     private func loadRideSummary(vin: String) async {
+        if rideExtra == nil { rideLoading = true }
+        defer { rideLoading = false }
         if let extra = await RideTrackService.rideExtra(vin: vin) {
             rideExtra = extra
         }
@@ -230,11 +239,11 @@ struct VehicleView: View {
     // MARK: - 寻车 / 解锁 / 设置
 
     private func actionDock(_ vehicle: Vehicle) -> some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 16) {
             sideActionCard(
                 icon: "light.beacon.max.fill",
                 title: "寻车",
-                tint: Theme.find,
+                tint: Theme.label,
                 busy: busy == "find"
             ) {
                 run("find") { try await model.findVehicle(vehicle) }
@@ -252,7 +261,7 @@ struct VehicleView: View {
             sideActionCard(
                 icon: "slider.horizontal.3",
                 title: "设置",
-                tint: vehicle.isCarMaster ? Theme.brand : Theme.tertiary,
+                tint: Theme.label,
                 busy: false
             ) {
                 if vehicle.isCarMaster {
@@ -274,26 +283,21 @@ struct VehicleView: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(Theme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(tint.opacity(0.10))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.38), lineWidth: 1)
+                            .strokeBorder(Theme.separator.opacity(0.55), lineWidth: 0.5)
                     )
                     .shadow(color: Theme.cardShadow, radius: 10, y: 4)
                 if busy {
                     ProgressView().tint(tint)
                 } else {
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(tint)
-                        .symbolRenderingMode(.hierarchical)
                 }
             }
-            .frame(width: 58, height: 72)
+            .frame(width: 72, height: 72)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
@@ -391,7 +395,7 @@ struct VehicleView: View {
             locationCard(vehicle)
             rideCard(vehicle)
         }
-        .frame(height: 168)
+        .frame(height: 198)
     }
 
     private func locationCard(_ vehicle: Vehicle) -> some View {
@@ -409,17 +413,17 @@ struct VehicleView: View {
                         .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.75)))
                         .padding(6)
                 }
-                .frame(height: 92)
+                .frame(height: 128)
                 .frame(maxWidth: .infinity)
                 .clipped()
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 1, brightness: 0))
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
                     Text("车辆位置")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Theme.label)
                     Spacer(minLength: 4)
                     Button {
@@ -433,19 +437,20 @@ struct VehicleView: View {
                     .disabled(vehicle.coordinate == nil)
                 }
                 Text(locationLabel(vehicle))
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(2)
-                Spacer(minLength: 0)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text(locationTimeLabel(vehicle))
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 9)
             .padding(.top, 6)
-            .padding(.bottom, 5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.bottom, 7)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
@@ -469,6 +474,14 @@ struct VehicleView: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.label)
 
+                if rideLoading && rideExtra == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SkeletonBar(width: 72, height: 12)
+                        SkeletonBar(height: 22)
+                        SkeletonBar(height: 22)
+                        SkeletonBar(height: 28, radius: 8)
+                    }
+                } else {
                 rideWaveRow(
                     value: rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—",
                     unit: "km",
@@ -476,8 +489,8 @@ struct VehicleView: View {
                     tint: Color(hex: 0xFF3B64)
                 )
                 rideWaveRow(
-                    value: rideExtra?.lastMin.map { "\($0)" } ?? "—",
-                    unit: "min",
+                    value: rideExtra?.lastMin.map { RideTrackService.durationText($0) } ?? "—",
+                    unit: "",
                     label: "耗时",
                     tint: Color(hex: 0x0B84FF)
                 )
@@ -499,12 +512,13 @@ struct VehicleView: View {
                         label: "速度"
                     )
                     rideStat(
-                        value: rideExtra?.todayMin.map { "\($0)" } ?? "—",
-                        unit: "min",
+                        value: rideExtra?.todayMin.map { RideTrackService.durationText($0) } ?? "—",
+                        unit: "",
                         label: "时长"
                     )
                 }
                 .padding(.top, 4)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.top, 9)
@@ -532,9 +546,11 @@ struct VehicleView: View {
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.label)
                         .monospacedDigit()
-                    Text(unit)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.label)
+                    if !unit.isEmpty {
+                        Text(unit)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.label)
+                    }
                 }
                 Text(label)
                     .font(.system(size: 9.5))
@@ -554,9 +570,11 @@ struct VehicleView: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Text(unit)
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(Theme.tertiary)
+                if !unit.isEmpty {
+                    Text(unit)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(Theme.tertiary)
+                }
             }
             Text(label)
                 .font(.system(size: 10))
@@ -694,13 +712,16 @@ struct VehicleView: View {
 
     private var loadingState: some View {
         VStack(spacing: 12) {
-            ProgressView()
-            Text("正在读取车辆")
-                .font(Theme.footnote)
-                .foregroundStyle(Theme.secondary)
+            SkeletonBar(height: 360, radius: 0)
+            HStack(spacing: 9) {
+                SkeletonBar(height: 198, radius: 16)
+                SkeletonBar(height: 198, radius: 16)
+            }
+            .padding(.horizontal, 16)
+            SkeletonBar(height: 88, radius: 16)
+                .padding(.horizontal, 16)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 160)
+        .padding(.top, 0)
     }
 
     private var emptyState: some View {
@@ -770,10 +791,7 @@ struct VehicleView: View {
 
     private func formatTodayDuration() -> String {
         guard let minutes = rideExtra?.todayMin, minutes > 0 else { return "—" }
-        let h = minutes / 60
-        let m = minutes % 60
-        if h > 0 { return "\(h)时\(m)分" }
-        return "\(m)分"
+        return RideTrackService.durationText(minutes)
     }
 
     private func run(

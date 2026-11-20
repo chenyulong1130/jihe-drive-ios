@@ -43,6 +43,10 @@ struct HeroStage: View {
     var onOpenBattery: (() -> Void)? = nil
     /// 拖 3D 时通知外层停掉页面滚动
     var onInteract: ((Bool) -> Void)? = nil
+    /// 多车才显示左上角切换箭头
+    var canSwitchVehicle: Bool = true
+
+    @State private var glbRevealed = false
 
     private var onDark: Bool { !selection.isDefault || videoURL != nil }
 
@@ -52,18 +56,16 @@ struct HeroStage: View {
     var body: some View {
         ZStack {
             backdrop
-                .mask(
+                .allowsHitTesting(false)
+                .overlay(alignment: .bottom) {
                     LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.94),
-                            .init(color: .clear, location: 1)
-                        ],
+                        colors: [Color.clear, Theme.groupedBackground],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                )
-                .allowsHitTesting(false)
+                    .frame(height: 36)
+                    .allowsHitTesting(false)
+                }
 
             carLayer
 
@@ -148,13 +150,10 @@ struct HeroStage: View {
                     Color(hex: 0x0B1A16)
                 }
 
-                GeometryReader { geo in
-                    CachedLoopingVideo(url: url)
-                        .frame(width: max(geo.size.width, 1), height: max(geo.size.height, 1))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .allowsHitTesting(false)
+                CachedLoopingVideo(url: url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                    .allowsHitTesting(false)
             }
             .clipped()
             .overlay(scrim)
@@ -213,7 +212,7 @@ struct HeroStage: View {
     // MARK: - 车 / 3D
 
     /// 车图顶距：躲开顶栏 + 电量
-    private var carTopPad: CGFloat { topInset + 96 }
+    private var carTopPad: CGFloat { topInset + 72 }
     /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var carBottomPad: CGFloat { hasTire ? 52 : 8 }
@@ -225,16 +224,23 @@ struct HeroStage: View {
                 if let modelGLBFile {
                     Color.clear
                         .overlay {
-                            ModelViewerWebView(
-                                glbFile: modelGLBFile,
-                                interactive: true,
-                                autoRotate: false,
-                                onDrag: onInteract
-                            )
+                            ZStack {
+                                twoDCar
+                                    .opacity(glbRevealed ? 0 : 1)
+                                ModelViewerWebView(
+                                    glbFile: modelGLBFile,
+                                    interactive: true,
+                                    autoRotate: false,
+                                    onDrag: onInteract,
+                                    onReady: { glbRevealed = true }
+                                )
+                                .opacity(glbRevealed ? 1 : 0)
+                            }
                         }
                         .padding(.top, carTopPad - 8)
                         .padding(.bottom, carBottomPad)
                         .simultaneousGesture(heroDrag)
+                        .onChange(of: modelGLBFile) { _, _ in glbRevealed = false }
                 } else if let modelScene {
                     VehicleSceneView(
                         scene: modelScene,
@@ -247,35 +253,10 @@ struct HeroStage: View {
                         .padding(.bottom, carBottomPad)
                         .simultaneousGesture(heroDrag)
                 } else {
-                    ZStack {
-                        Ellipse()
-                            .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
-                            .frame(width: 240, height: 12)
-                            .blur(radius: 10)
-                            .offset(y: 16)
-
-                        if vehicle.isCharging {
-                            ChargingGlow()
-                                .offset(y: 18)
-                        }
-
-                        Group {
-                            if let url = vehicle.imageURL {
-                                CachedRemoteImage(url: url, contentMode: .fit)
-                                    .id(vehicle.vinNo + url.absoluteString)
-                            } else {
-                                placeholder
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(maxHeight: .infinity)
-                        .padding(.horizontal, 32)
-                        .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.top, carTopPad - 8)
-                    .padding(.bottom, carBottomPad)
-                    .allowsHitTesting(false)
+                    twoDCar
+                        .padding(.top, carTopPad - 28)
+                        .padding(.bottom, carBottomPad)
+                        .allowsHitTesting(false)
                 }
             }
 
@@ -296,6 +277,35 @@ struct HeroStage: View {
             .padding(.trailing, 16)
             .accessibilityLabel("打开坐垫")
         }
+    }
+
+    private var twoDCar: some View {
+        ZStack {
+            Ellipse()
+                .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
+                .frame(width: 240, height: 12)
+                .blur(radius: 10)
+                .offset(y: 16)
+
+            if vehicle.isCharging {
+                ChargingGlow()
+                    .offset(y: 18)
+            }
+
+            Group {
+                if let url = vehicle.imageURL {
+                    CachedRemoteImage(url: url, contentMode: .fit)
+                        .id(vehicle.vinNo + url.absoluteString)
+                } else {
+                    placeholder
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(maxHeight: .infinity)
+            .padding(.horizontal, 6)
+            .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var placeholder: some View {
@@ -319,14 +329,17 @@ struct HeroStage: View {
                         .foregroundStyle(primary)
                         .shadow(color: onDark ? Color.black.opacity(0.2) : .clear, radius: 8)
                         .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(secondaryText)
+                    if canSwitchVehicle {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(secondaryText)
+                    }
                 }
                 .frame(minHeight: 36, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+            .disabled(!canSwitchVehicle)
 
             Spacer(minLength: 8)
 
