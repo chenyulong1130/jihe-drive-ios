@@ -10,6 +10,8 @@ struct VehicleMapView: UIViewRepresentable {
     let coordinate: Coordinate?
     var track: [Coordinate] = []
     var interactive: Bool = true
+    /// 显示手机当前位置（全屏地图用）
+    var showsUser: Bool = false
     /// 递增即重新聚焦到车辆 / 轨迹
     var recenterToken: Int = 0
 
@@ -19,7 +21,7 @@ struct VehicleMapView: UIViewRepresentable {
         map.mapType = .standard
         map.showsCompass = false
         map.showsScale = false
-        map.showsUserLocation = false
+        map.showsUserLocation = showsUser
         map.isRotateEnabled = false
         map.isPitchEnabled = false
         map.pointOfInterestFilter = .excludingAll

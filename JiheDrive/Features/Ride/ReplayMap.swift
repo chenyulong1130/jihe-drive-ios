@@ -35,6 +35,9 @@ struct ReplayMap: UIViewRepresentable {
         private var marker: MKPointAnnotation?
         private var lastIndex = -1
         private var didFit = false
+        private var didZoomFollow = false
+        private var lastLineAt: CFTimeInterval = 0
+        private var lastCenterAt: CFTimeInterval = 0
 
         func configure(map: MKMapView, points: [CLLocationCoordinate2D]) {
             allPoints = points
@@ -84,24 +87,42 @@ struct ReplayMap: UIViewRepresentable {
             guard index != lastIndex else { return }
             lastIndex = index
 
-            if let old = traveled { map.removeOverlay(old) }
-            if index >= 1 {
-                let slice = Array(allPoints[0...index])
-                let line = MKPolyline(coordinates: slice, count: slice.count)
-                traveled = line
-                map.addOverlay(line, level: .aboveRoads)
-            } else {
-                traveled = nil
-            }
-
+            // 标记每帧移动，代价很低
             marker?.coordinate = allPoints[index]
 
-            if follow {
-                let region = MKCoordinateRegion(
-                    center: allPoints[index],
-                    span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)
+            // 已行驶折线重建很贵，节流到约 8 次/秒
+            let now = CACurrentMediaTime()
+            if now - lastLineAt > 0.12 || index == allPoints.count - 1 {
+                lastLineAt = now
+                if let old = traveled { map.removeOverlay(old) }
+                if index >= 1 {
+                    let slice = Array(allPoints[0...index])
+                    let line = MKPolyline(coordinates: slice, count: slice.count)
+                    traveled = line
+                    map.addOverlay(line, level: .aboveRoads)
+                } else {
+                    traveled = nil
+                }
+            }
+
+            guard follow else {
+                didZoomFollow = false
+                return
+            }
+
+            if !didZoomFollow {
+                didZoomFollow = true
+                lastCenterAt = now
+                map.setRegion(
+                    MKCoordinateRegion(
+                        center: allPoints[index],
+                        span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)
+                    ),
+                    animated: true
                 )
-                map.setRegion(region, animated: false)
+            } else if now - lastCenterAt > 0.25 {
+                lastCenterAt = now
+                map.setCenter(allPoints[index], animated: false)
             }
         }
 

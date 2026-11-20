@@ -45,6 +45,13 @@
 	<string>Automatic</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>读取 GPS 用于核对车速与显示车辆位置，数据不会上传。</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>iosamap</string>
+		<string>baidumap</string>
+		<string>qqmap</string>
+		<string>comgooglemaps</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>从相册选择图片或视频作为车辆页背景，文件只保存在本机。</string>
 	<key>NSAppTransportSecurity</key>

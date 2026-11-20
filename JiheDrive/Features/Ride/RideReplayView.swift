@@ -50,7 +50,7 @@ struct RideReplayView: View {
             if progress >= 1 { progress = 0 }
             var last = Date()
             while playing && !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 16_000_000)
+                try? await Task.sleep(nanoseconds: 33_000_000)
                 if Task.isCancelled { break }
                 let now = Date()
                 let delta = now.timeIntervalSince(last)

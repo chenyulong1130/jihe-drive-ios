@@ -19,6 +19,7 @@ struct VehicleView: View {
     @State private var themeFocus: ThemeFocus = .none
     @State private var showBattery = false
     @State private var show3D = false
+    @State private var showDetail = false
     @State private var showReplay = false
 
     var body: some View {
@@ -60,6 +61,9 @@ struct VehicleView: View {
         }
         .sheet(isPresented: $show3D) {
             if let vehicle = model.selectedVehicle { Vehicle3DSheet(vehicle: vehicle) }
+        }
+        .sheet(isPresented: $showDetail) {
+            if let vehicle = model.selectedVehicle { VehicleDetailView(vehicle: vehicle) }
         }
         .fullScreenCover(isPresented: $showReplay) {
             RideHomeView(showsClose: true)
@@ -204,21 +208,34 @@ struct VehicleView: View {
             .disabled(busy != nil)
 
             HStack(spacing: 0) {
-                quickItem(icon: "light.beacon.max.fill", title: "寻车", tint: Theme.orange) {
+                quickItem(title: "寻车", tint: Theme.orange) {
+                    Image(systemName: "light.beacon.max.fill")
+                        .font(.system(size: 16, weight: .medium))
+                } action: {
                     run("find") { try await model.findVehicle(vehicle) }
                 }
-                quickItem(icon: "shippingbox.fill", title: "开坐垫", tint: Theme.teal) {
+
+                quickItem(title: "开坐垫", tint: Theme.teal) {
+                    SeatIcon(size: 20)
+                } action: {
                     run("cushion") { try await model.openCushion(vehicle) }
                 }
+
                 quickItem(
-                    icon: "battery.75percent",
                     title: "电池",
                     tint: Theme.green,
                     detail: model.batteries.first.map { "\($0.level)%" }
                 ) {
+                    Image(systemName: "battery.75percent")
+                        .font(.system(size: 16, weight: .medium))
+                } action: {
                     showBattery = true
                 }
-                quickItem(icon: "cube.transparent.fill", title: "3D 看车", tint: Theme.indigo) {
+
+                quickItem(title: "3D 看车", tint: Theme.indigo) {
+                    Image(systemName: "cube.transparent.fill")
+                        .font(.system(size: 16, weight: .medium))
+                } action: {
                     show3D = true
                 }
             }
@@ -228,11 +245,11 @@ struct VehicleView: View {
         .padding(.bottom, 16)
     }
 
-    private func quickItem(
-        icon: String,
+    private func quickItem<Icon: View>(
         title: String,
         tint: Color,
         detail: String? = nil,
+        @ViewBuilder icon: () -> Icon,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -241,8 +258,7 @@ struct VehicleView: View {
                     Circle()
                         .fill(tint.opacity(0.12))
                         .frame(width: 44, height: 44)
-                    Image(systemName: icon)
-                        .font(.system(size: 16, weight: .medium))
+                    icon()
                         .foregroundStyle(tint)
                 }
                 Text(title)
@@ -305,14 +321,16 @@ struct VehicleView: View {
                         .monospacedDigit()
                 }
 
-                VStack(spacing: 10) {
-                    HStack(spacing: 12) {
-                        cell("续航", "\(vehicle.rangeKm) km")
-                        cell("电压", voltageText(battery, vehicle))
-                    }
-                    HStack(spacing: 12) {
-                        cell("温度", temperatureText(battery, vehicle))
-                        cell("循环", cycleText(battery, vehicle))
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(metricItems(battery, vehicle), id: \.0) { item in
+                        cell(item.0, item.1)
                     }
                 }
             }
@@ -325,6 +343,17 @@ struct VehicleView: View {
         .padding(.vertical, 16)
         .contentShape(Rectangle())
         .onTapGesture { showBattery = true }
+    }
+
+    private func metricItems(_ battery: BatteryInfo?, _ vehicle: Vehicle) -> [(String, String)] {
+        var items: [(String, String)] = [("续航", "\(vehicle.rangeKm) km")]
+        let voltage = voltageText(battery, vehicle)
+        if voltage != "—" { items.append(("电压", voltage)) }
+        let temperature = temperatureText(battery, vehicle)
+        if temperature != "—" { items.append(("温度", temperature)) }
+        let cycle = cycleText(battery, vehicle)
+        if cycle != "—" { items.append(("循环", cycle)) }
+        return items
     }
 
     private func cell(_ title: String, _ value: String) -> some View {
@@ -439,35 +468,45 @@ struct VehicleView: View {
     // MARK: - 车辆信息
 
     private func infoBlock(_ vehicle: Vehicle) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 10) {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
-                        .frame(width: 6, height: 6)
-                    Text(vehicle.isOnline ? "在线" : "离线")
+        Button {
+            showDetail = true
+        } label: {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 10) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
+                            .frame(width: 6, height: 6)
+                        Text(vehicle.isOnline ? "在线" : "离线")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.secondary)
+                    }
+                    Text("信号 \(vehicle.signalLevel) 级")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.secondary)
+                    Spacer(minLength: 0)
+                    Text("车辆详情")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.secondary)
+                        .foregroundStyle(Theme.brand)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.tertiary)
                 }
-                Text("信号 \(vehicle.signalLevel) 级")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.secondary)
-                Spacer(minLength: 0)
-                Text(shortTime(vehicle.locationTime))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.tertiary)
-            }
 
-            Text(vehicle.vinNo)
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(Theme.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+                Text(vehicle.vinNo)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .buttonStyle(PressableStyle(scale: 0.995, brightness: 0))
     }
+
 
     // MARK: - 电池文案
 

@@ -7,12 +7,13 @@ struct TrackMapView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var recenterToken = 0
+    @State private var showNavOptions = false
 
     private var coordinate: Coordinate? { vehicle.coordinate }
 
     var body: some View {
         ZStack {
-            VehicleMapView(coordinate: coordinate, recenterToken: recenterToken)
+            VehicleMapView(coordinate: coordinate, showsUser: true, recenterToken: recenterToken)
                 .ignoresSafeArea()
 
             if coordinate == nil {
@@ -25,11 +26,11 @@ struct TrackMapView: View {
                 Spacer(minLength: 0)
                 if coordinate != nil {
                     PrimaryButton(
-                        label: "在地图中导航过去",
+                        label: "导航到车辆",
                         icon: "arrow.triangle.turn.up.right.diamond.fill",
                         color: Theme.brand
                     ) {
-                        openInMaps()
+                        showNavOptions = true
                     }
                 }
             }
@@ -38,6 +39,21 @@ struct TrackMapView: View {
             .padding(.bottom, 14)
         }
         .background(Theme.groupedBackground)
+        .onAppear { LocationPermissionRequester.shared.request() }
+        .confirmationDialog("选择导航应用", isPresented: $showNavOptions, titleVisibility: .visible) {
+            if let coordinate {
+                ForEach(NavigationLauncher.options(
+                    lat: coordinate.latitude,
+                    lon: coordinate.longitude,
+                    name: vehicle.name
+                )) { option in
+                    Button(option.title) { option.action() }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("车辆坐标是高德坐标，已按各 App 坐标系转换")
+        }
     }
 
     // MARK: - 顶部
@@ -139,16 +155,6 @@ struct TrackMapView: View {
     }
 
     // MARK: - 动作
-
-    private func openInMaps() {
-        guard let coordinate else { return }
-        let placemark = MKPlacemark(coordinate: coordinate.mapCoordinate)
-        let item = MKMapItem(placemark: placemark)
-        item.name = vehicle.name
-        item.openInMaps(
-            launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving]
-        )
-    }
 
     // MARK: - 文案
 
