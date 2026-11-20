@@ -50,20 +50,24 @@ struct BatteryInfo: Identifiable, Hashable {
         let parsedState = stateText(rawState, powerState: powerState)
         let charging = parsedState.contains("充")
 
-        if level == 0 && voltage == 0 && temp == 0 && type.isEmpty && name.isEmpty {
+        let typeName = type ?? ""
+        let batteryName = name ?? ""
+        let pulledFlag = pulled ?? ""
+
+        if level == 0 && voltage == 0 && temp == 0 && typeName.isEmpty && batteryName.isEmpty {
             return nil
         }
 
         return BatteryInfo(
-            id: name.isEmpty ? "battery-\(index)" : "\(name)-\(index)",
-            name: name.isEmpty ? "电池 \(index + 1)" : name,
+            id: batteryName.isEmpty ? "battery-\(index)" : "\(batteryName)-\(index)",
+            name: batteryName.isEmpty ? "电池 \(index + 1)" : batteryName,
             level: max(0, min(100, level)),
             voltage: voltage,
             temperature: temp,
-            type: type.isEmpty ? "锂电池" : type,
+            type: typeName.isEmpty ? "锂电池" : typeName,
             stateText: parsedState,
             isCharging: charging,
-            isPulledOut: pulled == "1" || pulled.lowercased() == "true",
+            isPulledOut: pulledFlag == "1" || pulledFlag.lowercased() == "true",
             abnormal: (abnormal?.isEmpty ?? true) || abnormal == "0" ? nil : abnormal,
             chargeMinutes: chargeSeconds > 0 ? chargeSeconds / 60 : nil,
             fullChargeText: fullCharge?.isEmpty == true ? nil : fullCharge,

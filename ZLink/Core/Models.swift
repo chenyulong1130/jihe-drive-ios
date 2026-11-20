@@ -43,7 +43,7 @@ extension Vehicle {
         self.name = Self.firstString(json, keys: ["vehicleName", "vehicleTypeName", "modelName", "deviceName", "name"]) ?? "我的车辆"
         self.soc = Self.intValue(json["bmssoc"] ?? iot["BMSSOC"] ?? iot["bmssoc"])
         self.rangeKm = Self.intValue(json["hmiRidableMile"] ?? iot["HMIRidableMile"] ?? iot["hmiRidableMile"])
-        self.totalMileKm = Self.doubleValue(json["totalRideMile"] ?? iot["TotalRideMile"])
+        self.totalMileKm = Self.doubleValue(json["totalRideMile"] ?? iot["TotalRideMile"]) ?? 0
         self.isOnline = Self.onlineHint(json) ?? false
         self.isLocked = Self.lockState(json, iot)
         self.isCharging = Self.chargingState(json, iot)
