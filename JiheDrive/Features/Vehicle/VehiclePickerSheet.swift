@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 车辆切换：分组列表式卡片，点选即切
+/// 车辆切换：型号 + 共享标记，不展示车架号/锁态
 struct VehiclePickerSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +12,7 @@ struct VehiclePickerSheet: View {
             onClose: { dismiss() }
         ) {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 12) {
+                VStack(spacing: 8) {
                     ForEach(model.vehicles) { vehicle in
                         row(vehicle)
                     }
@@ -37,55 +37,80 @@ struct VehiclePickerSheet: View {
             HStack(spacing: 12) {
                 thumb(vehicle)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(vehicle.name)
-                        .font(Theme.headline)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(vehicle.name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                            .lineLimit(1)
+                        if vehicle.isShared {
+                            Text("共享")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Theme.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.orange.opacity(0.14)))
+                        }
+                    }
 
                     HStack(spacing: 8) {
-                        Text("VIN \(vehicle.vinNo.suffix(6))")
-                            .font(Theme.caption)
-                            .foregroundStyle(Theme.secondary)
-                            .monospacedDigit()
+                        if let modelName = vehicle.modelName, !modelName.isEmpty {
+                            Text(modelName)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text(vehicle.isCarMaster ? "我的车辆" : "共享车辆")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.secondary)
+                        }
 
+                        Circle()
+                            .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
+                            .frame(width: 5, height: 5)
                         Text(vehicle.isOnline ? "在线" : "离线")
-                            .font(Theme.caption)
-                            .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.secondary)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.tertiary)
+                    }
 
-                        Text(vehicle.isLocked ? "已上锁" : "未上锁")
-                            .font(Theme.caption)
-                            .foregroundStyle(vehicle.isLocked ? Theme.secondary : Theme.orange)
+                    if vehicle.isShared, let nick = vehicle.shareNickName, !nick.isEmpty {
+                        Text("来自 \(nick)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
                     }
                 }
 
                 Spacer(minLength: 0)
 
-                HStack(alignment: .firstTextBaseline, spacing: 1) {
-                    Text("\(vehicle.soc)")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(Theme.label)
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 1) {
+                        Text("\(vehicle.soc)")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Theme.label)
+                            .monospacedDigit()
+                        Text("%")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                    Text("\(vehicle.rangeKm) km")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.tertiary)
                         .monospacedDigit()
-                    Text("%")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
                 }
 
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(selected ? Theme.brand : Theme.tertiary.opacity(0.6))
+                    .foregroundStyle(selected ? Theme.brand : Theme.tertiary.opacity(0.55))
             }
-            .padding(14)
-            .frame(minHeight: 76)
+            .padding(12)
             .background(
-                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                    .fill(selected ? Theme.brand.opacity(0.06) : Theme.surface)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(selected ? Theme.brand.opacity(0.07) : Theme.surface)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                    .strokeBorder(selected ? Theme.brand.opacity(0.32) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(selected ? Theme.brand.opacity(0.35) : Theme.separator.opacity(0.4), lineWidth: 0.8)
             )
-            .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
         }
         .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
         .accessibilityAddTraits(selected ? AccessibilityTraits.isSelected : AccessibilityTraits())
@@ -93,9 +118,8 @@ struct VehiclePickerSheet: View {
 
     private func thumb(_ vehicle: Vehicle) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Theme.surfaceAlt)
-
             if let url = vehicle.imageURL {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
@@ -108,12 +132,12 @@ struct VehiclePickerSheet: View {
                 placeholder
             }
         }
-        .frame(width: 58, height: 58)
+        .frame(width: 64, height: 52)
     }
 
     private var placeholder: some View {
         Image(systemName: "bolt.car")
-            .font(.system(size: 24, weight: .regular))
+            .font(.system(size: 22, weight: .regular))
             .foregroundStyle(Theme.tertiary)
     }
 }

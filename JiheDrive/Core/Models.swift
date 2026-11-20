@@ -3,6 +3,8 @@ import Foundation
 struct Vehicle: Identifiable, Hashable {
     let vinNo: String
     let name: String
+    /// 车型名（vehicleTypeName / modelName）
+    let modelName: String?
     let soc: Int
     let rangeKm: Int
     let totalMileKm: Double
@@ -21,6 +23,8 @@ struct Vehicle: Identifiable, Hashable {
     let address: String?
     let imageURL: URL?
     let monthMileage: String?
+    /// 本月骑行时长（分钟文案）
+    let monthRideMinutes: String?
     /// 胎压，统一换算成 kPa 存，展示时除 100 得到 bar
     let tireFrontKpa: Double?
     let tireRearKpa: Double?
@@ -32,10 +36,49 @@ struct Vehicle: Identifiable, Hashable {
     let model3DURL: URL?
     /// 仪表壁纸轮廓（subjectWallpaperConfig）
     let wallpaperOutlines: WallpaperOutlines?
+    /// 是否车主（carMaster != "0"）
+    let isCarMaster: Bool
+    let shareNickName: String?
 
     var id: String { vinNo }
 
+    /// 分享车辆（非车主）
+    var isShared: Bool { !isCarMaster }
+
     var hasTirePressure: Bool { tireFrontKpa != nil || tireRearKpa != nil }
+
+    func withLocked(_ locked: Bool) -> Vehicle {
+        Vehicle(
+            vinNo: vinNo,
+            name: name,
+            modelName: modelName,
+            soc: soc,
+            rangeKm: rangeKm,
+            totalMileKm: totalMileKm,
+            isOnline: isOnline,
+            onlineKnown: onlineKnown,
+            isLocked: locked,
+            isCharging: isCharging,
+            signalLevel: signalLevel,
+            signalText: signalText,
+            latitude: latitude,
+            longitude: longitude,
+            locationTime: locationTime,
+            address: address,
+            imageURL: imageURL,
+            monthMileage: monthMileage,
+            monthRideMinutes: monthRideMinutes,
+            tireFrontKpa: tireFrontKpa,
+            tireRearKpa: tireRearKpa,
+            voltage: voltage,
+            temperature: temperature,
+            cycleCount: cycleCount,
+            model3DURL: model3DURL,
+            wallpaperOutlines: wallpaperOutlines,
+            isCarMaster: isCarMaster,
+            shareNickName: shareNickName
+        )
+    }
 
     /// 接口给的是 glb/gltf 时用 model-viewer 渲染
     var isGLBModel: Bool {
@@ -56,6 +99,7 @@ struct Vehicle: Identifiable, Hashable {
         Vehicle(
             vinNo: vinNo,
             name: detail.name == "我的车辆" ? name : detail.name,
+            modelName: detail.modelName ?? modelName,
             soc: detail.soc > 0 ? detail.soc : soc,
             rangeKm: detail.rangeKm > 0 ? detail.rangeKm : rangeKm,
             totalMileKm: detail.totalMileKm > 0 ? detail.totalMileKm : totalMileKm,
@@ -72,13 +116,16 @@ struct Vehicle: Identifiable, Hashable {
             address: detail.address ?? address,
             imageURL: detail.imageURL ?? imageURL,
             monthMileage: detail.monthMileage ?? monthMileage,
+            monthRideMinutes: detail.monthRideMinutes ?? monthRideMinutes,
             tireFrontKpa: detail.tireFrontKpa ?? tireFrontKpa,
             tireRearKpa: detail.tireRearKpa ?? tireRearKpa,
             voltage: detail.voltage ?? voltage,
             temperature: detail.temperature ?? temperature,
             cycleCount: detail.cycleCount ?? cycleCount,
             model3DURL: detail.model3DURL ?? model3DURL,
-            wallpaperOutlines: detail.wallpaperOutlines ?? wallpaperOutlines
+            wallpaperOutlines: detail.wallpaperOutlines ?? wallpaperOutlines,
+            isCarMaster: isCarMaster && detail.isCarMaster,
+            shareNickName: detail.shareNickName ?? shareNickName
         )
     }
 }
@@ -148,7 +195,8 @@ extension Vehicle {
         let location = json["location"] as? [String: Any]
 
         self.vinNo = vin
-        self.name = Self.firstString(json, keys: ["vehicleName", "vehicleTypeName", "modelName", "deviceName", "name"]) ?? "我的车辆"
+        self.name = Self.firstString(json, keys: ["vehicleName", "deviceName", "name"]) ?? "我的车辆"
+        self.modelName = Self.firstString(json, keys: ["vehicleTypeName", "modelName", "vehicleType"])
         self.soc = Self.intValue(json["bmssoc"] ?? iot["BMSSOC"] ?? iot["bmssoc"])
         self.rangeKm = Self.intValue(json["hmiRidableMile"] ?? iot["HMIRidableMile"] ?? iot["hmiRidableMile"])
         self.totalMileKm = Self.doubleValue(json["totalRideMile"] ?? iot["TotalRideMile"]) ?? 0
@@ -157,6 +205,12 @@ extension Vehicle {
         self.onlineKnown = online != nil
         self.isLocked = Self.lockState(json, iot)
         self.isCharging = Self.chargingState(json, iot)
+        // carMaster "0" = 被分享；sharedFlag "1" + 昵称也当分享车
+        let master = Self.firstString(json, keys: ["carMaster"]) ?? "1"
+        let sharedFlag = Self.firstString(json, keys: ["sharedFlag"])
+        let nick = Self.firstString(json, keys: ["shareNickName"])
+        self.shareNickName = nick
+        self.isCarMaster = master != "0" && !(sharedFlag == "1" && (nick?.isEmpty == false))
         // 格数用 gsmRxLevel；gsmRxLev 是 dBm（常为负），不能当格数
         self.signalLevel = Self.signalBars(
             json["gsmRxLevel"] ?? iot["GSMRxLevel"] ?? json["gsmRxLevValue"]
@@ -174,6 +228,7 @@ extension Vehicle {
         ]) ?? location?["address"] as? String
         self.imageURL = Self.firstString(json, keys: ["customImage", "vehicleScalePicUrl", "vehiclePicUrl", "vehicleBackPicUrl", "pic", "imageUrl"]).flatMap(URL.init(string:))
         self.monthMileage = Self.dashValue(json["rideMileageMonth"])
+        self.monthRideMinutes = Self.dashValue(json["ridingTimeMonthUnitMinute"])
         let fields = Self.merge(json, iot)
         self.tireFrontKpa = Self.pressure(json, iot, keys: [
             "frontTirePressure", "frontTyrePressure", "tirePressureFront",

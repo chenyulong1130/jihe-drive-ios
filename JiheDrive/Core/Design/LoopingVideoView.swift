@@ -100,8 +100,14 @@ final class LoopingPlayerView: UIView {
 
         let asset = AVURLAsset(url: url)
         let item = AVPlayerItem(asset: asset)
+        // 不限峰值码率，避免主题视频被压糊
+        item.preferredPeakBitRate = 0
+        if #available(iOS 15.0, *) {
+            item.preferredMaximumResolution = .zero
+        }
         let player = AVQueuePlayer()
         player.isMuted = muted
+        player.volume = 0
         player.actionAtItemEnd = .advance
         player.automaticallyWaitsToMinimizeStalling = false
         player.preventsDisplaySleepDuringVideoPlayback = false

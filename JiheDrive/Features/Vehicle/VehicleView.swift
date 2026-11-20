@@ -14,6 +14,8 @@ struct VehicleView: View {
     @State private var toast: String?
 
     @State private var rideExtra: RideTrackService.RideExtra?
+    @State private var resolvedAddress: String?
+    @StateObject private var signin = SigninStore()
 
     @State private var showMap = false
     @State private var showPicker = false
@@ -26,6 +28,7 @@ struct VehicleView: View {
     @State private var showDetail = false
     @State private var showSettings = false
     @State private var showReplay = false
+    @State private var showSigninDetail = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -84,19 +87,33 @@ struct VehicleView: View {
         .fullScreenCover(isPresented: $showReplay) {
             RideHomeView(showsClose: true)
         }
+        .sheet(isPresented: $showSigninDetail) {
+            SigninDetailSheet()
+                .environmentObject(signin)
+        }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
             // 切车先清掉上一台的模型，避免画面短暂串车
             heroGLB = nil
             model3D.clear()
             rideExtra = nil
+            resolvedAddress = nil
             await loadHeroModel()
             async let battery: Void = model.loadBattery(vin: vin)
             async let detail: Void = model.loadDetail(vin: vin)
             async let tire: Void = model.loadTire(vin: vin)
-            _ = await (battery, detail, tire)
+            async let sign: Void = signin.refresh()
+            _ = await (battery, detail, tire, sign)
             await loadHeroModel()
             await loadRideSummary(vin: vin)
+            await resolveAddressIfNeeded()
+            WidgetSnapshot.publish(from: model, signin: signin)
+        }
+        .onChange(of: model.selectedVehicle?.latitude) { _, _ in
+            Task { await resolveAddressIfNeeded() }
+        }
+        .onChange(of: model.selectedVehicle?.longitude) { _, _ in
+            Task { await resolveAddressIfNeeded() }
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             guard oldPhase == .background, newPhase == .active else { return }
@@ -120,7 +137,7 @@ struct VehicleView: View {
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             topInset: proxy.safeAreaInsets.top + 10,
-            height: max(420, fullHeight * 0.52),
+            height: max(420, fullHeight * 0.50),
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -129,11 +146,19 @@ struct VehicleView: View {
                 }
             },
             onOpenDashboardWallpaper: {
-                showDashboardWallpaper = true
+                if vehicle.isCarMaster {
+                    showDashboardWallpaper = true
+                } else {
+                    showToast("分享车辆暂不支持仪表壁纸")
+                }
             },
             onOpenTheme: {
-                themeFocus = .theme
-                showTheme = true
+                if vehicle.isCarMaster {
+                    themeFocus = .theme
+                    showTheme = true
+                } else {
+                    showToast("分享车辆暂不支持主题")
+                }
             },
             onOpenCushion: {
                 run("cushion") { try await model.openCushion(vehicle) }
@@ -176,11 +201,18 @@ struct VehicleView: View {
     // MARK: - 内容面板
 
     private func content(_ vehicle: Vehicle) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 8) {
             actionDock(vehicle)
+            if vehicle.isShared {
+                sharedHint
+            }
             duoCards(vehicle)
             ridingCard(vehicle)
             batteryCard(vehicle)
+            SigninPanel(
+                store: signin,
+                onMore: { showSigninDetail = true }
+            )
 
             if let error = model.errorMessage {
                 SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
@@ -264,11 +296,15 @@ struct VehicleView: View {
             sideActionCard(
                 icon: "gearshape.fill",
                 title: "设置",
-                hint: "车辆控制",
+                hint: vehicle.isCarMaster ? "车辆控制" : "共享不可用",
                 tint: Theme.brand,
                 busy: false
             ) {
-                showSettings = true
+                if vehicle.isCarMaster {
+                    showSettings = true
+                } else {
+                    showToast("分享车辆暂不支持车辆设置")
+                }
             }
         }
         .padding(6)
@@ -331,85 +367,83 @@ struct VehicleView: View {
         .disabled(self.busy != nil)
     }
 
+    /// 对齐 Flutter / 小程序：横向大按钮「一键解锁 / 点击关锁」
     private func unlockButton(_ vehicle: Vehicle) -> some View {
         let locked = vehicle.isLocked
         let online = vehicle.isOnline
-        let accent = locked ? Theme.unlock : Theme.lock
-        let colors: [Color] = locked
-            ? [Color(hex: 0x34C759).mixed(with: .white, amount: 0.12), Color(hex: 0x248A3D)]
-            : [Color(hex: 0xFF9F0A).mixed(with: .white, amount: 0.16), Color(hex: 0xD97706)]
+        let loading = busy == "lock"
+        let accent = locked ? Color(hex: 0x30D158) : Color(hex: 0xFF9F0A)
 
         return Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             let queued = !online
             run(
                 "lock",
-                success: queued ? "车辆离线，指令已排队" : (locked ? "已发送解锁指令" : "已发送锁车指令")
+                success: queued
+                    ? "车辆离线，指令已排队"
+                    : (locked ? "开锁指令已发送" : "关锁指令已发送")
             ) {
                 try await model.toggleLock(vehicle)
             }
         } label: {
-            VStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(Color.white.opacity(0.2))
-                        .frame(width: 44, height: 44)
-                    if busy == "lock" {
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 40, height: 40)
+                    if loading {
                         ProgressView()
                             .progressViewStyle(.circular)
                             .tint(.white)
-                            .scaleEffect(0.9)
+                            .scaleEffect(0.85)
                     } else {
-                        Image(systemName: locked ? "lock.open.fill" : "lock.fill")
+                        Image(systemName: locked ? "lock.fill" : "lock.open.fill")
                             .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
                             .contentTransition(.symbolEffect(.replace))
                     }
                 }
 
-                Text(locked ? "解锁" : "关锁")
-                    .font(.system(size: 15, weight: .bold))
-                Text(online ? (locked ? "已关锁" : "未关锁") : "离线排队")
-                    .font(.system(size: 10, weight: .medium))
-                    .opacity(0.85)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(loading ? "请求中…" : (locked ? "一键解锁" : "点击关锁"))
+                        .font(.system(size: 16, weight: .heavy))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(online ? (locked ? "车辆已关锁" : "车辆未关锁") : "离线 · 指令将排队")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
-            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
             .frame(maxWidth: .infinity)
-            .frame(height: 86)
+            .frame(height: 78)
             .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: colors,
+                            colors: [accent.opacity(0.95), accent.opacity(0.78)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
-                    }
-                    .overlay(alignment: .top) {
-                        // 在线指示：右上角小点
-                        Circle()
-                            .fill(online ? Color.white : Color.white.opacity(0.35))
-                            .frame(width: 7, height: 7)
-                            .padding(10)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                            .allowsHitTesting(false)
-                    }
             }
-            .shadow(color: accent.opacity(0.34), radius: 14, x: 0, y: 7)
+            .shadow(color: accent.opacity(0.28), radius: 14, x: 0, y: 6)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.02))
+        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.03))
         .disabled(busy != nil)
         .animation(Motion.spring, value: locked)
         .animation(Motion.quick, value: online)
+        .accessibilityLabel(locked ? "一键解锁" : "点击关锁")
     }
 
     // MARK: - 位置 / 骑行
 
     private func duoCards(_ vehicle: Vehicle) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             locationCard(vehicle)
             rideCard(vehicle)
         }
@@ -641,6 +675,28 @@ struct VehicleView: View {
         }
     }
 
+    private var sharedHint: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("共享车辆")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Text("主题、仪表壁纸与车辆设置仅车主可用")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.orange.opacity(0.08))
+        }
+    }
+
     // MARK: - 我的骑行
 
     private func ridingCard(_ vehicle: Vehicle) -> some View {
@@ -666,8 +722,8 @@ struct VehicleView: View {
 
                 HStack(spacing: 0) {
                     ridingMetric(
-                        value: formatTodayDuration(),
-                        label: "今日时长"
+                        value: vehicle.monthRideMinutes ?? formatTodayDuration(),
+                        label: "本月时长"
                     )
                     Rectangle()
                         .fill(Theme.separator)
@@ -681,7 +737,7 @@ struct VehicleView: View {
                         .fill(Theme.separator)
                         .frame(width: 0.5, height: 36)
                     ridingMetric(
-                        value: String(format: "%.0f", vehicle.totalMileKm),
+                        value: vehicle.totalMileKm > 0 ? String(format: "%.0f", vehicle.totalMileKm) : "—",
                         unit: "km",
                         label: "总里程"
                     )
@@ -830,8 +886,30 @@ struct VehicleView: View {
 
     private func locationLabel(_ vehicle: Vehicle) -> String {
         guard vehicle.coordinate != nil else { return "未上报位置" }
-        if let address = vehicle.address, !address.isEmpty { return address }
-        return "已定位 · 点击查看地图"
+        if let address = AmapGeocode.readableAddress(resolvedAddress)
+            ?? AmapGeocode.readableAddress(vehicle.address) {
+            return address
+        }
+        return "定位中…"
+    }
+
+    private func resolveAddressIfNeeded() async {
+        guard let vehicle = model.selectedVehicle,
+              let coord = vehicle.coordinate else {
+            resolvedAddress = nil
+            return
+        }
+        if let existing = AmapGeocode.readableAddress(vehicle.address) {
+            resolvedAddress = existing
+            return
+        }
+        if let cached = AmapGeocode.readableAddress(resolvedAddress) {
+            return
+        }
+        resolvedAddress = await AmapGeocode.reverse(
+            longitude: coord.longitude,
+            latitude: coord.latitude
+        )
     }
 
     private func shortTime(_ raw: String?) -> String {

@@ -16,6 +16,8 @@ struct BatterySheet: View {
         ) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 12) {
+                    overviewHero
+
                     if model.batteryLoading && model.batteries.isEmpty {
                         loading
                     } else if let error = model.batteryError, model.batteries.isEmpty {
@@ -23,16 +25,14 @@ struct BatterySheet: View {
                         fallbackCard
                     } else if model.batteries.isEmpty {
                         fallbackCard
-                    } else {
-                        if let first = model.batteries.first {
-                            mainCard(first)
-                            metrics(first)
-                            if let abnormal = first.abnormal {
-                                banner("电池异常：\(abnormal)")
-                            }
-                            if first.isPulledOut {
-                                banner("检测到电池被拔出")
-                            }
+                    } else if let first = model.batteries.first {
+                        metrics(first)
+                        healthCard(first)
+                        if let abnormal = first.abnormal {
+                            banner("电池异常：\(abnormal)")
+                        }
+                        if first.isPulledOut {
+                            banner("检测到电池被拔出")
                         }
                         if model.batteries.count > 1 {
                             listCard
@@ -46,8 +46,97 @@ struct BatterySheet: View {
             }
             .refreshable { await load() }
         }
-        .sheetChrome(detents: [.medium, .large])
+        .sheetChrome(detents: [.large])
         .task { await load() }
+    }
+
+    // MARK: - 概览 Hero
+
+    private var overviewHero: some View {
+        let battery = model.batteries.first
+        let level = min(max(battery?.level ?? vehicle.soc, 0), 100)
+        let charging = battery?.isCharging ?? vehicle.isCharging
+        let tint = charging ? Theme.green : Theme.brand
+
+        return AppleCard {
+            VStack(spacing: 14) {
+                HStack(alignment: .center, spacing: 16) {
+                    ZStack {
+                        RingProgress(
+                            progress: Double(level) / 100,
+                            color: tint,
+                            track: Theme.surfaceAlt,
+                            lineWidth: 10,
+                            size: 108
+                        )
+                        VStack(spacing: 0) {
+                            Text("\(level)")
+                                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Theme.label)
+                                .monospacedDigit()
+                            Text("%")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.secondary)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        StatusPill(
+                            text: charging ? "充电中" : (battery?.stateText ?? "待机"),
+                            color: tint,
+                            pulsing: charging
+                        )
+                        Text("预计续航")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text("\(vehicle.rangeKm)")
+                                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Theme.label)
+                                .monospacedDigit()
+                            Text("km")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.tertiary)
+                        }
+                        Text(battery?.type ?? "动力电池")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func healthCard(_ battery: BatteryInfo) -> some View {
+        AppleCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("健康状态")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+
+                InfoRow(title: "充放电状态", value: battery.stateText)
+                InfoRow(
+                    title: "循环次数",
+                    value: (battery.cycleCount ?? vehicle.cycleCount).map { "\($0) 次" } ?? "—"
+                )
+                InfoRow(
+                    title: "额定容量",
+                    value: battery.capacity.map { String(format: "%.0f Ah", $0) } ?? "—"
+                )
+                InfoRow(
+                    title: "充满预估",
+                    value: battery.chargeMinutes.map { "\($0) 分钟" }
+                        ?? chargeEstimateText(battery.fullChargeText).map { "\($0) 分钟" }
+                        ?? "—"
+                )
+                if battery.isPulledOut {
+                    Text("传感器检测到电池可能已拔出")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.orange)
+                }
+            }
+        }
     }
 
     // MARK: - 主卡

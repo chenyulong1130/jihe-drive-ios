@@ -16,11 +16,13 @@ struct DashboardWallpaperSheet: View {
     @State private var uploading = false
     @State private var selected: DashboardWallpaperItem?
     @State private var deleting = false
+    @State private var draftImage: UIImage?
+    @State private var draftHome: UIImage?
+    @State private var draftSpeed: UIImage?
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
-    ]
+    private var outlines: WallpaperOutlines {
+        (vehicle.wallpaperOutlines ?? .fallback).withFallback()
+    }
 
     var body: some View {
         SheetShell(
@@ -28,26 +30,27 @@ struct DashboardWallpaperSheet: View {
             onClose: { dismiss() }
         ) {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
+                VStack(spacing: 10) {
                     PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
                         HStack(spacing: 10) {
-                            if uploading {
-                                ProgressView().scaleEffect(0.85)
-                            } else {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(Theme.brand)
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Theme.brand)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("制作壁纸")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Theme.label)
+                                Text("选图后先预览仪表轮廓再上传")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.tertiary)
                             }
-                            Text(uploading ? "正在上传…" : "制作并上传")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Theme.label)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(Theme.tertiary)
                         }
                         .padding(.horizontal, 14)
-                        .frame(height: 52)
+                        .padding(.vertical, 12)
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .fill(Theme.surface)
@@ -63,9 +66,13 @@ struct DashboardWallpaperSheet: View {
                         Spacer()
                         if loading {
                             ProgressView().scaleEffect(0.7)
+                        } else {
+                            Text("\(items.count)")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.tertiary)
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 2)
 
                     if let errorText {
                         SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
@@ -76,9 +83,9 @@ struct DashboardWallpaperSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 20)
                     } else {
-                        LazyVGrid(columns: columns, spacing: 10) {
+                        VStack(spacing: 8) {
                             ForEach(items) { item in
-                                wallpaperTile(item)
+                                wallpaperRow(item)
                             }
                         }
                     }
@@ -91,64 +98,160 @@ struct DashboardWallpaperSheet: View {
         .task { await reload() }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
-            Task { await upload(item) }
+            Task { await prepareDraft(item) }
         }
         .sheet(item: $selected) { item in
             wallpaperDetail(item)
         }
+        .sheet(isPresented: Binding(
+            get: { draftImage != nil },
+            set: { if !$0 { clearDraft() } }
+        )) {
+            draftPreviewSheet
+        }
     }
 
-    private func wallpaperTile(_ item: DashboardWallpaperItem) -> some View {
+    private func wallpaperRow(_ item: DashboardWallpaperItem) -> some View {
         Button {
             selected = item
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                ZStack(alignment: .topTrailing) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(hex: 0x1C1C1E))
-                        Group {
-                            if let url = item.homeURL {
-                                AsyncImage(url: url) { phase in
-                                    switch phase {
-                                    case .success(let image):
-                                        image.resizable().scaledToFill()
-                                    default:
-                                        Theme.surfaceAlt
-                                    }
-                                }
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(hex: 0x1C1C1E))
+                    if let url = item.homeURL {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
                             } else {
                                 Theme.surfaceAlt
                             }
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        .padding(5)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 92)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                    )
-
-                    if item.isLive {
-                        Text("仪表使用中")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Theme.green))
-                            .padding(6)
+                    if let outline = (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().homeOutlineURL {
+                        AsyncImage(url: outline) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            }
+                        }
+                        .allowsHitTesting(false)
                     }
                 }
+                .frame(width: 108, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8)
+                )
 
-                Text(item.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.label)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                    if item.isLive {
+                        Text("仪表使用中")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.green)
+                    } else {
+                        Text("云端已保存")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.surface)
+            )
+        }
+        .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+    }
+
+    private var draftPreviewSheet: some View {
+        SheetShell(title: "轮廓预览", subtitle: "确认后再上传到云端", onClose: { clearDraft() }) {
+            ScrollView {
+                VStack(spacing: 14) {
+                    if let home = draftHome {
+                        draftFrame(title: "主页", image: home, outline: outlines.homeOutlineURL, ratio: 1024 / 600)
+                    }
+                    if let speed = draftSpeed {
+                        draftFrame(
+                            title: "速度卡",
+                            image: speed,
+                            outline: outlines.speedOutlineURL,
+                            subject: outlines.speedSubjectURL,
+                            ratio: 307 / 460
+                        )
+                    }
+
+                    Button {
+                        Task { await confirmUpload() }
+                    } label: {
+                        HStack {
+                            if uploading { ProgressView().tint(.white) }
+                            Text(uploading ? "上传中…" : "确认上传")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Theme.brand)
+                        )
+                    }
+                    .disabled(uploading)
+                    .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
+                }
+                .padding(.horizontal, Theme.page)
+                .padding(.bottom, 28)
             }
         }
-        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+        .sheetChrome(detents: [.large])
+    }
+
+    private func draftFrame(
+        title: String,
+        image: UIImage,
+        outline: URL?,
+        subject: URL? = nil,
+        ratio: CGFloat
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.secondary)
+            ZStack {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                if let outline {
+                    AsyncImage(url: outline) { phase in
+                        if let img = phase.image { img.resizable().scaledToFill() }
+                    }
+                    .allowsHitTesting(false)
+                }
+                if let subject {
+                    AsyncImage(url: subject) { phase in
+                        if let img = phase.image { img.resizable().scaledToFill() }
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(ratio, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+            )
+        }
     }
 
     private func wallpaperDetail(_ item: DashboardWallpaperItem) -> some View {
@@ -298,20 +401,33 @@ struct DashboardWallpaperSheet: View {
         }
     }
 
-    private func upload(_ item: PhotosPickerItem) async {
+    private func prepareDraft(_ item: PhotosPickerItem) async {
+        errorText = nil
+        defer { photoItem = nil }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data),
+              let exported = WallpaperExporter.exportAuto(from: image) else {
+            errorText = "图片读取失败"
+            return
+        }
+        draftImage = image
+        draftHome = UIImage(data: exported.home)
+        draftSpeed = UIImage(data: exported.speed)
+    }
+
+    private func clearDraft() {
+        draftImage = nil
+        draftHome = nil
+        draftSpeed = nil
+    }
+
+    private func confirmUpload() async {
+        guard let home = draftHome?.pngData(),
+              let speed = draftSpeed?.pngData() else { return }
         uploading = true
         errorText = nil
-        defer {
-            uploading = false
-            photoItem = nil
-        }
+        defer { uploading = false }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data),
-                  let exported = WallpaperExporter.exportAuto(from: image) else {
-                errorText = "图片读取失败"
-                return
-            }
             let name = WallpaperExporter.nextName(existing: items.map(\.name))
             let res = try await ZeehoClient.shared.postMultipartOrdered(
                 path: "/v1.0/app/cfmotoserverapp/vehicle/wallpaper/save",
@@ -319,9 +435,9 @@ struct DashboardWallpaperSheet: View {
                     .field(name: "vinNo", value: vehicle.vinNo),
                     .field(name: "wallpaperName", value: name),
                     .field(name: "types", value: "2"),
-                    .file(name: "files", filename: "wallpaper_2.png", mime: "image/png", data: exported.home),
+                    .file(name: "files", filename: "wallpaper_2.png", mime: "image/png", data: home),
                     .field(name: "types", value: "1"),
-                    .file(name: "files", filename: "wallpaper_1.png", mime: "image/png", data: exported.speed)
+                    .file(name: "files", filename: "wallpaper_1.png", mime: "image/png", data: speed)
                 ]
             )
             let code = ZeehoClient.codeString(res["code"])
@@ -329,6 +445,7 @@ struct DashboardWallpaperSheet: View {
                 errorText = ZeehoClient.errorText(res) ?? "上传失败"
                 return
             }
+            clearDraft()
             await reload()
         } catch {
             errorText = error.localizedDescription

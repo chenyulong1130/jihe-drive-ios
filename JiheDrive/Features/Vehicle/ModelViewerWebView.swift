@@ -23,13 +23,13 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.isUserInteractionEnabled = interactive
         view.navigationDelegate = context.coordinator
 
-        context.coordinator.load(into: view, glbFile: glbFile, autoRotate: autoRotate)
+        context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         view.isUserInteractionEnabled = interactive
-        context.coordinator.load(into: view, glbFile: glbFile, autoRotate: autoRotate)
+        context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -40,15 +40,18 @@ struct ModelViewerWebView: UIViewRepresentable {
         let scheme = ModelSchemeHandler()
         private var loadedFile: URL?
 
-        func load(into view: WKWebView, glbFile: URL, autoRotate: Bool) {
-            guard loadedFile != glbFile else { return }
+        private var loadedInteractive: Bool?
+
+        func load(into view: WKWebView, glbFile: URL, interactive: Bool, autoRotate: Bool) {
+            guard loadedFile != glbFile || loadedInteractive != interactive else { return }
             guard let data = try? Data(contentsOf: glbFile), data.count > 1024 else { return }
             guard let script = ModelViewerAsset.shared.scriptData else { return }
 
             loadedFile = glbFile
+            loadedInteractive = interactive
             scheme.replace(glb: data, script: script)
 
-            let html = ModelViewerAsset.html(autoRotate: autoRotate)
+            let html = ModelViewerAsset.html(interactive: interactive, autoRotate: autoRotate)
             let base = URL(string: "\(ModelSchemeHandler.scheme)://local/index.html")!
             view.loadHTMLString(html, baseURL: base)
         }
@@ -69,13 +72,15 @@ enum ModelViewerAsset {
         }
     }
 
-    /// 与安卓版 VehicleModelCamera 对齐的相机参数
-    static func html(autoRotate: Bool) -> String {
+    /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
+    static func html(interactive: Bool, autoRotate: Bool) -> String {
         let orbit = "0.28deg 83.06deg 3.086m"
         let target = "-0.02m auto auto"
-        let minOrbit = "auto 83.06deg 2.53m"
-        let maxOrbit = "auto 83.06deg 3.86m"
+        // 可拖拽时放宽方位角；仰角仍锁在约 83°，避免翻车底
+        let minOrbit = interactive ? "auto 70deg 2.2m" : "auto 83.06deg 2.53m"
+        let maxOrbit = interactive ? "auto 95deg 4.2m" : "auto 83.06deg 3.86m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
+        let controls = interactive ? "camera-controls touch-action=\"none\"" : "interaction-prompt=\"none\""
 
         return """
         <!DOCTYPE html>
@@ -88,11 +93,13 @@ enum ModelViewerAsset {
           html, body {
             margin: 0; padding: 0; width: 100%; height: 100%;
             background: transparent; overflow: hidden;
+            touch-action: none;
           }
           model-viewer {
             width: 100%; height: 100%; background: transparent;
             --progress-bar-height: 0px;
             --progress-bar-color: transparent;
+            touch-action: none;
           }
           model-viewer::part(default-progress-bar) { display: none; }
         </style>
@@ -112,6 +119,7 @@ enum ModelViewerAsset {
           environment-image="neutral"
           reveal="auto"
           disable-pan
+          \(controls)
           \(rotation)>
         </model-viewer>
         </body>

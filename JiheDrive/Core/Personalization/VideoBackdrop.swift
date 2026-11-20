@@ -76,17 +76,24 @@ final class VideoBackdropStore: ObservableObject {
         let target = folder.appendingPathComponent("vehicle-backdrop.tmp.mp4")
         try? FileManager.default.removeItem(at: target)
 
-        if let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPreset1920x1080) {
+        // 优先最高画质；失败再退 1080p；再失败原样拷贝
+        let presets = [AVAssetExportPresetHighestQuality, AVAssetExportPreset1920x1080, AVAssetExportPresetPassthrough]
+        var exported = false
+        for preset in presets {
+            guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            try? FileManager.default.removeItem(at: target)
             session.outputURL = target
             session.outputFileType = .mp4
-            session.shouldOptimizeForNetworkUse = true
+            session.shouldOptimizeForNetworkUse = false
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 session.exportAsynchronously { continuation.resume() }
             }
-            guard session.status == .completed else {
-                throw BackdropError.exportFailed
+            if session.status == .completed {
+                exported = true
+                break
             }
-        } else {
+        }
+        if !exported {
             try FileManager.default.copyItem(at: source, to: target)
         }
 

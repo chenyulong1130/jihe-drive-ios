@@ -168,59 +168,24 @@ struct TireSheet: View {
         return "正常"
     }
 
-    // MARK: - 压力区间
+    // MARK: - 压力区间（每轮一行刻度，避免针脚叠在一起）
 
     private var gaugeCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("压力区间")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.label)
                 Spacer()
-                Text("量程 0 – 4.0 bar")
-                    .font(.system(size: 11))
+                Text("安全 1.9 – 3.2 bar")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
             }
 
-            GeometryReader { geo in
-                let width = geo.size.width
-                ZStack(alignment: .leading) {
-                    HStack(spacing: 0) {
-                        zone(color: Theme.orange.opacity(0.55), label: "偏低", width: width * (1.9 / 4.0))
-                        zone(color: Theme.green.opacity(0.55), label: "安全", width: width * ((3.2 - 1.9) / 4.0))
-                        zone(color: Theme.orange.opacity(0.55), label: "偏高", width: width * ((4.0 - 3.2) / 4.0))
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    ForEach(wheels) { wheel in
-                        let x = min(max(wheel.pressure / 4.0, 0), 1) * width
-                        VStack(spacing: 2) {
-                            Text(String(format: "%.1f", wheel.pressure))
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(wheel.label == "前轮" ? Theme.brand : Theme.orange)
-                                .monospacedDigit()
-                            Capsule()
-                                .fill(wheel.label == "前轮" ? Theme.brand : Theme.orange)
-                                .frame(width: 3, height: 28)
-                        }
-                        .offset(x: x - 12)
-                    }
+            VStack(spacing: 14) {
+                ForEach(wheels) { wheel in
+                    wheelGauge(wheel)
                 }
-            }
-            .frame(height: 44)
-
-            HStack {
-                ForEach(["0", "1.0", "2.0", "3.0", "4.0"], id: \.self) { tick in
-                    Text(tick)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            HStack(spacing: 16) {
-                legend(color: Theme.brand, text: "前轮")
-                legend(color: Theme.orange, text: "后轮")
             }
         }
         .padding(14)
@@ -230,22 +195,81 @@ struct TireSheet: View {
         }
     }
 
-    private func zone(color: Color, label: String, width: CGFloat) -> some View {
-        ZStack {
-            color
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
-        }
-        .frame(width: max(1, width), height: 28)
-    }
+    private func wheelGauge(_ wheel: WheelReading) -> some View {
+        let ok = wheel.isOk(low: lowBar, high: highBar)
+        let tint: Color = {
+            if wheel.pressure < lowBar { return Theme.orange }
+            if wheel.pressure > highBar { return Theme.red }
+            return wheel.label == "前轮" ? Theme.brand : Color(hex: 0xFF8A3D)
+        }()
+        let scaleMax: Double = 4.0
 
-    private func legend(color: Color, text: String) -> some View {
-        HStack(spacing: 5) {
-            Circle().fill(color).frame(width: 7, height: 7)
-            Text(text)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.secondary)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(wheel.label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Spacer()
+                Text(statusText(wheel))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(ok ? Theme.green : Theme.orange)
+                Text(String(format: "%.1f bar", wheel.pressure))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(ok ? Theme.label : tint)
+                    .monospacedDigit()
+            }
+
+            GeometryReader { geo in
+                let w = geo.size.width
+                let lowX = w * CGFloat(lowBar / scaleMax)
+                let highX = w * CGFloat(highBar / scaleMax)
+                let needle = min(max(CGFloat(wheel.pressure / scaleMax), 0), 1) * w
+
+                ZStack(alignment: .leading) {
+                    // 三段色带：偏低 / 安全 / 偏高
+                    HStack(spacing: 0) {
+                        Capsule()
+                            .fill(Theme.orange.opacity(0.28))
+                            .frame(width: max(4, lowX))
+                        Capsule()
+                            .fill(Theme.green.opacity(0.42))
+                            .frame(width: max(4, highX - lowX))
+                        Capsule()
+                            .fill(Theme.red.opacity(0.28))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .frame(height: 12)
+                    .clipShape(Capsule())
+
+                    // 刻度竖线
+                    ForEach([lowBar, highBar], id: \.self) { mark in
+                        Rectangle()
+                            .fill(Color.white.opacity(0.85))
+                            .frame(width: 1.5, height: 16)
+                            .offset(x: w * CGFloat(mark / scaleMax) - 0.75)
+                    }
+
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 18, height: 18)
+                        .overlay(Circle().strokeBorder(Color.white, lineWidth: 2.5))
+                        .shadow(color: tint.opacity(0.4), radius: 5, y: 1)
+                        .offset(x: max(0, min(w - 18, needle - 9)))
+                }
+            }
+            .frame(height: 18)
+
+            HStack {
+                Text("偏低")
+                    .foregroundStyle(Theme.orange)
+                Spacer()
+                Text("1.9 安全区 3.2")
+                    .foregroundStyle(Theme.green)
+                Spacer()
+                Text("偏高")
+                    .foregroundStyle(Theme.red)
+            }
+            .font(.system(size: 10, weight: .semibold))
         }
     }
 

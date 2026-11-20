@@ -14,6 +14,13 @@ enum VehicleSettingKind {
     case action
 }
 
+enum VehicleSettingEndpoint {
+    case property
+    case soundSize
+    case lowPower
+    case motoPlay
+}
+
 struct VehicleSettingItem: Identifiable {
     let key: String
     let title: String
@@ -22,6 +29,7 @@ struct VehicleSettingItem: Identifiable {
     var version: String = "v2"
     let kind: VehicleSettingKind
     let readKeys: [String]
+    var endpoint: VehicleSettingEndpoint = .property
 
     var id: String { key }
 }
@@ -149,6 +157,213 @@ enum VehicleSettingsService {
                 kind: .action,
                 readKeys: []
             )
+        ]),
+        VehicleSettingGroup(title: "快捷键", items: [
+            VehicleSettingItem(
+                key: "customButtonSingle",
+                title: "自定义按键（单击）",
+                desc: "按下车上自定义键时执行的功能",
+                cmd: "142",
+                kind: .select([
+                    VehicleSettingOption(value: "7", label: "切换信息组"),
+                    VehicleSettingOption(value: "1", label: "Hello 音效"),
+                    VehicleSettingOption(value: "3", label: "解锁坐垫"),
+                    VehicleSettingOption(value: "10", label: "静音切换"),
+                    VehicleSettingOption(value: "19", label: "陡坡缓降"),
+                    VehicleSettingOption(value: "20", label: "音量增减"),
+                    VehicleSettingOption(value: "31", label: "无操作")
+                ]),
+                readKeys: ["customButtonSingle", "customButton"]
+            )
+        ]),
+        VehicleSettingGroup(title: "安防", items: [
+            VehicleSettingItem(
+                key: "inducedVibration",
+                title: "震动防盗报警",
+                desc: "调整震动报警灵敏度",
+                cmd: "61",
+                kind: .select([
+                    VehicleSettingOption(value: "0", label: "微弱"),
+                    VehicleSettingOption(value: "1", label: "标准"),
+                    VehicleSettingOption(value: "2", label: "灵敏"),
+                    VehicleSettingOption(value: "3", label: "关闭")
+                ]),
+                readKeys: ["inducedVibration"]
+            ),
+            VehicleSettingItem(
+                key: "automaticShutdownSwitch",
+                title: "超时关机保护",
+                desc: "长时间停放自动关机，防止电池耗尽",
+                cmd: "103",
+                kind: .toggle,
+                readKeys: ["automaticShutdownSwitch"]
+            ),
+            VehicleSettingItem(
+                key: "automaticShutdownTimeout",
+                title: "超时关机时间",
+                desc: "触发自动关机的等待时长",
+                cmd: "108",
+                kind: .select([
+                    VehicleSettingOption(value: "5", label: "5 分钟"),
+                    VehicleSettingOption(value: "10", label: "10 分钟"),
+                    VehicleSettingOption(value: "20", label: "20 分钟"),
+                    VehicleSettingOption(value: "30", label: "30 分钟"),
+                    VehicleSettingOption(value: "60", label: "60 分钟")
+                ]),
+                readKeys: ["automaticShutdownTimeout"]
+            ),
+            VehicleSettingItem(
+                key: "automaticShutdown",
+                title: "离车关机",
+                desc: "离开车辆后自动关机",
+                cmd: "32",
+                kind: .toggle,
+                readKeys: ["automaticShutdown"]
+            ),
+            VehicleSettingItem(
+                key: "leaveOffTime",
+                title: "离车关机时长",
+                desc: "离开后等待多久关机",
+                cmd: "33",
+                kind: .select([
+                    VehicleSettingOption(value: "3", label: "3 秒"),
+                    VehicleSettingOption(value: "5", label: "5 秒"),
+                    VehicleSettingOption(value: "10", label: "10 秒"),
+                    VehicleSettingOption(value: "30", label: "30 秒"),
+                    VehicleSettingOption(value: "60", label: "60 秒"),
+                    VehicleSettingOption(value: "120", label: "120 秒")
+                ]),
+                readKeys: ["leaveOffTime"]
+            ),
+            VehicleSettingItem(
+                key: "emergencyBrakeFlash",
+                title: "急刹双闪",
+                desc: "急刹时灯光快速闪烁提醒后车",
+                cmd: "107",
+                kind: .toggle,
+                readKeys: ["emergencyBrakeFlash"]
+            )
+        ]),
+        VehicleSettingGroup(title: "感应", items: [
+            VehicleSettingItem(
+                key: "cushionSensor",
+                title: "座垫感应",
+                desc: "坐垫受压后才可进入骑行状态",
+                cmd: "66",
+                kind: .toggle,
+                readKeys: ["cushionSensor", "ecushionSensor"]
+            ),
+            VehicleSettingItem(
+                key: "edgeSupportSensing",
+                title: "边撑感应",
+                desc: "检测边撑是否收起，未收起不可骑行",
+                cmd: "73",
+                kind: .toggle,
+                readKeys: ["edgeSupportSensing"]
+            )
+        ]),
+        VehicleSettingGroup(title: "灯光", items: [
+            VehicleSettingItem(
+                key: "comeHomeWithYou",
+                title: "伴我回家",
+                desc: "关机后大灯延时熄灭",
+                cmd: "56",
+                kind: .toggle,
+                readKeys: ["comeHomeWithYou"]
+            ),
+            VehicleSettingItem(
+                key: "comeHomeWithYouTime",
+                title: "延时关灯",
+                desc: "大灯延时关闭时间",
+                cmd: "58",
+                kind: .select([
+                    VehicleSettingOption(value: "3", label: "3 秒"),
+                    VehicleSettingOption(value: "10", label: "10 秒"),
+                    VehicleSettingOption(value: "30", label: "30 秒"),
+                    VehicleSettingOption(value: "60", label: "60 秒"),
+                    VehicleSettingOption(value: "120", label: "120 秒")
+                ]),
+                readKeys: ["comeHomeWithYouTime"]
+            )
+        ]),
+        VehicleSettingGroup(title: "仪表", items: [
+            VehicleSettingItem(
+                key: "mileageUnit",
+                title: "里程单位",
+                desc: nil,
+                cmd: "2",
+                kind: .select([
+                    VehicleSettingOption(value: "1", label: "公制 km"),
+                    VehicleSettingOption(value: "2", label: "英制 mile")
+                ]),
+                readKeys: ["mileageUnit"]
+            ),
+            VehicleSettingItem(
+                key: "temperatureUnit",
+                title: "温度单位",
+                desc: nil,
+                cmd: "3",
+                kind: .select([
+                    VehicleSettingOption(value: "1", label: "摄氏度 ℃"),
+                    VehicleSettingOption(value: "2", label: "华氏度 ℉")
+                ]),
+                readKeys: ["temperatureUnit"]
+            ),
+            VehicleSettingItem(
+                key: "timeFormat",
+                title: "时间格式",
+                desc: nil,
+                cmd: "5",
+                kind: .select([
+                    VehicleSettingOption(value: "1", label: "12 小时制"),
+                    VehicleSettingOption(value: "2", label: "24 小时制")
+                ]),
+                readKeys: ["timeFormat"]
+            )
+        ]),
+        VehicleSettingGroup(title: "音效", items: [
+            VehicleSettingItem(
+                key: "soundEffectSetting.soundSize",
+                title: "音量",
+                desc: "提示音音量大小",
+                cmd: "",
+                kind: .select([
+                    VehicleSettingOption(value: "0", label: "静音"),
+                    VehicleSettingOption(value: "20", label: "20"),
+                    VehicleSettingOption(value: "40", label: "40"),
+                    VehicleSettingOption(value: "60", label: "60"),
+                    VehicleSettingOption(value: "80", label: "80"),
+                    VehicleSettingOption(value: "100", label: "100")
+                ]),
+                readKeys: ["soundEffectSetting.soundSize", "soundSize"],
+                endpoint: .soundSize
+            )
+        ]),
+        VehicleSettingGroup(title: "电池", items: [
+            VehicleSettingItem(
+                key: "lowPower",
+                title: "低电量提醒",
+                desc: "电量低于该阈值时车辆提醒",
+                cmd: "",
+                kind: .select([
+                    VehicleSettingOption(value: "10", label: "10%"),
+                    VehicleSettingOption(value: "15", label: "15%"),
+                    VehicleSettingOption(value: "20", label: "20%"),
+                    VehicleSettingOption(value: "25", label: "25%"),
+                    VehicleSettingOption(value: "30", label: "30%")
+                ]),
+                readKeys: ["lowPower"],
+                endpoint: .lowPower
+            ),
+            VehicleSettingItem(
+                key: "motoPlay",
+                title: "投屏开关",
+                desc: "仪表画面联动到 App 端展示",
+                cmd: "",
+                kind: .toggle,
+                readKeys: ["motoPlay"],
+                endpoint: .motoPlay
+            )
         ])
     ]
 
@@ -166,17 +381,36 @@ enum VehicleSettingsService {
     }
 
     static func write(vin: String, item: VehicleSettingItem, value: String) async throws {
-        let body: [String: Any] = [
-            "commond": item.cmd,
-            "commondParam": value,
-            "relatedFunctions": NSNull(),
-            "vcu": vin,
-            "version": item.version
-        ]
-        let response = try await ZeehoClient.shared.put(
-            "/v1.0/app/cfmotoserverapp/vehicleSet/propertyOne/one",
-            body: body
-        )
+        let response: [String: Any]
+        switch item.endpoint {
+        case .soundSize:
+            let size = min(100, max(0, Int(value) ?? 0))
+            response = try await ZeehoClient.shared.put(
+                "/v1.0/app/cfmotoserverapp/vehicleSet/soundSize",
+                body: ["size": size, "vcu": vin]
+            )
+        case .lowPower:
+            response = try await ZeehoClient.shared.put(
+                "/v1.0/app/cfmotoserverapp/vehicleSet/lowPowerRule/one",
+                body: ["ruleId": "", "value": value, "vcu": vin]
+            )
+        case .motoPlay:
+            response = try await ZeehoClient.shared.put(
+                "/v1.0/app/cfmotoserverapp/vehicleSet/motoPlay/one",
+                body: ["vinNo": vin, "motoPlay": value == "1" ? 1 : 0]
+            )
+        case .property:
+            response = try await ZeehoClient.shared.put(
+                "/v1.0/app/cfmotoserverapp/vehicleSet/propertyOne/one",
+                body: [
+                    "commond": item.cmd,
+                    "commondParam": value,
+                    "relatedFunctions": NSNull(),
+                    "vcu": vin,
+                    "version": item.version
+                ]
+            )
+        }
         let code = ZeehoClient.codeString(response["code"])
         if !code.isEmpty, code != "10000" {
             throw VehicleSettingError.message(
@@ -267,8 +501,7 @@ final class VehicleSettingsStore: ObservableObject {
         guard !vin.isEmpty, busyKey == nil else { return }
         busyKey = item.key
         let previous = raw
-        let key = item.readKeys.first ?? item.key
-        raw[key] = value
+        applyOptimistic(key: item.readKeys.first ?? item.key, value: value)
 
         do {
             try await VehicleSettingsService.write(vin: vin, item: item, value: value)
@@ -277,5 +510,20 @@ final class VehicleSettingsStore: ObservableObject {
             self.error = failure.localizedDescription
         }
         busyKey = nil
+    }
+
+    private func applyOptimistic(key: String, value: String) {
+        if key.contains(".") {
+            let parts = key.split(separator: ".").map(String.init)
+            guard parts.count >= 2 else {
+                raw[key] = value
+                return
+            }
+            var nested = raw[parts[0]] as? [String: Any] ?? [:]
+            nested[parts[1]] = value
+            raw[parts[0]] = nested
+        } else {
+            raw[key] = value
+        }
     }
 }

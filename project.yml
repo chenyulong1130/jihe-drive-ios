@@ -24,15 +24,18 @@ targets:
       - path: JiheDrive
         excludes:
           - "Info.plist"
+          - "JiheDrive.entitlements"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.liruixin.jihedrive
         PRODUCT_NAME: JiheDrive
         INFOPLIST_FILE: JiheDrive/Info.plist
+        CODE_SIGN_ENTITLEMENTS: JiheDrive/JiheDrive.entitlements
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
+      - target: JiheDriveWidget
       - sdk: MapKit.framework
       - sdk: CoreLocation.framework
       - sdk: Security.framework
@@ -40,12 +43,45 @@ targets:
       - sdk: AVFoundation.framework
       - sdk: SceneKit.framework
       - sdk: UniformTypeIdentifiers.framework
+      - sdk: WidgetKit.framework
+    entitlements:
+      path: JiheDrive/JiheDrive.entitlements
+
+  JiheDriveWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: JiheDriveWidget
+        excludes:
+          - "Info.plist"
+          - "JiheDriveWidget.entitlements"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.liruixin.jihedrive.widget
+        PRODUCT_NAME: JiheDriveWidget
+        INFOPLIST_FILE: JiheDriveWidget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: JiheDriveWidget/JiheDriveWidget.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+        SKIP_INSTALL: "YES"
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    entitlements:
+      path: JiheDriveWidget/JiheDriveWidget.entitlements
+    info:
+      path: JiheDriveWidget/Info.plist
+      properties:
+        CFBundleDisplayName: 极核智行
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
 schemes:
   JiheDrive:
     build:
       targets:
         JiheDrive: all
+        JiheDriveWidget: all
     run:
       config: Debug
     archive:

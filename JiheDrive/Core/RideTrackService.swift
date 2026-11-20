@@ -32,22 +32,32 @@ enum RideTrackService {
 
     static func tracks(
         vin: String,
-        days: Int = 7,
+        days: Int = 30,
         page: Int = 1,
-        pageSize: Int = 20
+        pageSize: Int = 50
     ) async -> [RideTrack]? {
         let calendar = Calendar.current
         let today = Date()
         guard let from = calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: today) else {
             return nil
         }
+        return await tracks(vin: vin, from: from, to: today, page: page, pageSize: pageSize)
+    }
 
+    /// 按日期区间拉按次行程（日期/月份均横线，对齐 miniapp fetchTripTrack）
+    static func tracks(
+        vin: String,
+        from: Date,
+        to: Date,
+        page: Int = 1,
+        pageSize: Int = 50
+    ) async -> [RideTrack]? {
         let query = [
             "vinNo": vin,
             "startDateTime": dashedDay.string(from: from),
-            "endDateTime": dashedDay.string(from: today),
+            "endDateTime": dashedDay.string(from: to),
             "startTime": dashedMonth.string(from: from),
-            "endTime": dashedMonth.string(from: today),
+            "endTime": dashedMonth.string(from: to),
             "page": "\(page)",
             "pageSize": "\(pageSize)"
         ]
@@ -151,6 +161,56 @@ enum RideTrackService {
         )
     }
 
+    /// 月里程：对齐 Flutter / 小程序 rideMonthInfo（month 用 yyyy.MM）
+    struct MonthDay: Identifiable {
+        var id: String { date }
+        let date: String
+        let mileage: Double
+        let minutes: Int
+    }
+
+    static func monthInfo(vin: String, month: Date = Date()) async -> [MonthDay] {
+        let query = [
+            "vinNo": vin,
+            "month": dottedMonth.string(from: month)
+        ]
+        guard let response = try? await ZeehoClient.shared.get(
+            "/v1.0/app/cfmotoserverapp/rideMonthInfo",
+            query: query
+        ) else { return [] }
+        let code = ZeehoClient.codeString(response["code"])
+        guard code.isEmpty || code == "10000" else { return [] }
+
+        let raw = response["data"]
+        let list: [[String: Any]]
+        if let array = raw as? [[String: Any]] {
+            list = array
+        } else if let dict = raw as? [String: Any] {
+            list = (dict["list"] as? [[String: Any]])
+                ?? (dict["records"] as? [[String: Any]])
+                ?? (dict["dayList"] as? [[String: Any]])
+                ?? []
+        } else {
+            list = []
+        }
+
+        return list.compactMap { item in
+            let rawDate = text(item["date"] ?? item["dayTime"] ?? item["rideDate"]) ?? ""
+            let date = rawDate.replacingOccurrences(of: "-", with: ".")
+            let mileage = Vehicle.doubleValue(item["rideMileage"] ?? item["rideMileageDay"] ?? item["mileage"]) ?? 0
+            let minutes = Int(Vehicle.doubleValue(item["ridingTimeUnitMinute"] ?? item["ridingTimeDayUnitMinute"]) ?? 0)
+            guard !date.isEmpty else { return nil }
+            return MonthDay(date: date, mileage: mileage, minutes: minutes)
+        }
+    }
+
+    private static let dottedMonth: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy.MM"
+        return formatter
+    }()
+
     /// 面板骑行卡权威数据源：homeRideInfo（最近）+ rideDayInfo（今日时长/极速）
     static func rideExtra(vin: String) async -> RideExtra {
         var extra = RideExtra()
@@ -180,7 +240,9 @@ enum RideTrackService {
         }
 
         if let day = await daySummary(vin: vin) {
-            if extra.todayKm == nil, day.mileage > 0 { extra.todayKm = day.mileage }
+            // rideDayInfo 为今日权威；home 有今日里程时也保留，两者取正值优先 day
+            if day.mileage > 0 { extra.todayKm = day.mileage }
+            else if extra.todayKm == nil { /* keep nil */ }
             if day.minutes > 0 { extra.todayMin = day.minutes }
             if day.maxSpeed > 0 { extra.todayMaxSpeed = day.maxSpeed }
         }

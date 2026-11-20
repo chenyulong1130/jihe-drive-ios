@@ -55,13 +55,14 @@ struct HeroStage: View {
                     .padding(.top, 10)
                 statusRow
                     .padding(.top, 10)
-                Spacer(minLength: 8)
+                // 中间空白让触摸落到下方 3D 层，可拖拽旋转
+                Spacer(minLength: 4)
+                    .allowsHitTesting(false)
                 tireStrip
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
-            // 胎压条抬到渐隐之上，避免被底部 mask 洗白
-            .padding(.bottom, 52)
+            .padding(.bottom, 18)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
@@ -151,7 +152,7 @@ struct HeroStage: View {
                 }
 
                 GeometryReader { geo in
-                    LoopingVideoView(url: url)
+                    LoopingVideoView(url: url, muted: true)
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
                 .clipped()
@@ -221,8 +222,8 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图顶距：躲开顶栏 + 电量区；再下移一点，避免「车太高」
-    private var carTopPad: CGFloat { topInset + 128 }
+    /// 车图顶距：躲开顶栏 + 电量；压缩底部空隙让车图更大
+    private var carTopPad: CGFloat { topInset + 96 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -231,23 +232,21 @@ struct HeroStage: View {
                 if let modelGLBFile {
                     Color.clear
                         .overlay {
-                            ModelViewerWebView(glbFile: modelGLBFile, interactive: false, autoRotate: true)
+                            ModelViewerWebView(glbFile: modelGLBFile, interactive: true, autoRotate: false)
                         }
-                        .padding(.top, carTopPad)
-                        .padding(.bottom, 72)
-                        .allowsHitTesting(false)
+                        .padding(.top, carTopPad - 8)
+                        .padding(.bottom, 18)
                 } else if let modelScene {
-                    VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
-                        .padding(.top, carTopPad)
-                        .padding(.bottom, 72)
-                        .allowsHitTesting(false)
+                    VehicleSceneView(scene: modelScene, interactive: true, autoSpin: false, spinSpeed: 0)
+                        .padding(.top, carTopPad - 8)
+                        .padding(.bottom, 18)
                 } else {
                     ZStack {
                         Ellipse()
-                            .fill(Color.black.opacity(onDark ? 0.28 : 0.09))
-                            .frame(width: 218, height: 15)
-                            .blur(radius: 12)
-                            .offset(y: 10)
+                            .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
+                            .frame(width: 260, height: 14)
+                            .blur(radius: 10)
+                            .offset(y: 18)
 
                         Group {
                             if let url = vehicle.imageURL {
@@ -264,12 +263,12 @@ struct HeroStage: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 220)
-                        .shadow(color: Color.black.opacity(onDark ? 0.30 : 0.10), radius: 18, x: 0, y: 12)
+                        .frame(height: 304)
+                        .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.top, carTopPad)
-                    .padding(.bottom, 56)
+                    .padding(.top, carTopPad - 8)
+                    .padding(.bottom, 14)
                     .allowsHitTesting(false)
                 }
             }
@@ -463,37 +462,29 @@ struct HeroStage: View {
         let front = validBar(frontBar)
         let rear = validBar(rearBar)
 
-        // 无有效读数时完全不占位，也不画白底条；整块可点进胎压详情
+        // 无雾蒙底、无进度条；有读数才显示，整块点进详情
         if front != nil || rear != nil {
             Button {
                 onOpenTire?()
             } label: {
-                HStack(spacing: 0) {
+                HStack(spacing: 16) {
                     if let front {
                         tireCell(title: "前轮", bar: front)
                     }
-
                     if front != nil && rear != nil {
                         Rectangle()
-                            .fill(primary.opacity(0.18))
-                            .frame(width: 0.5, height: 26)
+                            .fill(primary.opacity(0.22))
+                            .frame(width: 0.5, height: 22)
                     }
-
                     if let rear {
                         tireCell(title: "后轮", bar: rear)
                     }
-
+                    Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(secondaryText.opacity(0.7))
-                        .padding(.trailing, 4)
+                        .foregroundStyle(secondaryText.opacity(0.65))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(primary.opacity(onDark ? 0.14 : 0.08))
-                }
+                .padding(.vertical, 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
@@ -516,40 +507,18 @@ struct HeroStage: View {
     }
 
     private func tireCell(title: String, bar: Double) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(secondaryText)
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(String(format: "%.1f", bar))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(tireTint(bar))
-                        .monospacedDigit()
-                    Text("bar")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(secondaryText)
-                }
-            }
-
-            Spacer(minLength: 4)
-
-            // 进度条：透明底轨，不要白底块
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(primary.opacity(0.18))
-                    .frame(width: 48, height: 3.5)
-                Capsule()
-                    .fill(tireTint(bar))
-                    .frame(width: max(4, 48 * tireRatio(bar)), height: 3.5)
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(secondaryText)
+            Text(String(format: "%.1f", bar))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(tireTint(bar))
+                .monospacedDigit()
+            Text("bar")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(secondaryText)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 6)
-    }
-
-    private func tireRatio(_ bar: Double) -> CGFloat {
-        CGFloat(min(1, max(0.06, bar / 3.2)))
     }
 
     private func tireTint(_ bar: Double) -> Color {

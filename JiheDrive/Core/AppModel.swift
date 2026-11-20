@@ -259,61 +259,10 @@ final class AppModel: ObservableObject {
 
     private func applyOptimisticLock(vin: String, locked: Bool) {
         if let index = vehicles.firstIndex(where: { $0.vinNo == vin }) {
-            let old = vehicles[index]
-            vehicles[index] = Vehicle(
-                vinNo: old.vinNo,
-                name: old.name,
-                soc: old.soc,
-                rangeKm: old.rangeKm,
-                totalMileKm: old.totalMileKm,
-                isOnline: old.isOnline,
-                onlineKnown: old.onlineKnown,
-                isLocked: locked,
-                isCharging: old.isCharging,
-                signalLevel: old.signalLevel,
-                signalText: old.signalText,
-                latitude: old.latitude,
-                longitude: old.longitude,
-                locationTime: old.locationTime,
-                address: old.address,
-                imageURL: old.imageURL,
-                monthMileage: old.monthMileage,
-                tireFrontKpa: old.tireFrontKpa,
-                tireRearKpa: old.tireRearKpa,
-                voltage: old.voltage,
-                temperature: old.temperature,
-                cycleCount: old.cycleCount,
-                model3DURL: old.model3DURL,
-                wallpaperOutlines: old.wallpaperOutlines
-            )
+            vehicles[index] = vehicles[index].withLocked(locked)
         }
         if let detail = detailVehicle, detail.vinNo == vin {
-            detailVehicle = Vehicle(
-                vinNo: detail.vinNo,
-                name: detail.name,
-                soc: detail.soc,
-                rangeKm: detail.rangeKm,
-                totalMileKm: detail.totalMileKm,
-                isOnline: detail.isOnline,
-                onlineKnown: detail.onlineKnown,
-                isLocked: locked,
-                isCharging: detail.isCharging,
-                signalLevel: detail.signalLevel,
-                signalText: detail.signalText,
-                latitude: detail.latitude,
-                longitude: detail.longitude,
-                locationTime: detail.locationTime,
-                address: detail.address,
-                imageURL: detail.imageURL,
-                monthMileage: detail.monthMileage,
-                tireFrontKpa: detail.tireFrontKpa,
-                tireRearKpa: detail.tireRearKpa,
-                voltage: detail.voltage,
-                temperature: detail.temperature,
-                cycleCount: detail.cycleCount,
-                model3DURL: detail.model3DURL,
-                wallpaperOutlines: detail.wallpaperOutlines
-            )
+            detailVehicle = detail.withLocked(locked)
         }
     }
 
