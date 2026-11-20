@@ -16,7 +16,7 @@ enum BackdropSelection: Equatable {
     }
 }
 
-/// 车辆主视觉：铺满屏幕宽度，背景走 `.background` 不参与布局测量
+/// 车辆主视觉：左右贴边铺满，背景走 `.background` 不参与布局测量
 struct HeroStage: View {
     let vehicle: Vehicle
     let selection: BackdropSelection
@@ -25,26 +25,32 @@ struct HeroStage: View {
     let photo: UIImage?
     let modelScene: SCNScene?
     var topInset: CGFloat = 12
-    var height: CGFloat = 420
-    var cornerRadius: CGFloat = 28
+    var height: CGFloat = 470
+    var cornerRadius: CGFloat = 30
     let onPickVehicle: () -> Void
+    let onOpenWallpaper: () -> Void
     let onOpenTheme: () -> Void
 
     private var onDark: Bool { !selection.isDefault }
 
     private var primary: Color { onDark ? .white : Theme.label }
-    private var secondaryText: Color { onDark ? Color.white.opacity(0.78) : Theme.secondary }
+    private var secondaryText: Color { onDark ? Color.white.opacity(0.8) : Theme.secondary }
+    private var glass: AnyShapeStyle {
+        onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surface)
+    }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             carLayer
 
             VStack(spacing: 0) {
-                topBar
-                Spacer(minLength: 0)
-                bottomBar
+                topRow
+                batteryBlock
+                    .padding(.top, 14)
+                Spacer(minLength: 8)
+                tireStrip
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 18)
             .padding(.top, topInset)
             .padding(.bottom, 16)
         }
@@ -59,13 +65,6 @@ struct HeroStage: View {
                 topTrailingRadius: 0
             )
         )
-        .overlay(alignment: .bottom) {
-            if !onDark {
-                Rectangle()
-                    .fill(Theme.separator.opacity(0.7))
-                    .frame(height: 0.5)
-            }
-        }
     }
 
     // MARK: - 背景
@@ -169,27 +168,22 @@ struct HeroStage: View {
         )
     }
 
-    // MARK: - 车
+    // MARK: - 车 / 3D
 
     @ViewBuilder
     private var carLayer: some View {
         if let modelScene {
-            ZStack(alignment: .bottom) {
-                VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
-                    .padding(.bottom, 34)
-
-                modelBadge
-                    .padding(.bottom, 96)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .allowsHitTesting(false)
+            VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
+                .padding(.top, 92)
+                .padding(.bottom, 96)
+                .allowsHitTesting(false)
         } else {
-            ZStack(alignment: .bottom) {
+            ZStack {
                 Ellipse()
-                    .fill(Color.black.opacity(onDark ? 0.30 : 0.10))
-                    .frame(width: 224, height: 16)
+                    .fill(Color.black.opacity(onDark ? 0.28 : 0.09))
+                    .frame(width: 218, height: 15)
                     .blur(radius: 12)
-                    .offset(y: 6)
+                    .offset(y: 10)
 
                 Group {
                     if let url = vehicle.imageURL {
@@ -205,170 +199,217 @@ struct HeroStage: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 224)
-                .shadow(color: Color.black.opacity(onDark ? 0.34 : 0.12), radius: 18, x: 0, y: 12)
+                .frame(height: 230)
+                .shadow(color: Color.black.opacity(onDark ? 0.30 : 0.10), radius: 18, x: 0, y: 12)
             }
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 54)
+            .offset(y: 26)
             .allowsHitTesting(false)
-        }
-    }
-
-    private var modelBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "cube.transparent.fill")
-                .font(.system(size: 9, weight: .semibold))
-            Text("3D 模型")
-                .font(.system(size: 10, weight: .semibold))
-        }
-        .foregroundStyle(primary.opacity(0.9))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background {
-            Capsule(style: .continuous)
-                .fill(onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surfaceAlt))
         }
     }
 
     private var placeholder: some View {
         VStack(spacing: 8) {
             Image(systemName: "bolt.car.fill")
-                .font(.system(size: 56, weight: .regular))
+                .font(.system(size: 54, weight: .regular))
             Text("暂未获取车辆图片")
                 .font(Theme.caption)
         }
-        .foregroundStyle(primary.opacity(0.75))
+        .foregroundStyle(primary.opacity(0.7))
     }
 
-    // MARK: - 顶栏
+    // MARK: - 顶部：车辆切换 + 壁纸 / 主题
 
-    private var topBar: some View {
-        HStack(spacing: 8) {
+    private var topRow: some View {
+        HStack(spacing: 10) {
             Button(action: onPickVehicle) {
                 HStack(spacing: 5) {
                     Text(vehicle.name)
-                        .font(.system(size: 21, weight: .semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(primary)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(secondaryText)
                 }
-                .frame(minHeight: 36, alignment: .leading)
+                .frame(minHeight: 38, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
 
-            Spacer(minLength: 8)
+            statusTag
 
-            Button(action: onOpenTheme) {
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(primary)
-                    .frame(width: 36, height: 36)
-                    .background {
-                        Circle()
-                            .fill(onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surface.opacity(0.9)))
-                    }
-                    .contentShape(Circle())
-            }
-            .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
-            .accessibilityLabel("更换车辆背景")
+            Spacer(minLength: 6)
+
+            circleAction(icon: "photo.on.rectangle.angled", label: "壁纸", action: onOpenWallpaper)
+            circleAction(icon: "play.rectangle.fill", label: "主题", action: onOpenTheme)
         }
     }
 
-    // MARK: - 底部：电量 + 数据
+    private func circleAction(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(primary)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(glass))
+                .contentShape(Circle())
+                .accessibilityLabel(label)
+        }
+        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+    }
 
-    private var bottomBar: some View {
-        HStack(spacing: 10) {
-            socRing
+    // MARK: - 电量进度条 + 续航
 
-            Rectangle()
-                .fill(primary.opacity(0.16))
-                .frame(width: 0.5, height: 30)
+    private var batteryBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(primary.opacity(0.18))
+                        .frame(height: 9)
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [socColor, socColor.opacity(0.78)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(9, proxy.size.width * socRatio), height: 9)
+                }
+            }
+            .frame(height: 9)
 
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(soc)")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(primary)
+                    .monospacedDigit()
+                Text("%")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(secondaryText)
+
+                Text(chargeHint)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(secondaryText)
+
+                Spacer(minLength: 8)
+
                 Text("续航")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(secondaryText)
+                Text("\(vehicle.rangeKm)")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(primary)
+                    .monospacedDigit()
+                Text("km")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(secondaryText)
+            }
+        }
+    }
+
+    private var soc: Int { min(max(vehicle.soc, 0), 100) }
+    private var socRatio: CGFloat { CGFloat(soc) / 100 }
+
+    private var socColor: Color {
+        if vehicle.isCharging { return Theme.green }
+        if soc <= 15 { return Theme.red }
+        if soc <= 30 { return Theme.orange }
+        return onDark ? .white : Theme.brand
+    }
+
+    private var chargeHint: String {
+        if vehicle.isCharging { return "充电中" }
+        return vehicle.isOnline ? "" : "离线"
+    }
+
+    // MARK: - 胎压
+
+    @ViewBuilder
+    private var tireStrip: some View {
+        HStack(spacing: 0) {
+            tireCell(title: "前轮", kpa: vehicle.tireFrontKpa)
+            Rectangle()
+                .fill(primary.opacity(0.14))
+                .frame(width: 0.5, height: 34)
+            tireCell(title: "后轮", kpa: vehicle.tireRearKpa)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(glass)
+        }
+    }
+
+    private func tireCell(title: String, kpa: Double?) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(secondaryText)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text("\(vehicle.rangeKm)")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(primary)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(kpa.map { String(format: "%.1f", $0 / 100) } ?? "—")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(tireTint(kpa))
                         .monospacedDigit()
-                    Text("km")
-                        .font(.system(size: 10.5, weight: .medium))
+                    Text("bar")
+                        .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(secondaryText)
                 }
             }
 
             Spacer(minLength: 4)
 
-            statusTag
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surface.opacity(0.92)))
-        }
-    }
-
-    private var socRing: some View {
-        HStack(spacing: 8) {
-            ZStack {
-                RingProgress(
-                    progress: Double(min(max(vehicle.soc, 0), 100)) / 100,
-                    color: socColor,
-                    track: primary.opacity(0.18),
-                    lineWidth: 3,
-                    size: 34
-                )
-                Image(systemName: vehicle.isCharging ? "bolt.fill" : "battery.50percent")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(primary)
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 1) {
-                Text("\(min(max(vehicle.soc, 0), 100))")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(primary)
-                    .monospacedDigit()
-                Text("%")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(secondaryText)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(primary.opacity(0.14))
+                    .frame(width: 52, height: 5)
+                Capsule()
+                    .fill(tireTint(kpa))
+                    .frame(width: max(5, 52 * tireRatio(kpa)), height: 5)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 6)
     }
 
-    private var socColor: Color {
-        if vehicle.isCharging { return Theme.green }
-        if vehicle.soc <= 15 { return Theme.red }
-        if vehicle.soc <= 30 { return Theme.orange }
-        return onDark ? .white : Theme.brand
+    private func tireRatio(_ kpa: Double?) -> CGFloat {
+        guard let kpa else { return 0.04 }
+        return CGFloat(min(1, max(0.06, kpa / 320)))
     }
 
-    @ViewBuilder
+    private func tireTint(_ kpa: Double?) -> Color {
+        guard let kpa else { return secondaryText }
+        if kpa < 180 { return Theme.red }
+        if kpa < 210 || kpa > 290 { return Theme.orange }
+        return Theme.green
+    }
+
+    // MARK: - 状态
+
     private var statusTag: some View {
         let tag: (String, String, Color) = {
             if vehicle.isCharging { return ("充电中", "bolt.fill", Theme.green) }
             if !vehicle.isOnline { return ("离线", "wifi.slash", secondaryText) }
-            if !vehicle.isLocked { return ("未锁车", "lock.open.fill", Theme.orange) }
-            return ("已上锁", "lock.fill", primary)
+            if !vehicle.isLocked { return ("未锁", "lock.open.fill", Theme.orange) }
+            return ("已锁", "lock.fill", primary)
         }()
 
-        HStack(spacing: 4) {
+        return HStack(spacing: 3) {
             Image(systemName: tag.1)
-                .font(.system(size: 9.5, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
             Text(tag.0)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10.5, weight: .medium))
         }
         .foregroundStyle(tag.2)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
         .background {
             Capsule(style: .continuous)
-                .fill(tag.2.opacity(onDark ? 0.22 : 0.12))
+                .fill(tag.2.opacity(onDark ? 0.22 : 0.10))
         }
     }
 }

@@ -2,7 +2,16 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// 打开面板时优先定位到哪一段
+enum ThemeFocus {
+    case none
+    case wallpaper
+    case theme
+}
+
 struct ThemeSheet: View {
+    var focus: ThemeFocus = .none
+
     @EnvironmentObject private var themeStore: ThemeStore
     @EnvironmentObject private var wallpaperStore: WallpaperStore
     @EnvironmentObject private var videoStore: VideoBackdropStore
@@ -16,12 +25,14 @@ struct ThemeSheet: View {
 
     var body: some View {
         SheetShell(title: "车辆背景", subtitle: themeStore.displayName, onClose: { dismiss() }) {
+            ScrollViewReader { reader in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
                     SectionHeader("我的")
                     mineCard
 
                     SectionHeader("内置壁纸")
+                        .id("wallpaper")
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(WallpaperCatalog.all) { wallpaper in
                             wallpaperCell(wallpaper)
@@ -29,6 +40,7 @@ struct ThemeSheet: View {
                     }
 
                     SectionHeader("动态主题")
+                        .id("theme")
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(AnimatedBackdropKind.allCases) { kind in
                             animatedCell(kind)
@@ -52,6 +64,16 @@ struct ThemeSheet: View {
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.bottom, 32)
+            }
+            .onAppear {
+                guard focus != .none else { return }
+                let target = focus == .wallpaper ? "wallpaper" : "theme"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    withAnimation(Motion.spring) {
+                        reader.scrollTo(target, anchor: .top)
+                    }
+                }
+            }
             }
         }
     }

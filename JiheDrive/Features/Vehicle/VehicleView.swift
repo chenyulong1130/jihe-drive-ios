@@ -15,6 +15,7 @@ struct VehicleView: View {
     @State private var showMap = false
     @State private var showPicker = false
     @State private var showTheme = false
+    @State private var themeFocus: ThemeFocus = .none
     @State private var showBattery = false
     @State private var show3D = false
     @State private var showReplay = false
@@ -47,7 +48,9 @@ struct VehicleView: View {
             }
         }
         .sheet(isPresented: $showPicker) { VehiclePickerSheet() }
-        .sheet(isPresented: $showTheme) { ThemeSheet() }
+        .sheet(isPresented: $showTheme, onDismiss: { themeFocus = .none }) {
+            ThemeSheet(focus: themeFocus)
+        }
         .sheet(isPresented: $showBattery) {
             if let vehicle = model.selectedVehicle { BatterySheet(vehicle: vehicle) }
         }
@@ -96,7 +99,14 @@ struct VehicleView: View {
                     showToast("当前账号只有一台车辆")
                 }
             },
-            onOpenTheme: { showTheme = true }
+            onOpenWallpaper: {
+                themeFocus = .wallpaper
+                showTheme = true
+            },
+            onOpenTheme: {
+                themeFocus = .theme
+                showTheme = true
+            }
         )
     }
 
@@ -106,7 +116,6 @@ struct VehicleView: View {
         VStack(spacing: 14) {
             actionCard(vehicle)
             batteryCard(vehicle)
-            tireCard(vehicle)
             locationCard(vehicle)
             rideCard(vehicle)
             infoCard(vehicle)
@@ -317,93 +326,6 @@ struct VehicleView: View {
             return "电量仅剩 \(vehicle.soc)%，建议尽快充电"
         }
         return nil
-    }
-
-    // MARK: - 胎压
-
-    private func tireCard(_ vehicle: Vehicle) -> some View {
-        AppleCard {
-            VStack(spacing: 14) {
-                CardTitle(
-                    text: "胎压",
-                    icon: "circle.dashed",
-                    tint: Theme.indigo,
-                    trailing: tireStatus(vehicle)
-                )
-
-                HStack(spacing: 12) {
-                    tireColumn(title: "前轮", kpa: vehicle.tireFrontKpa)
-                    Rectangle()
-                        .fill(Theme.separator)
-                        .frame(width: 0.5, height: 54)
-                    tireColumn(title: "后轮", kpa: vehicle.tireRearKpa)
-                }
-
-                if !vehicle.hasTirePressure {
-                    Text("该车型未上报胎压数据")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func tireColumn(title: String, kpa: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(title)
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-                Spacer(minLength: 0)
-                if let kpa {
-                    Text(String(format: "%.1f", kpa / 100))
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(tireTint(kpa))
-                        .monospacedDigit()
-                    Text("bar")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Theme.tertiary)
-                } else {
-                    Text("—")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Theme.tertiary)
-                }
-            }
-
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Theme.surfaceAlt)
-                        .frame(height: 6)
-                    Capsule()
-                        .fill(tireTint(kpa))
-                        .frame(width: max(6, proxy.size.width * tireRatio(kpa)), height: 6)
-                }
-            }
-            .frame(height: 6)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func tireStatus(_ vehicle: Vehicle) -> String {
-        guard vehicle.hasTirePressure else { return "无数据" }
-        let values = [vehicle.tireFrontKpa, vehicle.tireRearKpa].compactMap { $0 }
-        if values.contains(where: { $0 < 180 }) { return "偏低" }
-        if values.contains(where: { $0 < 210 || $0 > 290 }) { return "注意" }
-        return "正常"
-    }
-
-    private func tireRatio(_ kpa: Double?) -> CGFloat {
-        guard let kpa else { return 0.02 }
-        return CGFloat(min(1, max(0.04, kpa / 320)))
-    }
-
-    private func tireTint(_ kpa: Double?) -> Color {
-        guard let kpa else { return Theme.tertiary }
-        if kpa < 180 { return Theme.red }
-        if kpa < 210 || kpa > 290 { return Theme.orange }
-        return Theme.green
     }
 
     // MARK: - 位置
