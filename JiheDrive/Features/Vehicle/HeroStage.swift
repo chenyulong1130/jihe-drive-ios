@@ -39,6 +39,8 @@ struct HeroStage: View {
     let onOpenCushion: () -> Void
     /// 胎压监测二级页
     var onOpenTire: (() -> Void)? = nil
+    /// 电量详情
+    var onOpenBattery: (() -> Void)? = nil
     /// 拖 3D 时通知外层停掉页面滚动
     var onInteract: ((Bool) -> Void)? = nil
 
@@ -360,7 +362,7 @@ struct HeroStage: View {
     // MARK: - 电量（对齐小程序：电量% + 续航挤在左侧，短进度条 140×6）
 
     private var batteryBlock: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        let content = VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("\(soc)")
                     .font(.system(size: 24, weight: .semibold))
@@ -396,6 +398,17 @@ struct HeroStage: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityLabel("电池详情")
+
+        return Group {
+            if let onOpenBattery {
+                Button(action: onOpenBattery) { content }
+                    .buttonStyle(.plain)
+            } else {
+                content
+            }
+        }
     }
 
     private var statusRow: some View {
@@ -411,19 +424,23 @@ struct HeroStage: View {
 
             signalBars
 
+            if vehicle.isCharging {
+                HStack(spacing: 4) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("充电中")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(Theme.green)
+            }
+
             HStack(spacing: 4) {
-                Image(systemName: vehicle.isCharging
-                      ? "bolt.fill"
-                      : (vehicle.isLocked ? "lock.fill" : "lock.open.fill"))
+                Image(systemName: vehicle.isLocked ? "lock.fill" : "lock.open.fill")
                     .font(.system(size: 11, weight: .semibold))
-                Text(vehicle.isCharging ? "充电中" : (vehicle.isLocked ? "已关锁" : "未关锁"))
+                Text(vehicle.isLocked ? "已关锁" : "未关锁")
                     .font(.system(size: 11, weight: .semibold))
             }
-            .foregroundStyle(
-                vehicle.isCharging
-                    ? Theme.green
-                    : (vehicle.isLocked ? primary.opacity(0.92) : Color(hex: 0xFF9F0A))
-            )
+            .foregroundStyle(vehicle.isLocked ? primary.opacity(0.92) : Color(hex: 0xFF9F0A))
 
             Spacer(minLength: 0)
         }

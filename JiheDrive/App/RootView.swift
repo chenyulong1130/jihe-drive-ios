@@ -25,10 +25,10 @@ struct RootView: View {
         .environmentObject(wallpaperStore)
         .environmentObject(videoStore)
         .environmentObject(appearance)
-        .preferredColorScheme(appearance.mode.colorScheme)
+        .preferredColorScheme(appearance.resolvedScheme)
         .tint(Theme.brand)
         .animation(Motion.spring, value: model.isLoggedIn)
-        .animation(nil, value: appearance.mode)
+        .animation(nil, value: appearance.resolvedScheme)
         .task {
             await model.bootstrap()
             if let video = themeStore.resolvedVideoURL(local: videoStore.url) {
@@ -37,12 +37,15 @@ struct RootView: View {
             _ = await ResourceCache.image(for: themeStore.current.posterURL)
             _ = await ResourceCache.image(for: model.selectedVehicle?.imageURL)
         }
-        .onAppear { appearance.applyToWindows() }
+        .onAppear {
+            appearance.refreshResolved()
+            LocationPermissionRequester.shared.request()
+        }
         .onChange(of: appearance.mode) { _, _ in
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) {
-                appearance.applyToWindows()
+                appearance.refreshResolved()
             }
         }
     }

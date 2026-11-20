@@ -23,6 +23,7 @@ struct VehicleView: View {
     @State private var themeFocus: ThemeFocus = .none
     @State private var showDashboardWallpaper = false
     @State private var showTire = false
+    @State private var showBattery = false
     @State private var show3D = false
     @State private var showSettings = false
     @State private var showReplay = false
@@ -68,8 +69,13 @@ struct VehicleView: View {
         .sheet(isPresented: $showTire) {
             if let vehicle = model.selectedVehicle { TireSheet(vehicle: vehicle) }
         }
+        .sheet(isPresented: $showBattery) {
+            if let vehicle = model.selectedVehicle { BatterySheet(vehicle: vehicle) }
+        }
         .sheet(isPresented: $showMap) {
-            if let vehicle = model.selectedVehicle { TrackMapView(vehicle: vehicle) }
+            if let vehicle = model.selectedVehicle {
+                TrackMapView(vehicle: vehicle, address: locationLabel(vehicle))
+            }
         }
         .sheet(isPresented: $show3D) {
             if let vehicle = model.selectedVehicle { Vehicle3DSheet(vehicle: vehicle) }
@@ -94,10 +100,10 @@ struct VehicleView: View {
             async let addr: Void = resolveAddressIfNeeded()
             _ = await (ride, battery, detail, tire, sign, addr)
             await loadHeroModel()
-            WidgetSnapshot.publish(from: model, signin: signin)
+            await signin.syncWidget(model: model, ride: rideExtra)
         }
         .onChange(of: model.selectedVehicle?.soc) { _, _ in
-            WidgetSnapshot.publish(from: model, signin: signin)
+            WidgetSnapshot.publish(from: model, signin: signin, ride: rideExtra)
         }
         .onChange(of: model.selectedVehicle?.latitude) { _, _ in
             Task { await resolveAddressIfNeeded() }
@@ -153,6 +159,9 @@ struct VehicleView: View {
             onOpenTire: {
                 showTire = true
             },
+            onOpenBattery: {
+                showBattery = true
+            },
             onInteract: { pinningHero = $0 }
         )
     }
@@ -187,7 +196,7 @@ struct VehicleView: View {
         guard let vin = model.selectedVehicle?.vinNo else { return }
         await loadRideSummary(vin: vin)
         await resolveAddressIfNeeded()
-        WidgetSnapshot.publish(from: model, signin: signin)
+        await signin.syncWidget(model: model, ride: rideExtra)
     }
 
     private func loadRideSummary(vin: String) async {
@@ -394,7 +403,7 @@ struct VehicleView: View {
                     showMap = true
                 } label: {
                     mapBody(vehicle)
-                        .frame(height: 96)
+                        .frame(height: 78)
                         .frame(maxWidth: .infinity)
                         .overlay {
                             LinearGradient(
@@ -425,7 +434,7 @@ struct VehicleView: View {
                         .shadow(color: Theme.brand.opacity(0.35), radius: 6, y: 2)
                     }
                     .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-                    .padding(8)
+                    .padding(6)
                 }
             }
             .clipShape(UnevenRoundedRectangle(
@@ -439,33 +448,26 @@ struct VehicleView: View {
             Button {
                 showMap = true
             } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.brand)
-                        Text("位置")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Theme.tertiary)
-                    }
-
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
                     Text(locationLabel(vehicle))
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.secondary)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.label)
                         .lineLimit(1)
                         .truncationMode(.tail)
-
+                    Spacer(minLength: 0)
                     Text(shortTime(vehicle.locationTime))
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Theme.tertiary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Theme.tertiary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -488,7 +490,7 @@ struct VehicleView: View {
         Button {
             showReplay = true
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 4) {
                     Image(systemName: "figure.outdoor.cycle")
                         .font(.system(size: 11, weight: .semibold))
@@ -505,34 +507,18 @@ struct VehicleView: View {
                         .foregroundStyle(Theme.brand.opacity(0.7))
                 }
 
-                HStack(alignment: .top, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—")
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
                             .foregroundStyle(Theme.label)
                             .monospacedDigit()
-                        Text("最近 · km")
-                            .font(.system(size: 10))
+                        Text("最近 km")
+                            .font(.system(size: 9))
                             .foregroundStyle(Theme.tertiary)
-                        MiniSparkline(tint: Color(hex: 0xFF5A5F), seed: 1)
-                            .frame(height: 32)
-                            .padding(.top, 2)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(rideExtra?.lastMin.map { "\($0)" } ?? "—")
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Theme.label)
-                            .monospacedDigit()
-                        Text("时长 · min")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.tertiary)
-                        MiniSparkline(tint: Theme.brand, seed: 2)
-                            .frame(height: 32)
-                            .padding(.top, 2)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    MiniSparkline(tint: Theme.brand, values: rideExtra?.recentKm ?? [])
+                        .frame(height: 28)
                 }
 
                 HairLine()
@@ -555,7 +541,8 @@ struct VehicleView: View {
                     )
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -749,7 +736,7 @@ struct VehicleView: View {
         NavigationLauncher.openBest(
             lat: coordinate.latitude,
             lon: coordinate.longitude,
-            name: vehicle.name
+            name: locationLabel(vehicle)
         )
     }
 
@@ -782,12 +769,13 @@ struct VehicleView: View {
     }
 
     private func shortTime(_ raw: String?) -> String {
-        guard let raw, !raw.isEmpty else { return "暂无上报时间" }
+        guard let raw, !raw.isEmpty else { return "" }
+        if let match = raw.range(of: #"\d{1,2}:\d{2}"#, options: .regularExpression) {
+            return String(raw[match])
+        }
         let parts = raw.split(separator: " ")
-        guard parts.count == 2 else { return String(raw.prefix(11)) }
-        let date = parts[0].count >= 10 ? parts[0].suffix(5) : parts[0]
-        let time = parts[1].count >= 5 ? parts[1].prefix(5) : parts[1]
-        return "上报 \(date) \(time)"
+        guard parts.count == 2 else { return String(raw.prefix(8)) }
+        return String(parts[1].prefix(5))
     }
 
     private func formatSpeed(_ speed: Double) -> String {
@@ -833,7 +821,7 @@ struct VehicleView: View {
 
 private struct MiniSparkline: View {
     var tint: Color
-    var seed: Int
+    var values: [Double] = []
 
     var body: some View {
         GeometryReader { proxy in
@@ -853,7 +841,7 @@ private struct MiniSparkline: View {
                 }
                 .fill(
                     LinearGradient(
-                        colors: [tint.opacity(0.18), tint.opacity(0.02)],
+                        colors: [tint.opacity(0.22), tint.opacity(0.02)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -866,18 +854,23 @@ private struct MiniSparkline: View {
                         path.addLine(to: point)
                     }
                 }
-                .stroke(tint.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                .stroke(tint, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
             }
         }
     }
 
     private func points(in size: CGSize) -> [CGPoint] {
-        let values: [CGFloat] = seed == 1
-            ? [0.35, 0.55, 0.42, 0.78, 0.50, 0.88, 0.62]
-            : [0.55, 0.40, 0.68, 0.48, 0.72, 0.58, 0.82]
-        guard values.count > 1, size.width > 0, size.height > 0 else { return [] }
-        return values.enumerated().map { index, value in
-            let x = size.width * CGFloat(index) / CGFloat(values.count - 1)
+        let series: [CGFloat] = {
+            let raw = values.filter { $0 >= 0 }
+            if raw.count >= 2 {
+                let peak = max(raw.max() ?? 1, 0.1)
+                return raw.suffix(10).map { CGFloat($0 / peak) * 0.82 + 0.12 }
+            }
+            return [0.28, 0.46, 0.38, 0.62, 0.48, 0.78, 0.58]
+        }()
+        guard series.count > 1, size.width > 0, size.height > 0 else { return [] }
+        return series.enumerated().map { index, value in
+            let x = size.width * CGFloat(index) / CGFloat(series.count - 1)
             let y = size.height * (1 - value)
             return CGPoint(x: x, y: y)
         }

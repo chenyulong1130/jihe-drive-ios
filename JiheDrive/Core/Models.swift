@@ -487,6 +487,12 @@ struct RideTrack: Identifiable, Hashable {
     var brakeTimes: Int = 0
     var bendTimes: Int = 0
     var thumbnailURL: URL? = nil
+    /// 分组用，yyyy.MM.dd
+    var dayKey: String? = nil
+    /// 本次耗电 SOC%
+    var socUsed: Double? = nil
+    /// 本次能耗 Wh（接口给大数时）
+    var energyWh: Double? = nil
 
     static func parse(_ response: [String: Any]) -> [RideTrack] {
         guard let data = response["data"] else { return [] }

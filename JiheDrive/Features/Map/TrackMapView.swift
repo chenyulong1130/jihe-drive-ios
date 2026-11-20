@@ -4,10 +4,12 @@ import SwiftUI
 /// 车辆位置全屏地图（MapKit，零第三方依赖）
 struct TrackMapView: View {
     let vehicle: Vehicle
+    var address: String? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var recenterToken = 0
     @State private var showNavOptions = false
+    @State private var resolvedAddress: String?
 
     private var coordinate: Coordinate? { vehicle.coordinate }
 
@@ -41,6 +43,17 @@ struct TrackMapView: View {
         .background(Theme.groupedBackground)
         .sheetChrome()
         .onAppear { LocationPermissionRequester.shared.request() }
+        .task {
+            if AmapGeocode.readableAddress(address) != nil {
+                resolvedAddress = AmapGeocode.readableAddress(address)
+                return
+            }
+            guard let coordinate else { return }
+            resolvedAddress = await AmapGeocode.reverse(
+                longitude: coordinate.longitude,
+                latitude: coordinate.latitude
+            )
+        }
         .confirmationDialog("选择导航应用", isPresented: $showNavOptions, titleVisibility: .visible) {
             if let coordinate {
                 ForEach(NavigationLauncher.options(
@@ -84,10 +97,10 @@ struct TrackMapView: View {
                     .foregroundStyle(Theme.label)
                     .lineLimit(1)
 
-                Text(coordinateText)
+                Text(placeText)
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 Text(reportText)
                     .font(.system(size: 11, weight: .medium))
@@ -158,9 +171,13 @@ struct TrackMapView: View {
 
     // MARK: - 文案
 
-    private var coordinateText: String {
-        guard let coordinate else { return "暂无坐标" }
-        return String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude)
+    private var placeText: String {
+        if let text = AmapGeocode.readableAddress(resolvedAddress)
+            ?? AmapGeocode.readableAddress(address)
+            ?? AmapGeocode.readableAddress(vehicle.address) {
+            return text
+        }
+        return coordinate == nil ? "暂无位置" : "正在解析位置…"
     }
 
     private var reportText: String {

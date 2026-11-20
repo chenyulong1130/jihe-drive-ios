@@ -14,6 +14,9 @@ final class AppModel: ObservableObject {
     @Published var selectedVin: String? {
         didSet {
             UserDefaults.standard.set(selectedVin, forKey: Self.vinKey)
+            let suite = UserDefaults(suiteName: WidgetSnapshot.suiteName)
+            suite?.set(selectedVin, forKey: "selectedVin")
+            suite?.synchronize()
             guard oldValue != selectedVin else { return }
             // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度
             batteries = []
@@ -159,11 +162,12 @@ final class AppModel: ObservableObject {
     func refreshAll() async {
         await loadVehicles()
         if let vin = selectedVehicle?.vinNo {
-            await loadBattery(vin: vin)
-            await loadDetail(vin: vin)
-            await loadTire(vin: vin)
+            async let battery: Void = loadBattery(vin: vin)
+            async let detail: Void = loadDetail(vin: vin)
+            async let tire: Void = loadTire(vin: vin)
+            _ = await (battery, detail, tire)
         }
-        WidgetSnapshot.publish(from: self)
+        WidgetSnapshot.publish(from: self, ride: nil)
     }
 
     /// 胎压传感器接口，独立于车辆详情，失败不影响主流程
@@ -211,17 +215,33 @@ final class AppModel: ObservableObject {
         defer { batteryLoading = false }
 
         do {
-            var response = try await client.get("/v1.0/app/cfmotoserverapp/batteryInfo/\(vin)")
-            var items = BatteryInfo.parse(response)
+            // 小程序规则：V2 给充电骨架（功率/充满文案），batteryInfo 覆盖 soc/电压/电流
+            async let v2Task = client.get("/v1.0/app/cfmotoserverapp/vehicleHomePageV2/\(vin)")
+            async let infoTask = client.get("/v1.0/app/cfmotoserverapp/batteryInfo/\(vin)")
+            let v2Res = try? await v2Task
+            let infoRes = try? await infoTask
 
-            // 老车型 batteryInfo 为空，退回首页接口取同一批字段
-            if items.isEmpty {
-                response = try await client.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)")
-                items = BatteryInfo.parse(response)
+            var items = BatteryInfo.parse(infoRes ?? [:])
+            let skeleton = BatteryInfo.parse(v2Res ?? [:])
+            if let live = items.first, let frame = skeleton.first {
+                items = [frame.merged(with: live)]
+            } else if items.isEmpty {
+                items = skeleton
             }
 
-            // 请求期间用户可能已经切车，晚到的响应不能写进当前车辆
+            if let id = items.first?.detailId, !id.isEmpty, !id.hasPrefix("battery-") {
+                let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+                if let detail = try? await client.get("/v1.0/app/cfmotoserverapp/batteryInfo/detail/\(encoded)"),
+                   let extra = BatteryInfo.parse(detail).first,
+                   let base = items.first {
+                    items = [base.merged(with: extra)]
+                }
+            }
+
             guard selectedVin == nil || selectedVin == vin else { return }
+            if items.isEmpty, let vehicle = selectedVehicle, vehicle.vinNo == vin {
+                items = [BatteryInfo.fallback(from: vehicle)]
+            }
             batteries = items
             if items.isEmpty {
                 batteryError = "云端暂未返回电池数据"

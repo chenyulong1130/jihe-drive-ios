@@ -55,6 +55,17 @@ targets:
         excludes:
           - "Info.plist"
           - "JiheDriveWidget.entitlements"
+      - path: JiheDrive/Core/WidgetSnapshot.swift
+      - path: JiheDrive/Core/WidgetLiveSync.swift
+      - path: JiheDrive/Core/ZeehoClient.swift
+      - path: JiheDrive/Core/ZeehoSigner.swift
+      - path: JiheDrive/Core/H5Client.swift
+      - path: JiheDrive/Core/KeychainStore.swift
+      - path: JiheDrive/Core/Models.swift
+      - path: JiheDrive/Core/TireService.swift
+      - path: JiheDrive/Core/RideTrackService.swift
+      - path: JiheDrive/Core/CommunityTask.swift
+      - path: JiheDrive/Core/SigninInfo.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.liruixin.jihedrive.widget
@@ -67,6 +78,8 @@ targets:
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
+      - sdk: Security.framework
+      - sdk: CryptoKit.framework
     entitlements:
       path: JiheDriveWidget/JiheDriveWidget.entitlements
     info:

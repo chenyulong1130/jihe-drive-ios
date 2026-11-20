@@ -15,11 +15,35 @@ enum CommunityTask {
 
     static func isDoneToday(userId: String?) -> Bool {
         guard let userId, !userId.isEmpty else { return false }
-        return UserDefaults.standard.bool(forKey: markKey(userId))
+        let key = markKey(userId)
+        if UserDefaults.standard.bool(forKey: key) { return true }
+        return UserDefaults(suiteName: WidgetSnapshot.suiteName)?.bool(forKey: key) ?? false
     }
 
     static func markDone(userId: String) {
-        UserDefaults.standard.set(true, forKey: markKey(userId))
+        let key = markKey(userId)
+        UserDefaults.standard.set(true, forKey: key)
+        let defaults = UserDefaults(suiteName: WidgetSnapshot.suiteName)
+        defaults?.set(true, forKey: key)
+        defaults?.synchronize()
+    }
+
+    /// 今日社区是否完成：本地日期标记优先，没有再用积分明细反推（换机也能恢复）
+    static func resolveDone(userId: String) async -> Bool {
+        if isDoneToday(userId: userId) { return true }
+        let done = await doneFromIntegral(userId: userId)
+        if done { markDone(userId: userId) }
+        return done
+    }
+
+    static func dayKey(_ raw: String) -> String? {
+        let normalized = raw
+            .replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+        guard let match = normalized.range(of: #"\d{4}-\d{2}-\d{2}"#, options: .regularExpression) else {
+            return nil
+        }
+        return String(normalized[match])
     }
 
     private static func markKey(_ userId: String) -> String {
@@ -100,16 +124,31 @@ enum CommunityTask {
         let today = todayKey()
         var post = false, like = false, share = false
         for item in list {
-            let name = "\(item["name"] ?? item["integralName"] ?? item["ruleName"] ?? "")"
+            let name = "\(item["name"] ?? item["integralName"] ?? item["ruleName"] ?? item["title"] ?? "")"
             let remarks = "\(item["remarks"] ?? "")"
             if (name + remarks).contains("社区任务") { return true }
-            let when = "\(item["createDate"] ?? "")"
-            guard when.contains(today) else { continue }
+            let when = "\(item["createDate"] ?? item["updateDate"] ?? item["createTime"] ?? "")"
+            let key = dayKey(when)
+            let todayHit = key == today || (quotaFull(remarks) && (key == nil || key == today))
+            guard todayHit else { continue }
             if name.contains("发帖") || name.contains("帖子") || name.contains("发布") { post = true }
             else if name.contains("点赞") { like = true }
             else if name.contains("分享") { share = true }
         }
         return post && like && share
+    }
+
+    /// remarks 形如「每日上限1次  (1/1)」表示今日额度已用完
+    private static func quotaFull(_ remarks: String) -> Bool {
+        guard let match = remarks.range(of: #"\(\s*(\d+)\s*/\s*(\d+)\s*\)"#, options: .regularExpression) else {
+            return false
+        }
+        let inner = String(remarks[match]).filter { $0.isNumber || $0 == "/" }
+        let parts = inner.split(separator: "/")
+        guard parts.count == 2, let used = Int(parts[0]), let cap = Int(parts[1]), cap > 0 else {
+            return false
+        }
+        return used >= cap
     }
 
     private static func integralList(_ data: Any?) -> [[String: Any]] {

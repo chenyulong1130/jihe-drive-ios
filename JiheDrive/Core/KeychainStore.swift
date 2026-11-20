@@ -10,15 +10,27 @@ final class KeychainStore {
     }
 
     private let service = "com.liruixin.jihedrive"
+    private let accessGroup = "com.liruixin.jihedrive"
 
     func value(for key: Key) -> String? {
-        let query: [String: Any] = [
+        if let value = read(key, group: accessGroup) { return value }
+        return read(key, group: nil)
+    }
+
+    func set(_ value: String?, for key: Key) {
+        write(value, key: key, group: nil)
+        write(value, key: key, group: accessGroup)
+    }
+
+    private func read(_ key: Key, group: String?) -> String? {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key.rawValue,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
+        if let group { query[kSecAttrAccessGroup as String] = group }
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else {
@@ -27,12 +39,13 @@ final class KeychainStore {
         return String(data: data, encoding: .utf8)
     }
 
-    func set(_ value: String?, for key: Key) {
-        let query: [String: Any] = [
+    private func write(_ value: String?, key: Key, group: String?) {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key.rawValue,
         ]
+        if let group { query[kSecAttrAccessGroup as String] = group }
         SecItemDelete(query as CFDictionary)
         guard let value, let data = value.data(using: .utf8) else { return }
         var item = query

@@ -1,12 +1,14 @@
 import Foundation
 
-/// 电池信息。云端字段名在不同版本里不一致，解析时按候选键递归查找。
+/// 电池信息。合并 vehicleHomePageV2（充电骨架）+ batteryInfo（实时电压电流）。
 struct BatteryInfo: Identifiable, Hashable {
     let id: String
     let name: String
     let level: Int
     let voltage: Double
     let temperature: Double
+    let current: Double?
+    let power: Double?
     let type: String
     let stateText: String
     let isCharging: Bool
@@ -14,8 +16,65 @@ struct BatteryInfo: Identifiable, Hashable {
     let abnormal: String?
     let chargeMinutes: Int?
     let fullChargeText: String?
+    let chargeTimeString: String?
+    let etaFullText: String?
     let cycleCount: Int?
     let capacity: Double?
+    let soh: Double?
+    let score: String?
+    let rangeKm: Int?
+    let refreshTime: String?
+    let powerUseToday: Double?
+    let powerUseMonth: Double?
+    let powerChargeMonth: Double?
+    let chargeCount: Int?
+    /// 调 batteryInfo/detail/{id} 用
+    let detailId: String?
+
+    var hasLiveElectrical: Bool { voltage > 0 || current != nil || power != nil }
+
+    var hasChargeInfo: Bool {
+        isCharging
+            || !(chargeTimeString ?? "").isEmpty
+            || !(etaFullText ?? "").isEmpty
+            || chargeMinutes != nil
+    }
+
+    var hasUsage: Bool {
+        powerUseToday != nil || powerUseMonth != nil || powerChargeMonth != nil || chargeCount != nil
+    }
+
+    func merged(with other: BatteryInfo) -> BatteryInfo {
+        BatteryInfo(
+            id: other.detailId != nil ? other.id : (detailId != nil ? id : other.id),
+            name: pickName(other.name, name),
+            level: other.level > 0 ? other.level : level,
+            voltage: other.voltage > 0 ? other.voltage : voltage,
+            temperature: other.temperature != 0 ? other.temperature : temperature,
+            current: other.current ?? current,
+            power: other.power ?? power,
+            type: other.type == "锂电池" ? (type.isEmpty ? other.type : type) : other.type,
+            stateText: other.isCharging || other.stateText != "待机" ? other.stateText : stateText,
+            isCharging: isCharging || other.isCharging,
+            isPulledOut: isPulledOut || other.isPulledOut,
+            abnormal: other.abnormal ?? abnormal,
+            chargeMinutes: other.chargeMinutes ?? chargeMinutes,
+            fullChargeText: other.fullChargeText ?? fullChargeText,
+            chargeTimeString: nonempty(other.chargeTimeString) ?? chargeTimeString,
+            etaFullText: nonempty(other.etaFullText) ?? etaFullText,
+            cycleCount: other.cycleCount ?? cycleCount,
+            capacity: other.capacity ?? capacity,
+            soh: other.soh ?? soh,
+            score: nonempty(other.score) ?? score,
+            rangeKm: other.rangeKm ?? rangeKm,
+            refreshTime: other.refreshTime ?? refreshTime,
+            powerUseToday: other.powerUseToday ?? powerUseToday,
+            powerUseMonth: other.powerUseMonth ?? powerUseMonth,
+            powerChargeMonth: other.powerChargeMonth ?? powerChargeMonth,
+            chargeCount: other.chargeCount ?? chargeCount,
+            detailId: other.detailId ?? detailId
+        )
+    }
 
     static func parse(_ response: [String: Any]) -> [BatteryInfo] {
         let data = response["data"] ?? response
@@ -32,48 +91,148 @@ struct BatteryInfo: Identifiable, Hashable {
         return []
     }
 
+    static func fallback(from vehicle: Vehicle) -> BatteryInfo {
+        BatteryInfo(
+            id: "vehicle-\(vehicle.vinNo)",
+            name: "动力电池",
+            level: vehicle.soc,
+            voltage: scaledVolts(vehicle.voltage ?? 0),
+            temperature: vehicle.temperature ?? 0,
+            current: nil,
+            power: nil,
+            type: "锂电池",
+            stateText: vehicle.isCharging ? "充电中" : "待机",
+            isCharging: vehicle.isCharging,
+            isPulledOut: false,
+            abnormal: nil,
+            chargeMinutes: nil,
+            fullChargeText: nil,
+            chargeTimeString: nil,
+            etaFullText: nil,
+            cycleCount: vehicle.cycleCount,
+            capacity: nil,
+            soh: nil,
+            score: nil,
+            rangeKm: vehicle.rangeKm > 0 ? vehicle.rangeKm : nil,
+            refreshTime: nil,
+            powerUseToday: nil,
+            powerUseMonth: nil,
+            powerChargeMonth: nil,
+            chargeCount: nil,
+            detailId: nil
+        )
+    }
+
     private static func make(_ json: [String: Any], index: Int) -> BatteryInfo? {
-        let level = intValue(JSONDig.first(json, keys: ["batteryLevel", "bmssoc", "batterySoc", "soc"]))
-        let voltage = doubleValue(JSONDig.first(json, keys: ["batteryVoltage", "voltage", "totalVoltage"]))
-        let temp = doubleValue(JSONDig.first(json, keys: ["batteryTemp", "temperature", "temp"]))
+        let level = intValue(JSONDig.first(json, keys: [
+            "bmssoc", "batteryLevel", "batterySoc", "soc", "BmsSoc"
+        ]))
+        let voltage = scaledVolts(doubleValue(JSONDig.first(json, keys: [
+            "bmsVoltage", "batteryVoltage", "voltage", "totalVoltage", "packVoltage"
+        ])))
+        let temp = doubleValue(JSONDig.first(json, keys: [
+            "batteryTemp", "temperature", "temp", "bmsTemp"
+        ]))
+        let currentRaw = JSONDig.first(json, keys: ["current", "bmsCurrent", "chargeCurrent", "dischargeCurrent"])
+        let current = optionalDouble(currentRaw)
+        let powerRaw = JSONDig.first(json, keys: ["batteryPower", "power", "chargePower"])
+        let power = optionalDouble(powerRaw)
         let type = stringValue(JSONDig.first(json, keys: ["batteryType", "type"]))
-        let rawState = JSONDig.first(json, keys: ["batteryState", "batteryStateStr", "state"])
-        let powerState = JSONDig.first(json, keys: ["batteryPowerState", "chargeState", "whetherChargeState"])
+        let rawState = JSONDig.first(json, keys: ["batteryState", "batteryStateStr", "chargeStateStr", "state"])
+        let powerState = JSONDig.first(json, keys: [
+            "batteryPowerState", "chargeState", "whetherChargeState"
+        ])
         let pulled = stringValue(JSONDig.first(json, keys: ["batteryPullOutFlag", "pullOutFlag"]))
         let abnormal = stringValue(JSONDig.first(json, keys: ["batteryAbnormalType", "abnormalType"]))
-        let chargeSeconds = intValue(JSONDig.first(json, keys: ["chargeDuration", "chargeDurationSecond"]))
-        let fullCharge = stringValue(JSONDig.first(json, keys: ["fullChargeTime", "chargeTimeString", "fullChargeTimeSecond"]))
+        let chargeSeconds = intValue(JSONDig.first(json, keys: [
+            "chargeDuration", "chargeDurationSecond", "fullChargeTimeSecond"
+        ]))
+        let fullMin = intValue(JSONDig.first(json, keys: ["fullChargeTime"]))
+        let fullCharge = stringValue(JSONDig.first(json, keys: [
+            "fullChargeTime", "chargeTimeString", "fullChargeTimeSecond"
+        ]))
         let cycle = intValue(JSONDig.first(json, keys: ["cycleCount", "batteryCycleCount", "cycle"]))
-        let capacity = doubleValue(JSONDig.first(json, keys: ["batteryCapacity", "capacity", "remainCapacity"]))
-        let name = stringValue(JSONDig.first(json, keys: ["batteryName", "bmsUniqueId", "batteryNo", "name"]))
+        let capacity = doubleValue(JSONDig.first(json, keys: [
+            "batteryCapacity", "capacity", "remainCapacity", "remainAh"
+        ]))
+        let name = stringValue(JSONDig.first(json, keys: [
+            "batteryName", "bmsUniqueId", "batteryNo", "name", "deviceId"
+        ]))
+        let detailId = stringValue(JSONDig.first(json, keys: [
+            "bmsUniqueId", "batteryNo", "deviceId", "batteryId", "id"
+        ]))
+        let soh = optionalDouble(JSONDig.first(json, keys: ["soh", "batterySoh", "health"]))
+        let score = stringValue(JSONDig.first(json, keys: ["score", "batteryScore"]))
+        let range = intValue(JSONDig.first(json, keys: ["hmiRidableMile", "ridableMile", "rangeKm"]))
+        let refresh = stringValue(JSONDig.first(json, keys: ["refreshTime", "updateTime", "ts"]))
+        let chargeTimeString = stringValue(JSONDig.first(json, keys: ["chargeTimeString"]))
+        let eta = stringValue(JSONDig.first(json, keys: [
+            "expectFullTimeDescribe", "etaFullText", "expectFullTime"
+        ]))
 
         let parsedState = stateText(rawState, powerState: powerState)
-        let charging = parsedState.contains("充")
+        let charging = parsedState.contains("充") || boolCharge(powerState)
 
         let typeName = type ?? ""
         let batteryName = name ?? ""
         let pulledFlag = pulled ?? ""
 
-        if level == 0 && voltage == 0 && temp == 0 && typeName.isEmpty && batteryName.isEmpty {
+        if level == 0 && voltage == 0 && temp == 0 && current == nil && power == nil
+            && typeName.isEmpty && batteryName.isEmpty && !charging {
             return nil
         }
 
+        let chargeMin: Int? = {
+            if fullMin > 0, fullMin < 24 * 60 { return fullMin }
+            if chargeSeconds > 60 { return chargeSeconds / 60 }
+            if chargeSeconds > 0 { return chargeSeconds }
+            return nil
+        }()
+
         return BatteryInfo(
             id: batteryName.isEmpty ? "battery-\(index)" : "\(batteryName)-\(index)",
-            name: batteryName.isEmpty ? "电池 \(index + 1)" : batteryName,
+            name: batteryName.isEmpty ? "动力电池" : batteryName,
             level: max(0, min(100, level)),
             voltage: voltage,
             temperature: temp,
+            current: current,
+            power: power,
             type: typeName.isEmpty ? "锂电池" : typeName,
             stateText: parsedState,
             isCharging: charging,
             isPulledOut: pulledFlag == "1" || pulledFlag.lowercased() == "true",
             abnormal: (abnormal?.isEmpty ?? true) || abnormal == "0" ? nil : abnormal,
-            chargeMinutes: chargeSeconds > 0 ? chargeSeconds / 60 : nil,
+            chargeMinutes: chargeMin,
             fullChargeText: fullCharge?.isEmpty == true ? nil : fullCharge,
+            chargeTimeString: chargeTimeString,
+            etaFullText: eta,
             cycleCount: cycle > 0 ? cycle : nil,
-            capacity: capacity > 0 ? capacity : nil
+            capacity: capacity > 0 ? capacity : nil,
+            soh: soh.flatMap { $0 > 0 ? $0 : nil },
+            score: score,
+            rangeKm: range > 0 ? range : nil,
+            refreshTime: refresh,
+            powerUseToday: optionalDouble(JSONDig.first(json, keys: ["powerUseToday", "todayPower"])),
+            powerUseMonth: optionalDouble(JSONDig.first(json, keys: ["powerUseMonth", "monthPower"])),
+            powerChargeMonth: optionalDouble(JSONDig.first(json, keys: ["powerChargeMonth"])),
+            chargeCount: {
+                let n = intValue(JSONDig.first(json, keys: ["chargeCount", "monthChargeCount"]))
+                return n > 0 ? n : nil
+            }(),
+            detailId: detailId
         )
+    }
+
+    /// >300 视为 0.1V 刻度（724 → 72.4V），对齐小程序 voltScale
+    private static func scaledVolts(_ raw: Double) -> Double {
+        guard raw > 0 else { return 0 }
+        return raw > 300 ? (raw / 10) : raw
+    }
+
+    private static func boolCharge(_ raw: Any?) -> Bool {
+        if let flag = raw as? Bool { return flag }
+        let text = stringValue(raw)?.lowercased() ?? ""
+        return text == "1" || text == "true" || text.contains("charg")
     }
 
     private static func stateText(_ raw: Any?, powerState: Any?) -> String {
@@ -83,16 +242,14 @@ struct BatteryInfo: Identifiable, Hashable {
             case "1": return "充电中"
             case "2": return "放电中"
             case "3": return "待机"
-            default: return text
+            default:
+                if text != "0" { return text }
             }
         }
-        if let text = stringValue(powerState), !text.isEmpty {
-            if text == "1" || text.lowercased().contains("charg") { return "充电中" }
-        }
+        if boolCharge(powerState) { return "充电中" }
         return "待机"
     }
 
-    /// 在 data 里找电池数组（列表可能包在 list / batteryInfoList / batteryInfos 里）
     private static func array(in data: Any) -> [[String: Any]]? {
         if let array = data as? [[String: Any]] { return array }
         guard let dict = data as? [String: Any] else { return nil }
@@ -106,6 +263,16 @@ struct BatteryInfo: Identifiable, Hashable {
             }
         }
         return nil
+    }
+
+    private static func pickName(_ a: String, _ b: String) -> String {
+        if a == "动力电池" || a.hasPrefix("battery-") { return b.isEmpty ? a : b }
+        return a.isEmpty ? b : a
+    }
+
+    private static func nonempty(_ text: String?) -> String? {
+        guard let text, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return text
     }
 
     private static func stringValue(_ raw: Any?) -> String? {
@@ -127,11 +294,23 @@ struct BatteryInfo: Identifiable, Hashable {
     }
 
     private static func doubleValue(_ raw: Any?) -> Double {
+        optionalDouble(raw) ?? 0
+    }
+
+    private static func optionalDouble(_ raw: Any?) -> Double? {
+        guard let raw, !(raw is NSNull) else { return nil }
+        if let number = raw as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+            return number.doubleValue
+        }
         if let number = raw as? Double { return number }
         if let number = raw as? Int { return Double(number) }
-        if let text = raw as? String, let number = Double(text) { return number }
-        if let number = raw as? NSNumber { return number.doubleValue }
-        return 0
+        if let text = raw as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { return nil }
+            return Double(trimmed)
+        }
+        return nil
     }
 }
 

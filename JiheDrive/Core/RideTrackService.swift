@@ -44,6 +44,28 @@ enum RideTrackService {
         return await tracks(vin: vin, from: from, to: today, page: page, pageSize: pageSize)
     }
 
+    /// 整月按次行程（分页拼齐）
+    static func monthTracks(vin: String, month: Date) async -> [RideTrack]? {
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month], from: month)
+        components.day = 1
+        guard let start = calendar.date(from: components),
+              let next = calendar.date(byAdding: .month, value: 1, to: start),
+              let last = calendar.date(byAdding: .day, value: -1, to: next) else {
+            return nil
+        }
+        let end = min(last, Date())
+        var all: [RideTrack] = []
+        for page in 1...8 {
+            guard let batch = await tracks(vin: vin, from: start, to: end, page: page, pageSize: 50) else {
+                return all.isEmpty ? nil : all
+            }
+            all.append(contentsOf: batch)
+            if batch.count < 50 { break }
+        }
+        return all
+    }
+
     /// 按日期区间拉按次行程（日期/月份均横线，对齐 miniapp fetchTripTrack）
     static func tracks(
         vin: String,
@@ -91,12 +113,17 @@ enum RideTrackService {
 
         var items: [[String: Any]] = []
         for group in groups {
+            let day = text(group["dayTime"] ?? group["date"])
             let history = (group["historyList"]
                 ?? group["rideRocordList"]
                 ?? group["rideList"]
                 ?? group["recordList"]) as? [[String: Any]]
             if let history {
-                items.append(contentsOf: history)
+                for row in history {
+                    var copy = row
+                    if copy["dayTime"] == nil, let day { copy["dayTime"] = day }
+                    items.append(copy)
+                }
             } else if group["rideId"] != nil || group["trajectory"] != nil {
                 items.append(group)
             }
@@ -112,6 +139,7 @@ enum RideTrackService {
 
             let start = text(item["startTime"] ?? item["beginTime"] ?? item["rideBeginTime"])
             let end = text(item["endTime"] ?? item["finishTime"] ?? item["rideEndTime"])
+            let energy = parseEnergy(item)
             let track = RideTrack(
                 id: text(item["rideId"] ?? item["id"]) ?? "ride-\(index)",
                 startTime: display(start),
@@ -138,7 +166,10 @@ enum RideTrackService {
                         ?? item["thumbnail"]
                         ?? item["thumbUrl"]
                         ?? item["rideThumbnail"]
-                )
+                ),
+                dayKey: dayKey(item["dayTime"] ?? item["date"] ?? start),
+                socUsed: energy.soc,
+                energyWh: energy.wh
             )
             return (start ?? "", track)
         }
@@ -167,6 +198,8 @@ enum RideTrackService {
         var todayAccel: Int?
         var todayBrake: Int?
         var todayBend: Int?
+        var recentKm: [Double] = []
+        var recentMin: [Int] = []
     }
 
     static func daySummary(vin: String, date: Date = Date()) async -> DaySummary? {
@@ -198,7 +231,11 @@ enum RideTrackService {
         return DaySummary(
             mileage: Vehicle.doubleValue(data["rideMileageDay"] ?? data["rideMileage"]) ?? 0,
             minutes: Int(Vehicle.doubleValue(
-                data["ridingTimeDayUnitMinute"] ?? data["ridingTimeUnitMinute"]
+                data["ridingTimeDayUnitMinute"]
+                    ?? data["ridingTimeUnitMinute"]
+                    ?? data["ridingTimeDay"]
+                    ?? data["rideTimeDay"]
+                    ?? data["ridingTime"]
             ) ?? 0),
             maxSpeed: maxSpeed,
             accelTimes: Int(Vehicle.doubleValue(
@@ -349,11 +386,18 @@ enum RideTrackService {
                         ?? Vehicle.doubleValue(data["lastRidingTime"])
                 ) ?? times.last
                 extra.todayKm = positive(Vehicle.doubleValue(data["rideMileageDay"]))
+                extra.todayMin = positiveInt(
+                    Vehicle.doubleValue(data["ridingTimeDayUnitMinute"])
+                        ?? Vehicle.doubleValue(data["ridingTimeUnitMinute"])
+                        ?? Vehicle.doubleValue(data["ridingTimeDay"])
+                )
                 extra.todayMaxSpeed = positive(
                     Vehicle.doubleValue(data["maxSpeed"])
                         ?? Vehicle.doubleValue(data["maxSpeedDay"])
                         ?? Vehicle.doubleValue(data["highestSpeed"])
                 )
+                extra.recentKm = mileages
+                extra.recentMin = times
             }
         } catch is CancellationError {
             return nil
@@ -373,10 +417,18 @@ enum RideTrackService {
             return nil
         }
 
-        if extra.todayMaxSpeed == nil
-            || extra.todayAccel == nil
-            || (extra.todayAccel ?? 0) == 0 {
+        // 车辆页只需要今日汇总；加速次数为 0 是正常值，不必再拉一天行程明细。
+        let needTracks = extra.todayKm == nil && extra.todayMin == nil
+        if needTracks {
             if let dayTracks = await tracks(vin: vin, days: 1), !dayTracks.isEmpty {
+                let mins = dayTracks.reduce(0) { $0 + $1.durationMinutes }
+                if mins > 0, extra.todayMin == nil || extra.todayMin == 0 {
+                    extra.todayMin = mins
+                }
+                if extra.todayKm == nil {
+                    let km = dayTracks.reduce(0.0) { $0 + $1.mileage }
+                    if km > 0 { extra.todayKm = km }
+                }
                 if extra.todayMaxSpeed == nil {
                     let peak = dayTracks.compactMap { track -> Double? in
                         if let max = track.maxSpeed, max > 0 { return max }
@@ -470,6 +522,41 @@ enum RideTrackService {
             return name
         }
         return nil
+    }
+
+    /// 耗电：≤100 当 SOC%；更大当 Wh。也支持 startSoc - endSoc。
+    private static func parseEnergy(_ item: [String: Any]) -> (soc: Double?, wh: Double?) {
+        let raw = Vehicle.doubleValue(
+            item["socConsumption"] ?? item["consumeSoc"] ?? item["usedSoc"]
+                ?? item["socUsed"] ?? item["rideSoc"] ?? item["electricityConsumption"]
+                ?? item["powerConsumption"]
+        )
+        let startSoc = Vehicle.doubleValue(item["startSoc"] ?? item["beginSoc"] ?? item["startBMSSOC"])
+        let endSoc = Vehicle.doubleValue(item["endSoc"] ?? item["finishSoc"] ?? item["endBMSSOC"])
+        var soc: Double?
+        var wh: Double?
+        if let raw {
+            if raw > 0, raw <= 100 {
+                soc = raw
+            } else if raw > 100 {
+                wh = raw
+            }
+        }
+        if soc == nil, let startSoc, let endSoc, startSoc >= endSoc, startSoc - endSoc <= 100 {
+            soc = startSoc - endSoc
+        }
+        return (soc, wh)
+    }
+
+    private static func dayKey(_ raw: Any?) -> String? {
+        guard let text = text(raw) else { return nil }
+        let normalized = text
+            .replacingOccurrences(of: "/", with: ".")
+            .replacingOccurrences(of: "-", with: ".")
+        guard let match = normalized.range(of: #"\d{4}\.\d{2}\.\d{2}"#, options: .regularExpression) else {
+            return nil
+        }
+        return String(normalized[match])
     }
 
     /// "2026.11.13 08:12:33" / ISO8601 → "08:12"（列表按日分组，条目不再重复日期）

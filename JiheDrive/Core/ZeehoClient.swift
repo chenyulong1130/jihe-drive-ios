@@ -28,16 +28,47 @@ final class ZeehoClient {
     init(session: URLSession = .shared, store: KeychainStore = .shared) {
         self.session = session
         self.store = store
+        if let token = store.value(for: .token), !token.isEmpty {
+            UserDefaults(suiteName: WidgetSnapshot.suiteName)?.set(token, forKey: "sessionToken")
+        }
+        if let uid = store.value(for: .userId), !uid.isEmpty {
+            UserDefaults(suiteName: WidgetSnapshot.suiteName)?.set(uid, forKey: "sessionUserId")
+        }
+        UserDefaults(suiteName: WidgetSnapshot.suiteName)?.synchronize()
     }
 
     var token: String? {
-        get { store.value(for: .token) }
-        set { store.set(newValue, for: .token) }
+        get {
+            if let value = store.value(for: .token), !value.isEmpty { return value }
+            return UserDefaults(suiteName: WidgetSnapshot.suiteName)?.string(forKey: "sessionToken")
+        }
+        set {
+            store.set(newValue, for: .token)
+            let defaults = UserDefaults(suiteName: WidgetSnapshot.suiteName)
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: "sessionToken")
+            } else {
+                defaults?.removeObject(forKey: "sessionToken")
+            }
+            defaults?.synchronize()
+        }
     }
 
     var userId: String? {
-        get { store.value(for: .userId) }
-        set { store.set(newValue, for: .userId) }
+        get {
+            if let value = store.value(for: .userId), !value.isEmpty { return value }
+            return UserDefaults(suiteName: WidgetSnapshot.suiteName)?.string(forKey: "sessionUserId")
+        }
+        set {
+            store.set(newValue, for: .userId)
+            let defaults = UserDefaults(suiteName: WidgetSnapshot.suiteName)
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: "sessionUserId")
+            } else {
+                defaults?.removeObject(forKey: "sessionUserId")
+            }
+            defaults?.synchronize()
+        }
     }
 
     var isLoggedIn: Bool {

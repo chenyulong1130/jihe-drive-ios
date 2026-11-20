@@ -6,6 +6,8 @@ struct SettingsView: View {
     @EnvironmentObject private var videoStore: VideoBackdropStore
     @EnvironmentObject private var wallpaperStore: WallpaperStore
     @EnvironmentObject private var appearance: AppearanceStore
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.activeMainTab) private var activeMainTab
 
     @State private var showPicker = false
     @State private var showTheme = false
@@ -47,8 +49,15 @@ struct SettingsView: View {
             .padding(.top, 8)
             .padding(.bottom, 118)
         }
-        .animation(nil, value: appearance.mode)
-        .task { await signin.refresh() }
+        .animation(nil, value: appearance.resolvedScheme)
+        .task(id: activeMainTab) {
+            guard activeMainTab == .settings else { return }
+            await signin.refresh()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, activeMainTab == .settings else { return }
+            Task { await signin.refresh() }
+        }
         .sheet(isPresented: $showPicker) {
             VehiclePickerSheet()
         }
@@ -247,7 +256,7 @@ struct SettingsView: View {
                         Text("主屏小组件")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Theme.label)
-                        Text("电量 · 续航 · 锁态 · 签到")
+                        Text("今日骑行 · 电量 · 积分 · 签到 · 社区")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.secondary)
                     }
@@ -259,7 +268,7 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("未签名安装时系统可能屏蔽 App Group，需用带描述文件的安装方式才能互通数据。")
+                Text("今日已签到且社区已完成时，刷新只拉车辆数据，不再重复签到和社区任务。")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -268,7 +277,7 @@ struct SettingsView: View {
                     Task {
                         await model.refreshAll()
                         await signin.refresh()
-                        WidgetSnapshot.publish(from: model, signin: signin)
+                        await signin.syncWidget(model: model, ride: nil)
                     }
                 } label: {
                     Text("立即同步到小组件")

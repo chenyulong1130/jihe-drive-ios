@@ -1,55 +1,49 @@
 import SwiftUI
 
-/// 骑行数据：对齐 Flutter RideMileagePage / 小程序 ride.vue
-/// 月度柱状图（rideMonthInfo）→ 选中日汇总 + 按次行程（ridetrack_v2）
+/// 全部行程：按日分组列表，对齐官方「全部行程」页
 struct RideHomeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.activeMainTab) private var activeMainTab
 
-    /// 从车辆页以弹层方式打开时显示关闭按钮
     var showsClose: Bool = false
 
     @State private var monthAnchor = Date()
-    @State private var monthDays: [RideTrackService.MonthDay] = []
-    @State private var selectedIndex = 0
-    @State private var daySummary: RideTrackService.DaySummary?
-    @State private var tracks: [RideTrack] = []
-    @State private var loadingMonth = false
-    @State private var loadingDay = false
+    @State private var groups: [RideDayGroup] = []
+    @State private var loading = false
     @State private var errorText: String?
     @State private var selected: RideTrack?
 
-    private var selectedDay: RideTrackService.MonthDay? {
-        guard monthDays.indices.contains(selectedIndex) else { return nil }
-        return monthDays[selectedIndex]
-    }
-
-    private var monthMileage: Double {
-        monthDays.reduce(0) { $0 + $1.mileage }
-    }
-
-    private var activeDayCount: Int {
-        monthDays.filter { $0.mileage > 0 }.count
-    }
-
-    private var maxBar: Double {
-        max(monthDays.map(\.mileage).max() ?? 1, 1)
-    }
-
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 header
+                monthChip
+                    .padding(.top, 8)
+                    .padding(.bottom, 18)
 
-                if model.selectedVehicle != nil {
-                    summaryCard
-                    monthChartCard
-                    daySection
-                } else {
+                if model.selectedVehicle == nil {
                     Text("先在车辆页登录并选择一台车")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.secondary)
-                        .padding(.top, 40)
+                        .padding(.top, 32)
+                } else if loading && groups.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 48)
+                } else if let errorText, groups.isEmpty {
+                    SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
+                        .padding(.top, 12)
+                } else if groups.isEmpty {
+                    Text("本月暂无骑行记录")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 48)
+                } else {
+                    ForEach(groups) { group in
+                        daySection(group)
+                    }
                 }
             }
             .padding(.horizontal, Theme.page)
@@ -58,7 +52,10 @@ struct RideHomeView: View {
         }
         .background(Theme.groupedBackground)
         .refreshable { await loadMonth() }
-        .task(id: model.selectedVehicle?.vinNo) { await loadMonth() }
+        .task(id: "\(model.selectedVehicle?.vinNo ?? "")-\(monthKey)-\(shouldLoadRides)") {
+            guard shouldLoadRides else { return }
+            await loadMonth()
+        }
         .fullScreenCover(item: $selected) { track in
             if let vehicle = model.selectedVehicle {
                 RideReplayView(vehicle: vehicle, track: track)
@@ -66,342 +63,201 @@ struct RideHomeView: View {
         }
     }
 
+    // MARK: - Header
+
     private var header: some View {
-        Group {
+        HStack(spacing: 10) {
             if showsClose {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("骑行数据")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                        Text(model.selectedVehicle?.name ?? "尚未选择车辆")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Theme.secondary)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(Theme.surfaceAlt))
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-                }
-                .padding(.bottom, 6)
-            } else {
-                LargeTitle("骑行", subtitle: model.selectedVehicle?.name ?? "尚未选择车辆")
-            }
-        }
-    }
-
-    // MARK: - 概览
-
-    private var summaryCard: some View {
-        AppleCard {
-            VStack(spacing: 12) {
-                HStack(spacing: 6) {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
-                    Text("里程概览")
-                        .font(Theme.headline)
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                    Spacer(minLength: 0)
-                    Text(monthTitle)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.tertiary)
+                        .frame(width: 34, height: 34)
                 }
-
-                HStack(spacing: 10) {
-                    MetricChip(
-                        title: "本月",
-                        value: model.selectedVehicle?.monthMileage
-                            ?? (monthDays.isEmpty ? "--" : String(format: "%.1f", monthMileage)),
-                        unit: "km",
-                        icon: "calendar"
-                    )
-                    MetricChip(
-                        title: "有效骑行",
-                        value: "\(activeDayCount)",
-                        unit: "天",
-                        icon: "figure.outdoor.cycle"
-                    )
-                    MetricChip(
-                        title: "总里程",
-                        value: String(format: "%.0f", model.selectedVehicle?.totalMileKm ?? 0),
-                        unit: "km",
-                        icon: "speedometer"
-                    )
-                }
-            }
-        }
-    }
-
-    // MARK: - 月柱图
-
-    private var monthChartCard: some View {
-        AppleCard {
-            VStack(spacing: 12) {
-                HStack {
-                    Button {
-                        shiftMonth(-1)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(Theme.label)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Theme.surfaceAlt))
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
-
-                    Spacer()
-                    VStack(spacing: 2) {
-                        Text(monthTitle)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                        Text(loadingMonth ? "加载中…" : "\(monthDays.count) 天记录")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.tertiary)
-                    }
-                    Spacer()
-
-                    Button {
-                        shiftMonth(1)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(canGoNextMonth ? Theme.label : Theme.tertiary.opacity(0.4))
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Theme.surfaceAlt))
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
-                    .disabled(!canGoNextMonth)
-                }
-
-                if let errorText {
-                    SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
-                }
-
-                if loadingMonth && monthDays.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 36)
-                } else if monthDays.isEmpty {
-                    Text("本月暂无骑行数据")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .bottom, spacing: 6) {
-                                ForEach(Array(monthDays.enumerated()), id: \.element.id) { index, day in
-                                    dayBar(day, index: index)
-                                        .id(index)
-                                }
-                            }
-                            .padding(.horizontal, 2)
-                            .padding(.top, 8)
-                            .frame(minHeight: 188, alignment: .bottom)
-                        }
-                        .onChange(of: selectedIndex) { _, idx in
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(idx, anchor: .center)
-                            }
-                        }
-                        .onAppear {
-                            proxy.scrollTo(selectedIndex, anchor: .center)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.top, 10)
-    }
-
-    private func dayBar(_ day: RideTrackService.MonthDay, index: Int) -> some View {
-        let selected = index == selectedIndex
-        let ratio = CGFloat(day.mileage / maxBar)
-        let height = max(6, 128 * ratio)
-        let hasRide = day.mileage > 0
-
-        return Button {
-            guard selectedIndex != index else { return }
-            selectedIndex = index
-            Task { await loadSelectedDay() }
-        } label: {
-            VStack(spacing: 6) {
-                Text(hasRide ? String(format: "%.0f", day.mileage) : " ")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(selected ? Theme.brand : Theme.tertiary)
-                    .monospacedDigit()
-                    .frame(height: 12)
-
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(selected ? Theme.brand : (hasRide ? Theme.brand.opacity(0.45) : Theme.surfaceAlt))
-                    .frame(width: 18, height: height)
-
-                Text(dayLabel(day.date))
-                    .font(.system(size: 10, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(selected ? Theme.label : Theme.tertiary)
-            }
-            .frame(width: 28)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - 选中日
-
-    private var daySection: some View {
-        VStack(spacing: 10) {
-            SectionHeader(selectedDay.map { "\($0.date) 行程" } ?? "当日行程")
-
-            if selectedDay != nil, (selectedDay?.mileage ?? 0) > 0 || (daySummary?.mileage ?? 0) > 0 || daySummary != nil {
-                daySummaryCard
+                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
             }
 
-            if loadingDay && tracks.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView().scaleEffect(0.8)
-                    Text("正在读取当日行程")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            } else if tracks.isEmpty {
-                Text((selectedDay?.mileage ?? 0) > 0 ? "当日暂无按次轨迹，可看上方汇总" : "选中有骑行的日期查看行程")
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(tracks) { track in
-                    Button {
-                        selected = track
-                    } label: {
-                        trackRow(track)
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
-                }
-            }
-        }
-        .padding(.top, 8)
-    }
-
-    private var daySummaryCard: some View {
-        let mile = daySummary?.mileage ?? selectedDay?.mileage ?? 0
-        let mins = daySummary?.minutes ?? selectedDay?.minutes ?? 0
-        let speed = daySummary?.maxSpeed ?? 0
-        let accel = daySummary?.accelTimes ?? 0
-        let brake = daySummary?.brakeTimes ?? 0
-        let bend = daySummary?.bendTimes ?? 0
-
-        return VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                MetricChip(title: "里程", value: String(format: "%.1f", mile), unit: "km", icon: "road.lanes")
-                MetricChip(title: "时长", value: "\(mins)", unit: "min", icon: "clock")
-                MetricChip(
-                    title: "极速",
-                    value: speed > 0 ? String(format: "%.0f", speed) : "--",
-                    unit: "km/h",
-                    icon: "speedometer"
-                )
-            }
-            HStack(spacing: 10) {
-                MetricChip(title: "急加速", value: "\(accel)", unit: "次", icon: "arrow.up.right")
-                MetricChip(title: "急刹车", value: "\(brake)", unit: "次", icon: "arrow.down.right")
-                MetricChip(title: "弯道", value: "\(bend)", unit: "次", icon: "arrow.turn.up.right")
-            }
-        }
-    }
-
-    private func trackRow(_ track: RideTrack) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Theme.surfaceAlt
-                RouteThumbnail(points: track.points)
-                if let thumb = track.thumbnailURL {
-                    CachedRemoteImage(url: thumb, contentMode: .fill)
-                }
-            }
-            .frame(width: 62, height: 62)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(tripClock(track))
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(Theme.label)
-                    .lineLimit(1)
-
-                if let from = track.startAddress, !from.isEmpty {
-                    Text(from)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let to = track.endAddress, !to.isEmpty {
-                        Text(to)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.secondary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    label(icon: "point.topleft.down.curvedto.point.bottomright.up", text: String(format: "%.1f km", track.mileage))
-                    label(icon: "clock", text: "\(track.durationMinutes) 分钟")
-                    if let speed = track.maxSpeed, speed > 0 {
-                        label(icon: "speedometer", text: String(format: "%.0f km/h", speed))
-                    }
-                }
-            }
+            Text("全部行程")
+                .font(.system(size: showsClose ? 18 : 28, weight: .semibold))
+                .foregroundStyle(Theme.label)
 
             Spacer(minLength: 0)
 
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 26))
-                .foregroundStyle(Theme.brand)
-                .padding(.top, 4)
+            if showsClose {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Theme.surfaceAlt))
+                }
+                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            }
         }
-        .padding(12)
+    }
+
+    private var monthChip: some View {
+        HStack(spacing: 10) {
+            Button {
+                shiftMonth(-1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+
+            HStack(spacing: 6) {
+                Text(monthTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(Theme.surface))
+            .shadow(color: Theme.cardShadow, radius: 8, y: 2)
+
+            Button {
+                shiftMonth(1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(canGoNextMonth ? Theme.secondary : Theme.tertiary.opacity(0.35))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            .disabled(!canGoNextMonth)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Day
+
+    private func daySection(_ group: RideDayGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(group.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Spacer(minLength: 8)
+                Text("\(formatKm(group.totalKm))km  \(durationLabel(group.totalMin))")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.tertiary)
+                    .monospacedDigit()
+            }
+            .padding(.top, 6)
+
+            ForEach(group.tracks) { track in
+                Button {
+                    selected = track
+                } label: {
+                    rideCard(track)
+                }
+                .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+            }
+        }
+        .padding(.bottom, 10)
+    }
+
+    private func rideCard(_ track: RideTrack) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(timeRange(track))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.secondary)
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+
+            HStack(alignment: .center, spacing: 14) {
+                thumb(track)
+                    .frame(width: 72, height: 72)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(formatKm(track.mileage))
+                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.label)
+                            .monospacedDigit()
+                        Text("km")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.secondary)
+                    }
+
+                    HStack(spacing: 0) {
+                        metric(socText(track), "耗电量")
+                        metric("\(track.durationMinutes)min", "耗时")
+                        metric(avgEnergyText(track), "平均能耗")
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Theme.surface)
         )
-        .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 4)
+        .shadow(color: Theme.cardShadow, radius: 14, y: 3)
     }
 
-    private func tripClock(_ track: RideTrack) -> String {
-        let start = track.startTime ?? ""
-        if start.isEmpty, track.endTime == nil { return "未命名行程" }
-        if let end = track.endTime, !end.isEmpty, end != start {
-            return "\(start) – \(end)"
+    private func thumb(_ track: RideTrack) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(hex: 0xF2F4F7))
+            RouteThumbnail(points: track.points)
+            if let url = track.thumbnailURL {
+                CachedRemoteImage(url: url, contentMode: .fill)
+            }
         }
-        return start.isEmpty ? "未命名行程" : start
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private func label(icon: String, text: String) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 9.5, weight: .semibold))
-            Text(text)
-                .font(.system(size: 11.5))
+    private func metric(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.label)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.tertiary)
         }
-        .foregroundStyle(Theme.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - 数据
+    // MARK: - Data
+
+    /// 底栏切到骑行页，或从车辆页全屏打开行程列表时才拉月数据。
+    private var shouldLoadRides: Bool {
+        showsClose || activeMainTab == .ride
+    }
 
     private var monthTitle: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy/MM"
+        return formatter.string(from: monthAnchor)
+    }
+
+    private var monthKey: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy.MM"
         return formatter.string(from: monthAnchor)
     }
@@ -418,157 +274,162 @@ struct RideHomeView: View {
         guard let next = Calendar.current.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
         if delta > 0, !canGoNextMonth { return }
         monthAnchor = next
-        Task { await loadMonth() }
     }
 
     private func loadMonth() async {
         guard let vehicle = model.selectedVehicle else { return }
-        loadingMonth = true
+        loading = true
         errorText = nil
-        defer { loadingMonth = false }
+        defer { loading = false }
 
-        guard let days = await RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor) else {
-            // 刷新取消或失败：保留当前图表，不要清空
-            return
-        }
-        monthDays = days
-
-        if days.isEmpty {
-            selectedIndex = 0
-            daySummary = nil
-            tracks = []
-            errorText = nil
-            return
-        }
-
-        // 默认：今天（有骑行）→ 否则本月最后一个有骑行的日子
-        let todayKey = Self.dottedDay.string(from: Date())
-        if let todayIdx = days.firstIndex(where: { $0.date == todayKey && $0.mileage > 0 }) {
-            selectedIndex = todayIdx
-        } else if let last = days.lastIndex(where: { $0.mileage > 0 }) {
-            selectedIndex = last
-        } else {
-            selectedIndex = days.count - 1
-        }
-
-        await loadSelectedDay()
-    }
-
-    private func loadSelectedDay() async {
-        guard let vehicle = model.selectedVehicle, let day = selectedDay else {
-            return
-        }
-
-        loadingDay = true
-        defer { loadingDay = false }
-
-        guard let date = Self.parseDotted(day.date) else { return }
-
-        async let summaryTask = RideTrackService.daySummary(vin: vehicle.vinNo, date: date)
-        async let tracksTask = RideTrackService.tracks(vin: vehicle.vinNo, from: date, to: date)
-        let summary = await summaryTask
-        let list = await tracksTask
+        async let daysTask = RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor)
+        async let tracksTask = RideTrackService.monthTracks(vin: vehicle.vinNo, month: monthAnchor)
+        let days = await daysTask
+        let tracks = await tracksTask
 
         if Task.isCancelled { return }
-
-        if let list {
-            tracks = list
+        if tracks == nil, days == nil {
+            errorText = "骑行数据加载失败"
+            return
         }
-        var merged = summary
-        let source = list ?? tracks
-        let accel = source.reduce(0) { $0 + $1.accelTimes }
-        let brake = source.reduce(0) { $0 + $1.brakeTimes }
-        let bend = source.reduce(0) { $0 + $1.bendTimes }
-        if merged == nil, day.mileage > 0 || !source.isEmpty {
-            merged = RideTrackService.DaySummary(
-                mileage: day.mileage,
-                minutes: day.minutes,
-                maxSpeed: source.compactMap(\.maxSpeed).max() ?? 0,
-                accelTimes: accel,
-                brakeTimes: brake,
-                bendTimes: bend
+        groups = Self.buildGroups(days: days ?? [], tracks: tracks ?? [])
+    }
+
+    private static func buildGroups(days: [RideTrackService.MonthDay], tracks: [RideTrack]) -> [RideDayGroup] {
+        let today = dotted.string(from: Date())
+        var bucket: [String: [RideTrack]] = [:]
+        for track in tracks {
+            let key = track.dayKey ?? today
+            bucket[key, default: []].append(track)
+        }
+        for day in days where day.mileage > 0 && bucket[day.date] == nil {
+            bucket[day.date] = []
+        }
+
+        let keys = bucket.keys.sorted(by: >)
+        return keys.compactMap { key in
+            let list = (bucket[key] ?? []).sorted { ($0.startTime ?? "") > ($1.startTime ?? "") }
+            let day = days.first(where: { $0.date == key })
+            let km = day?.mileage ?? list.reduce(0) { $0 + $1.mileage }
+            let minutes = day?.minutes ?? list.reduce(0) { $0 + $1.durationMinutes }
+            guard km > 0 || minutes > 0 || !list.isEmpty else { return nil }
+            return RideDayGroup(
+                id: key,
+                title: dayTitle(key, today: today),
+                totalKm: km,
+                totalMin: minutes,
+                tracks: list
             )
-        } else if var dayInfo = merged {
-            if dayInfo.accelTimes == 0, accel > 0 { dayInfo.accelTimes = accel }
-            if dayInfo.brakeTimes == 0, brake > 0 { dayInfo.brakeTimes = brake }
-            if dayInfo.bendTimes == 0, bend > 0 { dayInfo.bendTimes = bend }
-            merged = dayInfo
-        }
-        if let merged {
-            daySummary = merged
         }
     }
 
-    private func dayLabel(_ date: String) -> String {
-        let parts = date.split(separator: ".")
-        guard parts.count >= 3 else { return date }
-        return String(parts[2])
+    private static func dayTitle(_ key: String, today: String) -> String {
+        if key == today { return "今天" }
+        let parts = key.split(separator: ".")
+        guard parts.count >= 3, let month = Int(parts[1]), let day = Int(parts[2]) else {
+            return key
+        }
+        return "\(month)月\(String(format: "%02d", day))日"
     }
 
-    private static let dottedDay: DateFormatter = {
+    private func timeRange(_ track: RideTrack) -> String {
+        let start = track.startTime ?? "--:--"
+        if let end = track.endTime, !end.isEmpty, end != start {
+            return "\(start)-\(end)"
+        }
+        return start
+    }
+
+    private func socText(_ track: RideTrack) -> String {
+        if let soc = track.socUsed, soc > 0 {
+            return String(format: soc >= 10 ? "%.0f%%" : "%.1f%%", soc)
+        }
+        return "--"
+    }
+
+    private func avgEnergyText(_ track: RideTrack) -> String {
+        guard let soc = track.socUsed, soc > 0, track.mileage > 0.05 else { return "--" }
+        return String(format: "%.1f%%/km", soc / track.mileage)
+    }
+
+    private func formatKm(_ km: Double) -> String {
+        if km >= 100 { return String(format: "%.0f", km) }
+        return String(format: "%.1f", km)
+    }
+
+    private func durationLabel(_ minutes: Int) -> String {
+        if minutes >= 60 {
+            let hours = Double(minutes) / 60.0
+            return String(format: hours >= 10 ? "%.0fh" : "%.1fh", hours)
+        }
+        return "\(minutes)min"
+    }
+
+    private static let dotted: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy.MM.dd"
         return formatter
     }()
-
-    private static func parseDotted(_ text: String) -> Date? {
-        dottedDay.date(from: text)
-            ?? {
-                let alt = DateFormatter()
-                alt.locale = Locale(identifier: "en_US_POSIX")
-                alt.dateFormat = "yyyy-MM-dd"
-                return alt.date(from: text.replacingOccurrences(of: ".", with: "-"))
-            }()
-    }
 }
 
-/// 用轨迹点画的缩略图
+private struct RideDayGroup: Identifiable {
+    let id: String
+    let title: String
+    let totalKm: Double
+    let totalMin: Int
+    let tracks: [RideTrack]
+}
+
+/// 浅底轨迹缩略图：青点起点、红点终点
 struct RouteThumbnail: View {
     let points: [Coordinate]
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(hex: 0x0E1B2E), Color(hex: 0x17324F)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+        Canvas { context, size in
+            let bg = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 12)
+            context.fill(bg, with: .color(Color(hex: 0xF3F5F8)))
 
-            Canvas { context, size in
-                guard points.count > 1 else { return }
-                let lats = points.map { $0.latitude }
-                let lngs = points.map { $0.longitude }
-                guard let minLat = lats.min(), let maxLat = lats.max(),
-                      let minLng = lngs.min(), let maxLng = lngs.max() else { return }
+            guard points.count > 1 else { return }
+            let lats = points.map(\.latitude)
+            let lngs = points.map(\.longitude)
+            guard let minLat = lats.min(), let maxLat = lats.max(),
+                  let minLng = lngs.min(), let maxLng = lngs.max() else { return }
 
-                let spanLat = max(0.000001, maxLat - minLat)
-                let spanLng = max(0.000001, maxLng - minLng)
-                let inset: CGFloat = 9
-                let width = size.width - inset * 2
-                let height = size.height - inset * 2
+            let spanLat = max(0.000001, maxLat - minLat)
+            let spanLng = max(0.000001, maxLng - minLng)
+            let inset: CGFloat = 10
+            let width = size.width - inset * 2
+            let height = size.height - inset * 2
 
-                var path = Path()
-                for (index, point) in points.enumerated() {
-                    let x = inset + width * CGFloat((point.longitude - minLng) / spanLng)
-                    let y = inset + height * CGFloat(1 - (point.latitude - minLat) / spanLat)
-                    if index == 0 {
-                        path.move(to: CGPoint(x: x, y: y))
-                    } else {
-                        path.addLine(to: CGPoint(x: x, y: y))
-                    }
-                }
-
-                context.stroke(
-                    path,
-                    with: .color(Color(hex: 0x4D9BFF)),
-                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+            func point(at coordinate: Coordinate) -> CGPoint {
+                CGPoint(
+                    x: inset + width * CGFloat((coordinate.longitude - minLng) / spanLng),
+                    y: inset + height * CGFloat(1 - (coordinate.latitude - minLat) / spanLat)
                 )
             }
-            .padding(2)
+
+            var path = Path()
+            for (index, item) in points.enumerated() {
+                let p = point(at: item)
+                if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+            context.stroke(
+                path,
+                with: .color(Color(hex: 0x3B9BFF)),
+                style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
+            )
+
+            if let first = points.first {
+                let start = point(at: first)
+                let dot = Path(ellipseIn: CGRect(x: start.x - 4, y: start.y - 4, width: 8, height: 8))
+                context.fill(dot, with: .color(Color(hex: 0x2DD4BF)))
+            }
+            if let last = points.last {
+                let end = point(at: last)
+                let dot = Path(ellipseIn: CGRect(x: end.x - 4, y: end.y - 4, width: 8, height: 8))
+                context.fill(dot, with: .color(Color(hex: 0xFF5A5A)))
+            }
         }
     }
 }

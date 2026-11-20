@@ -24,22 +24,6 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         case .dark: return "moon.fill"
         }
     }
-
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: return nil
-        case .light: return .light
-        case .dark: return .dark
-        }
-    }
-
-    var uiUserInterfaceStyle: UIUserInterfaceStyle {
-        switch self {
-        case .system: return .unspecified
-        case .light: return .light
-        case .dark: return .dark
-        }
-    }
 }
 
 @MainActor
@@ -47,11 +31,19 @@ final class AppearanceStore: ObservableObject {
     @Published var mode: AppAppearance {
         didSet {
             UserDefaults.standard.set(mode.rawValue, forKey: Self.key)
-            applyToWindows()
+            refreshResolved()
         }
     }
 
+    /// 实际套到界面上的浅/深，永远不是 nil。
+    /// 「跟随系统」也解析成当前系统浅或深，避免 preferredColorScheme(nil) 在浅色下整页变白。
+    @Published private(set) var resolvedScheme: ColorScheme
+
+    private var observers: [NSObjectProtocol] = []
     private static let key = "jihe.appearance.mode"
+
+    private static let lightCanvas = UIColor(red: 0.933, green: 0.945, blue: 0.961, alpha: 1)
+    private static let darkCanvas = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
 
     init() {
         if let raw = UserDefaults.standard.string(forKey: Self.key),
@@ -60,25 +52,61 @@ final class AppearanceStore: ObservableObject {
         } else {
             mode = .system
         }
+        resolvedScheme = Self.scheme(for: mode)
+        observeSystem()
+        applyToWindows()
+    }
+
+    func refreshResolved() {
+        let next = Self.scheme(for: mode)
+        if resolvedScheme != next {
+            resolvedScheme = next
+        }
         applyToWindows()
     }
 
     func applyToWindows() {
-        let style = mode.uiUserInterfaceStyle
-        let canvas = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
-                : UIColor(red: 0.933, green: 0.945, blue: 0.961, alpha: 1)
-        }
+        let dark = resolvedScheme == .dark
+        let style: UIUserInterfaceStyle = dark ? .dark : .light
+        let canvas = dark ? Self.darkCanvas : Self.lightCanvas
         UIView.performWithoutAnimation {
             for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
                 for window in scene.windows {
                     window.overrideUserInterfaceStyle = style
                     window.backgroundColor = canvas
-                    window.tintAdjustmentMode = .normal
-                    window.layer.backgroundColor = canvas.resolvedColor(with: window.traitCollection).cgColor
+                    window.layer.backgroundColor = canvas.cgColor
                 }
             }
+        }
+    }
+
+    private func observeSystem() {
+        let center = NotificationCenter.default
+        let handler: (Notification) -> Void = { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshResolved()
+            }
+        }
+        observers.append(center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main,
+            using: handler
+        ))
+        observers.append(center.addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main,
+            using: handler
+        ))
+    }
+
+    private static func scheme(for mode: AppAppearance) -> ColorScheme {
+        switch mode {
+        case .light: return .light
+        case .dark: return .dark
+        case .system:
+            return UIScreen.main.traitCollection.userInterfaceStyle == .dark ? .dark : .light
         }
     }
 }

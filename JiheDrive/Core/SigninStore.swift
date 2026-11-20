@@ -1,68 +1,6 @@
 import Foundation
 import SwiftUI
 
-struct SigninScoreRule: Identifiable, Hashable {
-    var id: Int { days }
-    let days: Int
-    let score: Int
-}
-
-struct SigninInfo: Hashable {
-    var days: Int = 0
-    var continueDays: Int = 0
-    var lastTime: String?
-    var scoreList: [SigninScoreRule] = []
-
-    var signedInToday: Bool { Self.isToday(lastTime) }
-
-    var daysUntilLottery: Int {
-        if continueDays > 0, continueDays % 30 == 0 { return 0 }
-        let left = 30 - (continueDays % 30)
-        return left == 30 ? 0 : left
-    }
-
-    var todayRuleScore: Int {
-        guard !scoreList.isEmpty, days > 0 else { return 0 }
-        let current = days % 7 == 0 ? 7 : days % 7
-        return scoreList.first(where: { $0.days == current })?.score ?? 0
-    }
-
-    var todayEarnedScore: Int { signedInToday ? todayRuleScore : 0 }
-
-    static func isToday(_ lastTime: String?) -> Bool {
-        guard let lastTime, !lastTime.isEmpty else { return false }
-        let datePart = lastTime.split(separator: " ").first.map(String.init) ?? ""
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return datePart == formatter.string(from: Date())
-    }
-
-    static func parse(_ data: Any?) -> SigninInfo? {
-        guard let root = data as? [String: Any] else { return nil }
-        let map = (root["signinData"] as? [String: Any]) ?? root
-        guard map["scoreList"] != nil || map["continueDays"] != nil
-                || map["days"] != nil || map["lastTime"] != nil else {
-            return nil
-        }
-        let rules = ((map["scoreList"] as? [[String: Any]]) ?? []).compactMap { item -> SigninScoreRule? in
-            let days = Int("\(item["days"] ?? "")") ?? 0
-            let score = Int("\(item["score"] ?? "")") ?? 0
-            guard days > 0 else { return nil }
-            return SigninScoreRule(days: days, score: score)
-        }
-        return SigninInfo(
-            days: Int("\(map["days"] ?? "")") ?? 0,
-            continueDays: Int("\(map["continueDays"] ?? "")") ?? 0,
-            lastTime: {
-                let text = "\(map["lastTime"] ?? "")".trimmingCharacters(in: .whitespaces)
-                return text.isEmpty ? nil : text
-            }(),
-            scoreList: rules
-        )
-    }
-}
-
 @MainActor
 final class SigninStore: ObservableObject {
     @Published private(set) var info: SigninInfo?
@@ -76,6 +14,43 @@ final class SigninStore: ObservableObject {
 
     var signedToday: Bool {
         signedTodayByCount ?? info?.signedInToday ?? false
+    }
+
+    func applyWidgetSnap(_ snap: WidgetSnap) {
+        signedTodayByCount = snap.signedToday
+        communityDone = snap.communityDone
+        if snap.totalSignCount > 0 {
+            totalSignCount = snap.totalSignCount
+        }
+        if var current = info {
+            if snap.continueDays > 0 { current.continueDays = snap.continueDays }
+            info = current
+        } else if snap.continueDays > 0 || snap.signedToday {
+            info = SigninInfo(
+                days: snap.totalSignCount,
+                continueDays: snap.continueDays,
+                lastTime: snap.signedToday ? CommunityTask.todayKey() : nil,
+                scoreList: []
+            )
+        }
+    }
+
+    /// 小组件同步：复用车辆页已拉过的数据，不再打 list/homepage/胎压/今日骑行。
+    func syncWidget(model: AppModel, ride: RideTrackService.RideExtra?) async {
+        let snap = await WidgetLiveSync.refresh(
+            existing: .init(
+                vehicle: model.selectedVehicle,
+                tire: model.tire,
+                ride: ride,
+                signedToday: signedToday,
+                communityDone: communityDone,
+                continueDays: info?.continueDays,
+                totalSignCount: totalSignCount,
+                todayScore: info?.todayRuleScore
+            ),
+            mode: .reuse
+        )
+        applyWidgetSnap(snap)
     }
 
     func refresh() async {
@@ -105,12 +80,10 @@ final class SigninStore: ObservableObject {
         }
 
         info = parsed
-        if let uid = ZeehoClient.shared.userId {
-            var done = CommunityTask.isDoneToday(userId: uid)
-            if !done {
-                done = await CommunityTask.doneFromIntegral(userId: uid)
-            }
-            communityDone = done
+        if let uid = ZeehoClient.shared.userId, !uid.isEmpty {
+            communityDone = await CommunityTask.resolveDone(userId: uid)
+        } else {
+            communityDone = false
         }
 
         do {

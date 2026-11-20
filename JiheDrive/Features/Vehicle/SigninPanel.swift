@@ -39,6 +39,7 @@ struct SigninPanel: View {
                     .foregroundStyle(Theme.brand)
             }
             statusBadge
+            communityBadge
             if let onMore {
                 Button("更多", action: onMore)
                     .font(.system(size: 12, weight: .semibold))
@@ -59,12 +60,24 @@ struct SigninPanel: View {
             )
     }
 
+    private var communityBadge: some View {
+        let done = store.communityDone
+        return Text(done ? "社区已完成" : "社区未完成")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(done ? Theme.green : Theme.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill((done ? Theme.green : Theme.orange).opacity(0.14))
+            )
+    }
+
     private func bodyCard(_ info: SigninInfo) -> some View {
         VStack(spacing: 12) {
             HStack(spacing: 0) {
                 metric("\(info.daysUntilLottery)", unit: "天", label: "距盲盒")
                 metric("\(info.continueDays)", unit: "天", label: "连续签到")
-                metric("+\(info.todayEarnedScore)", unit: "分", label: "今日积分", accent: true)
+                metric("+\(info.todayEarnedScore + (store.communityDone ? 3 : 0))", unit: "分", label: "今日积分", accent: true)
             }
 
             HairLine()

@@ -64,7 +64,7 @@ struct MainTabView: View {
                 // 拖动中关掉隐式动画，否则 spring 会和手指抢位移，看起来像贴着乱抖
                 .animation(isDragging ? nil : Motion.page, value: tab)
                 .animation(isDragging ? nil : Motion.page, value: dragOffset)
-                .animation(nil, value: appearance.mode)
+                .animation(nil, value: appearance.resolvedScheme)
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
                 .clipShape(HorizontalClip())
                 .contentShape(Rectangle())
@@ -87,6 +87,7 @@ struct MainTabView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+        .environment(\.activeMainTab, tab)
         .sensoryFeedback(.selection, trigger: tab)
         .onAppear(perform: applyStatusBar)
         .onChange(of: tab) { _, _ in
@@ -287,6 +288,17 @@ private struct LiquidTabBar: View {
         .buttonStyle(PressableStyle(scale: 0.93, brightness: 0))
         .accessibilityAddTraits(selected ? AccessibilityTraits.isSelected : AccessibilityTraits())
         .accessibilityLabel(item.title)
+    }
+}
+
+private struct ActiveMainTabKey: EnvironmentKey {
+    static let defaultValue: MainTab = .vehicle
+}
+
+extension EnvironmentValues {
+    var activeMainTab: MainTab {
+        get { self[ActiveMainTabKey.self] }
+        set { self[ActiveMainTabKey.self] = newValue }
     }
 }
 

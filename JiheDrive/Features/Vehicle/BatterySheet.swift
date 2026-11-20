@@ -26,8 +26,15 @@ struct BatterySheet: View {
                     } else if model.batteries.isEmpty {
                         fallbackCard
                     } else if let first = model.batteries.first {
+                        liveElectrical(first)
+                        if first.hasChargeInfo {
+                            chargeCard(first)
+                        }
                         metrics(first)
                         healthCard(first)
+                        if first.hasUsage {
+                            usageCard(first)
+                        }
                         if let abnormal = first.abnormal {
                             banner("电池异常：\(abnormal)")
                         }
@@ -36,6 +43,12 @@ struct BatterySheet: View {
                         }
                         if model.batteries.count > 1 {
                             listCard
+                        }
+                        if let stamp = first.refreshTime, !stamp.isEmpty {
+                            Text("更新于 \(stamp)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.tertiary)
+                                .frame(maxWidth: .infinity)
                         }
                         refreshButton
                     }
@@ -56,6 +69,7 @@ struct BatterySheet: View {
         let battery = model.batteries.first
         let level = min(max(battery?.level ?? vehicle.soc, 0), 100)
         let charging = battery?.isCharging ?? vehicle.isCharging
+        let range = battery?.rangeKm ?? vehicle.rangeKm
         let tint = charging ? Theme.green : Theme.brand
 
         return AppleCard {
@@ -90,7 +104,7 @@ struct BatterySheet: View {
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.secondary)
                         HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text("\(vehicle.rangeKm)")
+                            Text("\(range)")
                                 .font(.system(size: 28, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Theme.label)
                                 .monospacedDigit()
@@ -108,6 +122,124 @@ struct BatterySheet: View {
         }
     }
 
+    private func liveElectrical(_ battery: BatteryInfo) -> some View {
+        let volts = battery.voltage > 0 ? battery.voltage : (vehicle.voltage ?? 0)
+        let current = battery.current
+        let power: Double? = {
+            if let p = battery.power { return p }
+            if let a = current, volts > 0 { return abs(a) * volts }
+            return nil
+        }()
+
+        return AppleCard {
+            VStack(alignment: .leading, spacing: 12) {
+                CardTitle(text: "实时工况", trailing: battery.isCharging ? "充电中" : "待机")
+                HStack(spacing: 12) {
+                    MetricChip(
+                        title: "电压",
+                        value: volts > 0 ? String(format: "%.1f", volts) : "--",
+                        unit: "V",
+                        icon: "bolt",
+                        color: Theme.orange
+                    )
+                    MetricChip(
+                        title: "电流",
+                        value: current.map { String(format: "%.1f", $0) } ?? "--",
+                        unit: "A",
+                        icon: "wave.3.right",
+                        color: Theme.teal
+                    )
+                    MetricChip(
+                        title: "功率",
+                        value: power.map { String(format: "%.0f", $0) } ?? "--",
+                        unit: "W",
+                        icon: "bolt.fill",
+                        color: Theme.brand
+                    )
+                }
+            }
+        }
+    }
+
+    private func chargeCard(_ battery: BatteryInfo) -> some View {
+        AppleCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("充电信息")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                    Spacer(minLength: 0)
+                    StatusPill(
+                        text: battery.isCharging ? "充电中" : "已停止",
+                        color: battery.isCharging ? Theme.green : Theme.secondary,
+                        pulsing: battery.isCharging
+                    )
+                }
+                HStack(spacing: 12) {
+                    MetricChip(
+                        title: "已充电时长",
+                        value: battery.chargeTimeString
+                            ?? battery.chargeMinutes.map { "\($0)" }
+                            ?? "--",
+                        unit: battery.chargeTimeString == nil && battery.chargeMinutes != nil ? "min" : nil,
+                        icon: "clock",
+                        color: Theme.brand
+                    )
+                    MetricChip(
+                        title: "预计充满",
+                        value: battery.etaFullText
+                            ?? chargeEstimateText(battery.fullChargeText)
+                            ?? battery.chargeMinutes.map { "\($0)" }
+                            ?? "--",
+                        unit: battery.etaFullText == nil ? "min" : nil,
+                        icon: "battery.100percent.bolt",
+                        color: Theme.green
+                    )
+                }
+            }
+        }
+    }
+
+    private func usageCard(_ battery: BatteryInfo) -> some View {
+        AppleCard {
+            VStack(alignment: .leading, spacing: 12) {
+                CardTitle(text: "用电统计")
+                HStack(spacing: 12) {
+                    MetricChip(
+                        title: "今日用电",
+                        value: battery.powerUseToday.map { String(format: "%.1f", $0) } ?? "--",
+                        unit: "度",
+                        icon: "sun.max",
+                        color: Theme.orange
+                    )
+                    MetricChip(
+                        title: "本月用电",
+                        value: battery.powerUseMonth.map { String(format: "%.1f", $0) } ?? "--",
+                        unit: "度",
+                        icon: "calendar",
+                        color: Theme.brand
+                    )
+                }
+                HStack(spacing: 12) {
+                    MetricChip(
+                        title: "本月充电量",
+                        value: battery.powerChargeMonth.map { String(format: "%.1f", $0) } ?? "--",
+                        unit: "度",
+                        icon: "bolt.circle",
+                        color: Theme.green
+                    )
+                    MetricChip(
+                        title: "本月充电次数",
+                        value: battery.chargeCount.map { "\($0)" } ?? "--",
+                        unit: "次",
+                        icon: "repeat",
+                        color: Theme.indigo
+                    )
+                }
+            }
+        }
+    }
+
     private func healthCard(_ battery: BatteryInfo) -> some View {
         AppleCard {
             VStack(alignment: .leading, spacing: 10) {
@@ -117,16 +249,21 @@ struct BatterySheet: View {
 
                 InfoRow(title: "充放电状态", value: battery.stateText)
                 InfoRow(
+                    title: "健康度",
+                    value: battery.soh.map { String(format: "%.0f%%", $0) } ?? (battery.score ?? "—")
+                )
+                InfoRow(
                     title: "循环次数",
                     value: (battery.cycleCount ?? vehicle.cycleCount).map { "\($0) 次" } ?? "—"
                 )
                 InfoRow(
                     title: "额定容量",
-                    value: battery.capacity.map { String(format: "%.0f Ah", $0) } ?? "—"
+                    value: battery.capacity.map { String(format: "%.1f Ah", $0) } ?? "—"
                 )
                 InfoRow(
                     title: "充满预估",
-                    value: battery.chargeMinutes.map { "\($0) 分钟" }
+                    value: battery.etaFullText
+                        ?? battery.chargeMinutes.map { "\($0) 分钟" }
                         ?? chargeEstimateText(battery.fullChargeText).map { "\($0) 分钟" }
                         ?? "—"
                 )
@@ -186,64 +323,23 @@ struct BatterySheet: View {
 
     private func metrics(_ battery: BatteryInfo) -> some View {
         let cycles = battery.cycleCount ?? vehicle.cycleCount
-        let capacity = battery.capacity
-        let chargeMin = battery.chargeMinutes
+        let temp = battery.temperature != 0 ? battery.temperature : (vehicle.temperature ?? 0)
 
         return VStack(spacing: 12) {
             HStack(spacing: 12) {
                 MetricChip(
-                    title: "电压",
-                    value: battery.voltage > 0
-                        ? String(format: "%.1f", battery.voltage)
-                        : (vehicle.voltage.map { String(format: "%.1f", $0) } ?? "--"),
-                    unit: "V",
-                    icon: "bolt",
-                    color: Theme.orange
-                )
-                MetricChip(
                     title: "温度",
-                    value: battery.temperature != 0
-                        ? String(format: "%.0f", battery.temperature)
-                        : (vehicle.temperature.map { String(format: "%.0f", $0) } ?? "--"),
+                    value: temp != 0 ? String(format: "%.0f", temp) : "--",
                     unit: "℃",
                     icon: "thermometer.medium",
                     color: Theme.teal
                 )
-            }
-
-            HStack(spacing: 12) {
                 MetricChip(
                     title: "循环次数",
                     value: cycles.map { "\($0)" } ?? "--",
                     unit: "次",
                     icon: "arrow.triangle.2.circlepath",
                     color: Theme.indigo
-                )
-                MetricChip(
-                    title: "容量",
-                    value: capacity.map { String(format: "%.0f", $0) } ?? "--",
-                    unit: "Ah",
-                    icon: "battery.100percent",
-                    color: Theme.brand
-                )
-            }
-
-            HStack(spacing: 12) {
-                MetricChip(
-                    title: "续航",
-                    value: "\(vehicle.rangeKm)",
-                    unit: "km",
-                    icon: "point.bottomleft.forward.to.point.topright.scurvepath",
-                    color: Theme.green
-                )
-                MetricChip(
-                    title: battery.isCharging ? "已充时长" : "充满预估",
-                    value: chargeMin.map { "\($0)" }
-                        ?? chargeEstimateText(battery.fullChargeText)
-                        ?? "--",
-                    unit: chargeMin != nil || battery.fullChargeText != nil ? "min" : "",
-                    icon: "clock",
-                    color: Theme.brand
                 )
             }
         }

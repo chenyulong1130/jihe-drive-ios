@@ -1,6 +1,6 @@
 import Foundation
 
-/// 高德逆地理：经纬度 → 短地址（与小程序 / Flutter 同源）
+/// 高德逆地理：经纬度 → 短地址（POI / 街道优先，不要坐标串）
 enum AmapGeocode {
     private static let key = "f4a9d2af73baa386f745df84b4eeb777"
     private static var cache: [String: String] = [:]
@@ -8,8 +8,14 @@ enum AmapGeocode {
     /// 看起来像坐标串（如 `120.1234, 30.5678`）时不当成地址
     static func looksLikeCoordinate(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pattern = #"^-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?$"#
-        return trimmed.range(of: pattern, options: .regularExpression) != nil
+        if trimmed.range(of: #"^-?\d{1,3}(\.\d+)?\s*,\s*-?\d{1,3}(\.\d+)?$"#, options: .regularExpression) != nil {
+            return true
+        }
+        if trimmed.range(of: #"^-?\d{1,3}\.\d{3,}"#, options: .regularExpression) != nil,
+           trimmed.range(of: #"-?\d{1,2}\.\d{3,}"#, options: .regularExpression) != nil {
+            return true
+        }
+        return false
     }
 
     static func readableAddress(_ text: String?) -> String? {
@@ -30,7 +36,7 @@ enum AmapGeocode {
         request.setValue("text/plain", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 6
         request.httpBody = Data(
-            "output=json&location=\(longitude),\(latitude)&extensions=base&radius=50&coordsys=autonavi&key=\(key)"
+            "output=json&location=\(longitude),\(latitude)&extensions=all&radius=80&coordsys=autonavi&key=\(key)"
                 .utf8
         )
 
@@ -42,35 +48,63 @@ enum AmapGeocode {
         }
 
         let short = shortAddress(regeo)
-        guard !short.isEmpty else { return nil }
+        guard !short.isEmpty, !looksLikeCoordinate(short) else { return nil }
         cache[cacheKey] = short
         return short
     }
 
     private static func shortAddress(_ regeo: [String: Any]) -> String {
-        var out = "\(regeo["formatted_address"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+        let ac = regeo["addressComponent"] as? [String: Any] ?? [:]
+        let streetNo = ac["streetNumber"] as? [String: Any] ?? [:]
+
+        if let pois = regeo["pois"] as? [[String: Any]] {
+            for poi in pois.prefix(3) {
+                let name = text(poi["name"])
+                if !name.isEmpty { return name }
+            }
+        }
+
+        let neighborhood = text((ac["neighborhood"] as? [String: Any])?["name"])
+        if !neighborhood.isEmpty { return neighborhood }
+
+        let building = text((ac["building"] as? [String: Any])?["name"])
+        if !building.isEmpty { return building }
+
+        let street = text(streetNo["street"]) + text(streetNo["number"])
+        if !street.isEmpty { return street }
+
+        let township = text(ac["township"])
+        if !township.isEmpty { return township }
+
+        var out = text(regeo["formatted_address"] ?? regeo["formattedAddress"])
         guard !out.isEmpty else { return "" }
 
-        let ac = regeo["addressComponent"] as? [String: Any] ?? [:]
         let cityRaw = ac["city"]
         let city: String = {
-            if let list = cityRaw as? [Any] {
-                return list.map { "\($0)" }.joined()
-            }
-            return "\(cityRaw ?? "")"
+            if let list = cityRaw as? [Any] { return list.map { "\($0)" }.joined() }
+            return text(cityRaw)
         }()
-
-        for prefix in ["\(ac["province"] ?? "")", city, "\(ac["district"] ?? "")"] {
-            let p = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !p.isEmpty, out.hasPrefix(p) {
-                out = String(out.dropFirst(p.count))
-            } else if !p.isEmpty {
-                out = out.replacingOccurrences(of: p, with: "")
+        for prefix in [text(ac["province"]), city, text(ac["district"])] {
+            if !prefix.isEmpty, out.hasPrefix(prefix) {
+                out = String(out.dropFirst(prefix.count))
+            } else if !prefix.isEmpty {
+                out = out.replacingOccurrences(of: prefix, with: "")
             }
         }
         let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty
-            ? "\(regeo["formatted_address"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
-            : trimmed
+        return trimmed.isEmpty ? text(regeo["formatted_address"]) : trimmed
+    }
+
+    private static func text(_ raw: Any?) -> String {
+        if raw == nil || raw is NSNull { return "" }
+        if let list = raw as? [Any] {
+            return list.map { text($0) }.filter { !$0.isEmpty }.joined()
+        }
+        if let map = raw as? [String: Any] {
+            return text(map["name"] ?? map["street"])
+        }
+        let value = "\(raw!)".trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty || value == "[]" || value == "<null>" { return "" }
+        return value
     }
 }
