@@ -13,56 +13,70 @@ struct RideHomeView: View {
     @State private var loading = false
     @State private var errorText: String?
     @State private var selected: RideTrack?
+    @State private var selecting = false
+    @State private var picked: Set<String> = []
+    @State private var replayBundle: RideReplayBundle?
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                monthChip
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
+        ZStack(alignment: .bottom) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    monthChip
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
 
-                if !groups.isEmpty {
-                    monthHero
-                        .padding(.bottom, 8)
-                }
+                    if !groups.isEmpty {
+                        monthHero
+                            .padding(.bottom, 8)
+                    }
 
-                if model.selectedVehicle == nil {
-                    Text("先在车辆页登录并选择一台车")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                        .padding(.top, 32)
-                } else if loading && groups.isEmpty {
-                    RideListSkeleton()
-                        .padding(.top, 4)
-                } else if let errorText, groups.isEmpty {
-                    SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
-                        .padding(.top, 12)
-                } else if groups.isEmpty {
-                    Text("本月暂无骑行记录")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 48)
-                } else {
-                    ForEach(groups) { group in
-                        daySection(group)
+                    if model.selectedVehicle == nil {
+                        Text("先在车辆页登录并选择一台车")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                            .padding(.top, 32)
+                    } else if loading && groups.isEmpty {
+                        RideListSkeleton()
+                            .padding(.top, 4)
+                    } else if let errorText, groups.isEmpty {
+                        SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
+                            .padding(.top, 12)
+                    } else if groups.isEmpty {
+                        Text("本月暂无骑行记录")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.tertiary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 48)
+                    } else {
+                        ForEach(groups) { group in
+                            daySection(group)
+                        }
                     }
                 }
+                .padding(.horizontal, Theme.page)
+                .padding(.top, showsClose ? 10 : 8)
+                .padding(.bottom, selecting ? 168 : 120)
             }
-            .padding(.horizontal, Theme.page)
-            .padding(.top, showsClose ? 10 : 8)
-            .padding(.bottom, 120)
+            .background(Theme.groupedBackground)
+            .refreshable { await loadMonth() }
+
+            if selecting {
+                selectBar
+            }
         }
-        .background(Theme.groupedBackground)
-        .refreshable { await loadMonth() }
         .task(id: "\(model.selectedVehicle?.vinNo ?? "")-\(monthKey)-\(shouldLoadRides)") {
             guard shouldLoadRides else { return }
             await loadMonth()
         }
         .fullScreenCover(item: $selected) { track in
             if let vehicle = model.selectedVehicle {
-                RideReplayView(vehicle: vehicle, track: track)
+                RideReplayView(vehicle: vehicle, tracks: [track])
+            }
+        }
+        .fullScreenCover(item: $replayBundle) { bundle in
+            if let vehicle = model.selectedVehicle {
+                RideReplayView(vehicle: vehicle, tracks: bundle.tracks)
             }
         }
     }
@@ -89,6 +103,20 @@ struct RideHomeView: View {
 
             Spacer(minLength: 0)
 
+            if !groups.isEmpty {
+                Button {
+                    withAnimation(Motion.quick) {
+                        selecting.toggle()
+                        if !selecting { picked.removeAll() }
+                    }
+                } label: {
+                    Text(selecting ? "取消" : "多选")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                }
+                .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+            }
+
             if showsClose {
                 Button {
                     dismiss()
@@ -102,6 +130,34 @@ struct RideHomeView: View {
                 .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
             }
         }
+    }
+
+    private var selectBar: some View {
+        HStack(spacing: 12) {
+            Text("已选 \(picked.count) 条")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.label)
+            Spacer(minLength: 0)
+            Button {
+                let tracks = groups.flatMap(\.tracks).filter { picked.contains($0.id) }
+                guard !tracks.isEmpty else { return }
+                replayBundle = RideReplayBundle(tracks: tracks)
+            } label: {
+                Text(picked.count > 1 ? "合并回放" : "回放")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(picked.isEmpty ? Theme.tertiary : Theme.brand))
+            }
+            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+            .disabled(picked.isEmpty)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .padding(.bottom, 8)
+        .background(.regularMaterial)
+        .shadow(color: Color.black.opacity(0.08), radius: 16, y: -4)
     }
 
     private var monthChip: some View {
@@ -215,9 +271,17 @@ struct RideHomeView: View {
             VStack(spacing: 0) {
                 ForEach(Array(group.tracks.enumerated()), id: \.element.id) { index, track in
                     Button {
-                        selected = track
+                        if selecting {
+                            if picked.contains(track.id) {
+                                picked.remove(track.id)
+                            } else {
+                                picked.insert(track.id)
+                            }
+                        } else {
+                            selected = track
+                        }
                     } label: {
-                        rideRow(track)
+                        rideRow(track, checked: picked.contains(track.id))
                     }
                     .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
                     if index < group.tracks.count - 1 {
@@ -234,8 +298,15 @@ struct RideHomeView: View {
         .padding(.bottom, 8)
     }
 
-    private func rideRow(_ track: RideTrack) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func rideRow(_ track: RideTrack, checked: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            if selecting {
+                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(checked ? Theme.brand : Theme.tertiary)
+                    .padding(.top, 2)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text(timeRange(track))
                     .font(.system(size: 13, weight: .semibold))
@@ -244,9 +315,9 @@ struct RideHomeView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 thumb(track)
-                    .frame(width: 76, height: 76)
+                    .frame(width: 72, height: 72)
             }
-            .frame(width: 92, alignment: .leading)
+            .frame(width: 86, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -258,18 +329,17 @@ struct RideHomeView: View {
                     Text("km")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.tertiary)
-                        .padding(.leading, 2)
+                    if !selecting {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.tertiary)
+                            .padding(.leading, 2)
+                    }
                 }
 
-                if let route = routeText(track) {
-                    Text(route)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 5) {
+                    placeLine(title: "起点", text: startText(track), tint: Color(hex: 0x22C55E))
+                    placeLine(title: "终点", text: endText(track), tint: Color(hex: 0xF97316))
                 }
 
                 HStack(spacing: 0) {
@@ -282,6 +352,26 @@ struct RideHomeView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+    }
+
+    private func placeLine(title: String, text: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Circle()
+                .fill(tint)
+                .frame(width: 6, height: 6)
+                .padding(.top, 5)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+                Text(text)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func rideMetric(_ value: String, _ label: String) -> some View {
@@ -430,15 +520,12 @@ struct RideHomeView: View {
         return "\(month)月\(String(format: "%02d", day))日"
     }
 
-    private func routeText(_ track: RideTrack) -> String? {
-        let start = AmapGeocode.compact(track.startAddress, limit: 10) ?? ""
-        let end = AmapGeocode.compact(track.endAddress, limit: 10) ?? ""
-        if !start.isEmpty, !end.isEmpty, start != end {
-            return "\(start) → \(end)"
-        }
-        if !start.isEmpty { return start }
-        if !end.isEmpty { return end }
-        return nil
+    private func startText(_ track: RideTrack) -> String {
+        AmapGeocode.compact(track.startAddress, limit: 18) ?? "未记录起点"
+    }
+
+    private func endText(_ track: RideTrack) -> String {
+        AmapGeocode.compact(track.endAddress, limit: 18) ?? "未记录终点"
     }
 
     private func avgSpeed(_ track: RideTrack) -> Double? {
@@ -481,6 +568,16 @@ struct RideHomeView: View {
         formatter.dateFormat = "yyyy.MM.dd"
         return formatter
     }()
+}
+
+private struct RideReplayBundle: Identifiable {
+    let id: String
+    let tracks: [RideTrack]
+
+    init(tracks: [RideTrack]) {
+        self.tracks = tracks
+        self.id = tracks.map(\.id).joined(separator: "|")
+    }
 }
 
 private struct RideDayGroup: Identifiable {

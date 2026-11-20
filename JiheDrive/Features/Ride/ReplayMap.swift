@@ -7,26 +7,33 @@ import UIKit
 struct ReplayMap: UIViewRepresentable {
     let points: [CLLocationCoordinate2D]
     var speeds: [Double] = []
+    /// 相对行程起点的秒，与 points 等长；有值则按真实时间插值
+    var times: [TimeInterval] = []
+    var duration: TimeInterval = 0
     let progress: Double
     let follow: Bool
+    /// 全览边距。卡片/全屏都不跟车时用均匀边距，露出整段轨迹。
+    var edgePadding: UIEdgeInsets = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.delegate = context.coordinator
-        map.mapType = .standard
-        map.overrideUserInterfaceStyle = .light
-        map.showsCompass = false
+        MapAppearance.apply(to: map)
         map.showsUserLocation = false
         map.isRotateEnabled = false
         map.isPitchEnabled = false
-        map.pointOfInterestFilter = .excludingAll
-        // 避免深色模式下底图发黑看不清轨迹
         map.backgroundColor = UIColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
+        context.coordinator.edgePadding = edgePadding
+        context.coordinator.times = times
+        context.coordinator.duration = duration
         context.coordinator.configure(map: map, points: points, speeds: speeds)
         return map
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.edgePadding = edgePadding
+        context.coordinator.times = times
+        context.coordinator.duration = duration
         context.coordinator.update(map: map, progress: progress, follow: follow)
     }
 
@@ -51,10 +58,26 @@ struct ReplayMap: UIViewRepresentable {
         private var marker: MKPointAnnotation?
         private var didFit = false
         private var didZoomFollow = false
-        private var lastCenterAt: CFTimeInterval = 0
+        private var followEnabled = false
+        private var cameraTarget: CLLocationCoordinate2D?
+        private var lerpUntil: CFTimeInterval = 0
+        private var displayLink: CADisplayLink?
+        private let tickProxy = TickProxy()
+        private weak var mapView: MKMapView?
+        var edgePadding = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
+        var times: [TimeInterval] = []
+        var duration: TimeInterval = 0
+        private var modelPoints: [Coordinate] = []
+
+        deinit {
+            displayLink?.invalidate()
+        }
 
         func configure(map: MKMapView, points: [CLLocationCoordinate2D], speeds: [Double]) {
+            mapView = map
+            tickProxy.owner = self
             allPoints = points
+            modelPoints = points.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
             self.speeds = speeds.count == points.count ? speeds : Array(repeating: 0, count: points.count)
             guard points.count > 1 else { return }
 
@@ -131,44 +154,91 @@ struct ReplayMap: UIViewRepresentable {
                 let point = MKMapPoint(coordinate)
                 rect = rect.union(MKMapRect(x: point.x, y: point.y, width: 0, height: 0))
             }
-            // 底部留给速度面板，顶部留给工具条；整体再近一点
             map.setVisibleMapRect(
                 rect,
-                edgePadding: UIEdgeInsets(top: 88, left: 36, bottom: 260, right: 36),
+                edgePadding: edgePadding,
                 animated: false
             )
         }
 
         func update(map: MKMapView, progress: Double, follow: Bool) {
+            mapView = map
             guard allPoints.count > 1 else { return }
-            let clamped = min(max(progress, 0), 1)
-            let raw = clamped * Double(allPoints.count - 1)
-            let index = min(allPoints.count - 2, max(0, Int(raw)))
-            let fraction = raw - Double(index)
-
-            let a = allPoints[index]
-            let b = allPoints[index + 1]
+            let sample = ReplayClock.interpolate(
+                points: modelPoints,
+                speeds: speeds,
+                times: times,
+                duration: duration,
+                progress: progress
+            )
             let current = CLLocationCoordinate2D(
-                latitude: a.latitude + (b.latitude - a.latitude) * fraction,
-                longitude: a.longitude + (b.longitude - a.longitude) * fraction
+                latitude: sample.point.latitude,
+                longitude: sample.point.longitude
             )
             marker?.coordinate = current
+            cameraTarget = current
 
-            guard follow else {
-                didZoomFollow = false
+            followEnabled = follow
+            if !follow {
+                stopLink()
                 return
             }
 
-            let now = CACurrentMediaTime()
-            // 更近的跟随视角（约 250–300m 视口）
-            let span = MKCoordinateSpan(latitudeDelta: 0.0028, longitudeDelta: 0.0028)
+            startLink()
             if !didZoomFollow {
                 didZoomFollow = true
-                lastCenterAt = now
-                map.setRegion(MKCoordinateRegion(center: current, span: span), animated: true)
-            } else if now - lastCenterAt > 0.2 {
-                lastCenterAt = now
-                map.setCenter(current, animated: false)
+                lerpUntil = CACurrentMediaTime() + 0.42
+                let camera = MKMapCamera(
+                    lookingAtCenter: current,
+                    fromDistance: 520,
+                    pitch: 0,
+                    heading: 0
+                )
+                map.setCamera(camera, animated: true)
+            }
+        }
+
+        private func startLink() {
+            guard displayLink == nil else { return }
+            let link = CADisplayLink(target: tickProxy, selector: #selector(TickProxy.tick(_:)))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        private func stopLink() {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        fileprivate func onTick(_ link: CADisplayLink) {
+            guard followEnabled, let map = mapView, let target = cameraTarget else { return }
+            if CACurrentMediaTime() < lerpUntil { return }
+
+            let current = map.centerCoordinate
+            let far = abs(current.latitude - target.latitude) > 0.004
+                || abs(current.longitude - target.longitude) > 0.004
+            let next: CLLocationCoordinate2D
+            if far {
+                next = target
+            } else {
+                let dt = link.duration > 0 ? link.duration : 1.0 / 60.0
+                let k = 1 - exp(-dt / 0.12)
+                next = CLLocationCoordinate2D(
+                    latitude: current.latitude + (target.latitude - current.latitude) * k,
+                    longitude: current.longitude + (target.longitude - current.longitude) * k
+                )
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            map.centerCoordinate = next
+            CATransaction.commit()
+        }
+
+        private final class TickProxy: NSObject {
+            weak var owner: Coordinator?
+            @objc func tick(_ link: CADisplayLink) {
+                owner?.onTick(link)
             }
         }
 

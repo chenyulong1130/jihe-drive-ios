@@ -34,6 +34,9 @@ struct HeroStage: View {
     let onPickVehicle: () -> Void
     /// 车机仪表壁纸（不是英雄区背景）
     let onOpenDashboardWallpaper: () -> Void
+    /// 官方消息收件箱
+    var onOpenMessages: (() -> Void)? = nil
+    var unreadCount: Int = 0
     /// 车辆页动态主题（视频背景）
     let onOpenTheme: () -> Void
     let onOpenCushion: () -> Void
@@ -211,11 +214,11 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图顶距：躲开顶栏 + 电量
-    private var carTopPad: CGFloat { topInset + 72 }
+    /// 车图顶距：躲开顶栏 + 电量，把车往下压，吃掉底部空白
+    private var carTopPad: CGFloat { topInset + 96 }
     /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
-    private var carBottomPad: CGFloat { hasTire ? 52 : 8 }
+    private var carBottomPad: CGFloat { hasTire ? 36 : 0 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -237,7 +240,7 @@ struct HeroStage: View {
                                 .opacity(glbRevealed ? 1 : 0)
                             }
                         }
-                        .padding(.top, carTopPad - 8)
+                        .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
                         .simultaneousGesture(heroDrag)
                         .onChange(of: modelGLBFile) { _, _ in glbRevealed = false }
@@ -249,12 +252,12 @@ struct HeroStage: View {
                         spinSpeed: 0,
                         onDrag: onInteract
                     )
-                        .padding(.top, carTopPad - 8)
+                        .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
                         .simultaneousGesture(heroDrag)
                 } else {
                     twoDCar
-                        .padding(.top, carTopPad - 28)
+                        .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
                         .allowsHitTesting(false)
                 }
@@ -273,7 +276,7 @@ struct HeroStage: View {
                     .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-            .padding(.top, carTopPad - 8)
+            .padding(.top, carTopPad)
             .padding(.trailing, 16)
             .accessibilityLabel("打开坐垫")
         }
@@ -305,7 +308,7 @@ struct HeroStage: View {
             .padding(.horizontal, 6)
             .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
     private var placeholder: some View {
@@ -357,6 +360,13 @@ struct HeroStage: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.label)
                 }
+                if let onOpenMessages {
+                    frostedCircle(action: onOpenMessages, label: "消息", badge: unreadCount) {
+                        Image(systemName: unreadCount > 0 ? "bell.badge.fill" : "bell.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                    }
+                }
             }
         }
     }
@@ -364,6 +374,7 @@ struct HeroStage: View {
     private func frostedCircle<Content: View>(
         action: @escaping () -> Void,
         label: String,
+        badge: Int = 0,
         @ViewBuilder content: () -> Content
     ) -> some View {
         Button(action: action) {
@@ -371,6 +382,17 @@ struct HeroStage: View {
                 .frame(width: 38, height: 38)
                 .background(Circle().fill(Color.white.opacity(0.82)))
                 .shadow(color: Color.black.opacity(0.06), radius: 6, y: 1)
+                .overlay(alignment: .topTrailing) {
+                    if badge > 0 {
+                        Text(badge > 9 ? "9+" : "\(badge)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Theme.red))
+                            .offset(x: 4, y: -4)
+                    }
+                }
                 .contentShape(Circle())
                 .accessibilityLabel(label)
         }

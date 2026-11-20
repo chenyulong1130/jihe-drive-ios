@@ -148,18 +148,28 @@ enum WidgetSnapshot {
     static let kind = "JiheDriveWidget"
     private static let fileName = "widget_snapshot.json"
     private static let imageName = "widget_vehicle.png"
-    private static let lotteryDayKey = "widget_lottery_checked_day"
+    private static let lastSignDateKey = "widget_last_sign_date"
+    private static let lastBlindBoxDateKey = "widget_last_blindbox_date"
 
     static func suiteDefaults() -> UserDefaults? {
         UserDefaults(suiteName: suiteName)
     }
 
-    static func lotteryCheckedToday() -> Bool {
-        suiteDefaults()?.string(forKey: lotteryDayKey) == CommunityTask.todayKey()
+    static func signedTodayGate() -> Bool {
+        suiteDefaults()?.string(forKey: lastSignDateKey) == CommunityTask.todayKey()
     }
 
-    static func markLotteryChecked() {
-        suiteDefaults()?.set(CommunityTask.todayKey(), forKey: lotteryDayKey)
+    static func markSignedToday() {
+        suiteDefaults()?.set(CommunityTask.todayKey(), forKey: lastSignDateKey)
+        suiteDefaults()?.synchronize()
+    }
+
+    static func lotteryClaimedToday() -> Bool {
+        suiteDefaults()?.string(forKey: lastBlindBoxDateKey) == CommunityTask.todayKey()
+    }
+
+    static func markLotteryClaimed() {
+        suiteDefaults()?.set(CommunityTask.todayKey(), forKey: lastBlindBoxDateKey)
         suiteDefaults()?.synchronize()
     }
 

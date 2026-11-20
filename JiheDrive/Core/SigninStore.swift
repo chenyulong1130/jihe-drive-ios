@@ -11,6 +11,8 @@ final class SigninStore: ObservableObject {
     @Published private(set) var communityRunning = false
     @Published private(set) var communityDone = false
     @Published var error: String?
+    @Published private(set) var prizes: [SigninPrize] = []
+    @Published private(set) var prizesLoading = false
 
     var signedToday: Bool {
         signedTodayByCount ?? info?.signedInToday ?? false
@@ -100,6 +102,20 @@ final class SigninStore: ObservableObject {
         }
     }
 
+    func loadPrizes() async {
+        prizesLoading = true
+        defer { prizesLoading = false }
+        var query = H5Client.mineQuery
+        query["page"] = "1"
+        query["pageSize"] = "20"
+        guard let res = try? await H5Client.get("/cfmotoservermine/H5/signin/prizesDetail", query: query) else {
+            return
+        }
+        let code = ZeehoClient.codeString(res["code"])
+        guard code.isEmpty || code == "10000" else { return }
+        prizes = SigninPrize.parse(res["data"])
+    }
+
     func signInToday() async {
         guard !signingIn, !signedToday else { return }
         signingIn = true
@@ -112,6 +128,7 @@ final class SigninStore: ObservableObject {
                 return
             }
             await refresh()
+            await loadPrizes()
         } catch {
             self.error = error.localizedDescription
         }

@@ -28,6 +28,10 @@ struct BatteryInfo: Identifiable, Hashable {
     let powerUseMonth: Double?
     let powerChargeMonth: Double?
     let chargeCount: Int?
+    /// V2 `onlineStatus == ONLINE`
+    let isOnline: Bool?
+    /// 接口单独给的电池等级，和 SOC 不是同一个字段
+    let batteryLevel: Int?
     /// 调 batteryInfo/detail/{id} 用
     let detailId: String?
 
@@ -72,6 +76,8 @@ struct BatteryInfo: Identifiable, Hashable {
             powerUseMonth: other.powerUseMonth ?? powerUseMonth,
             powerChargeMonth: other.powerChargeMonth ?? powerChargeMonth,
             chargeCount: other.chargeCount ?? chargeCount,
+            isOnline: other.isOnline ?? isOnline,
+            batteryLevel: other.batteryLevel ?? batteryLevel,
             detailId: other.detailId ?? detailId
         )
     }
@@ -119,14 +125,17 @@ struct BatteryInfo: Identifiable, Hashable {
             powerUseMonth: nil,
             powerChargeMonth: nil,
             chargeCount: nil,
+            isOnline: vehicle.isOnline,
+            batteryLevel: nil,
             detailId: nil
         )
     }
 
     private static func make(_ json: [String: Any], index: Int) -> BatteryInfo? {
         let level = intValue(JSONDig.first(json, keys: [
-            "bmssoc", "batteryLevel", "batterySoc", "soc", "BmsSoc"
+            "bmssoc", "batterySoc", "soc", "BmsSoc"
         ]))
+        let grade = intValue(JSONDig.first(json, keys: ["batteryLevel"]))
         let voltage = scaledVolts(doubleValue(JSONDig.first(json, keys: [
             "bmsVoltage", "batteryVoltage", "voltage", "totalVoltage", "packVoltage"
         ])))
@@ -172,13 +181,15 @@ struct BatteryInfo: Identifiable, Hashable {
 
         let parsedState = stateText(rawState, powerState: powerState)
         let charging = parsedState.contains("充") || boolCharge(powerState)
+        let online = optionalOnline(JSONDig.first(json, keys: ["onlineStatus", "isOnline", "online"]))
+        let soc = level > 0 ? level : grade
 
         let typeName = type ?? ""
         let batteryName = name ?? ""
         let pulledFlag = pulled ?? ""
 
-        if level == 0 && voltage == 0 && temp == 0 && current == nil && power == nil
-            && typeName.isEmpty && batteryName.isEmpty && !charging {
+        if soc == 0 && voltage == 0 && temp == 0 && current == nil && power == nil
+            && typeName.isEmpty && batteryName.isEmpty && !charging && online == nil {
             return nil
         }
 
@@ -192,7 +203,7 @@ struct BatteryInfo: Identifiable, Hashable {
         return BatteryInfo(
             id: batteryName.isEmpty ? "battery-\(index)" : "\(batteryName)-\(index)",
             name: batteryName.isEmpty ? "动力电池" : batteryName,
-            level: max(0, min(100, level)),
+            level: max(0, min(100, soc)),
             voltage: voltage,
             temperature: temp,
             current: current,
@@ -219,6 +230,8 @@ struct BatteryInfo: Identifiable, Hashable {
                 let n = intValue(JSONDig.first(json, keys: ["chargeCount", "monthChargeCount"]))
                 return n > 0 ? n : nil
             }(),
+            isOnline: online,
+            batteryLevel: grade > 0 ? grade : nil,
             detailId: detailId
         )
     }
@@ -227,6 +240,14 @@ struct BatteryInfo: Identifiable, Hashable {
     private static func scaledVolts(_ raw: Double) -> Double {
         guard raw > 0 else { return 0 }
         return raw > 300 ? (raw / 10) : raw
+    }
+
+    private static func optionalOnline(_ raw: Any?) -> Bool? {
+        if let flag = raw as? Bool { return flag }
+        guard let text = stringValue(raw)?.uppercased(), !text.isEmpty else { return nil }
+        if text == "ONLINE" || text == "1" || text == "TRUE" { return true }
+        if text == "OFFLINE" || text == "0" || text == "FALSE" { return false }
+        return nil
     }
 
     private static func boolCharge(_ raw: Any?) -> Bool {

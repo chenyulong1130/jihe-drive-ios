@@ -5,6 +5,7 @@ struct VehicleView: View {
     @EnvironmentObject private var themeStore: ThemeStore
     @EnvironmentObject private var wallpaperStore: WallpaperStore
     @EnvironmentObject private var videoStore: VideoBackdropStore
+    @EnvironmentObject private var messages: MessageStore
     @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var model3D = VehicleModelLoader()
@@ -29,6 +30,7 @@ struct VehicleView: View {
     @State private var show3D = false
     @State private var showSettings = false
     @State private var showReplay = false
+    @State private var showMessages = false
     @State private var pinningHero = false
 
     var body: some View {
@@ -85,6 +87,9 @@ struct VehicleView: View {
         .sheet(isPresented: $showSettings) {
             if let vehicle = model.selectedVehicle { VehicleSettingsView(vehicle: vehicle) }
         }
+        .sheet(isPresented: $showMessages) {
+            MessageInboxView(store: messages)
+        }
         .fullScreenCover(isPresented: $showReplay) {
             RideHomeView(showsClose: true)
         }
@@ -103,12 +108,18 @@ struct VehicleView: View {
             async let tire: Void = model.loadTire(vin: vin)
             async let sign: Void = signin.refresh()
             async let addr: Void = resolveAddressIfNeeded()
-            _ = await (ride, battery, detail, tire, sign, addr)
+            async let inbox: Void = messages.refresh()
+            _ = await (ride, battery, detail, tire, sign, addr, inbox)
             await loadHeroModel()
             await signin.syncWidget(model: model, ride: rideExtra)
+            syncChargeIsland()
         }
         .onChange(of: model.selectedVehicle?.soc) { _, _ in
             WidgetSnapshot.publish(from: model, signin: signin, ride: rideExtra)
+            syncChargeIsland()
+        }
+        .onChange(of: model.selectedVehicle?.isCharging) { _, _ in
+            syncChargeIsland()
         }
         .onChange(of: model.selectedVehicle?.latitude) { _, _ in
             Task { await resolveAddressIfNeeded() }
@@ -155,6 +166,8 @@ struct VehicleView: View {
                     showToast("分享车辆暂不支持仪表壁纸")
                 }
             },
+            onOpenMessages: { showMessages = true },
+            unreadCount: messages.unreadCount,
             onOpenTheme: {
                 themeFocus = .theme
                 showTheme = true
@@ -205,6 +218,13 @@ struct VehicleView: View {
         await loadRideSummary(vin: vin)
         await resolveAddressIfNeeded()
         await signin.syncWidget(model: model, ride: rideExtra)
+        await messages.refresh()
+        syncChargeIsland()
+    }
+
+    private func syncChargeIsland() {
+        guard let vehicle = model.selectedVehicle else { return }
+        ChargeLiveActivityController.sync(vehicle: vehicle, battery: model.batteries.first)
     }
 
     private func loadRideSummary(vin: String) async {
@@ -406,7 +426,7 @@ struct VehicleView: View {
             } label: {
                 ZStack(alignment: .topLeading) {
                     mapBody(vehicle)
-                    Text("腾讯地图")
+                    Text("地图")
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(Theme.secondary)
                         .padding(.horizontal, 4)
@@ -465,7 +485,7 @@ struct VehicleView: View {
         Button {
             showReplay = true
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("骑行记录")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.label)
@@ -478,47 +498,44 @@ struct VehicleView: View {
                         SkeletonBar(height: 28, radius: 8)
                     }
                 } else {
-                rideWaveRow(
-                    value: rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—",
-                    unit: "km",
-                    label: "最近骑行",
-                    tint: Color(hex: 0xFF3B64)
-                )
-                rideWaveRow(
-                    value: rideExtra?.lastMin.map { RideTrackService.durationText($0) } ?? "—",
-                    unit: "",
-                    label: "耗时",
-                    tint: Color(hex: 0x0B84FF)
-                )
+                    HStack(spacing: 0) {
+                        rideStat(
+                            value: rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—",
+                            unit: "km",
+                            label: "最近骑行"
+                        )
+                        rideStat(
+                            value: rideExtra?.lastMin.map { RideTrackService.durationText($0) } ?? "—",
+                            unit: "",
+                            label: "耗时"
+                        )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Spacer(minLength: 2)
+                    HairLine()
 
-                HairLine()
-                    .padding(.top, 2)
-
-                HStack(spacing: 0) {
-                    rideStat(
-                        value: rideExtra?.todayKm.map { String(format: "%.1f", $0) } ?? "—",
-                        unit: "km",
-                        label: "今日里程"
-                    )
-                    rideStat(
-                        value: rideExtra?.todayMaxSpeed.map { formatSpeed($0) } ?? "—",
-                        unit: "km/h",
-                        label: "速度"
-                    )
-                    rideStat(
-                        value: rideExtra?.todayMin.map { RideTrackService.durationText($0) } ?? "—",
-                        unit: "",
-                        label: "时长"
-                    )
-                }
-                .padding(.top, 4)
+                    HStack(spacing: 0) {
+                        rideStat(
+                            value: rideExtra?.todayKm.map { String(format: "%.1f", $0) } ?? "—",
+                            unit: "km",
+                            label: "今日里程"
+                        )
+                        rideStat(
+                            value: rideExtra?.todayMaxSpeed.map { formatSpeed($0) } ?? "—",
+                            unit: "km/h",
+                            label: "速度"
+                        )
+                        rideStat(
+                            value: rideExtra?.todayMin.map { RideTrackService.durationText($0) } ?? "—",
+                            unit: "",
+                            label: "时长"
+                        )
+                    }
                 }
             }
             .padding(.horizontal, 10)
             .padding(.top, 8)
-            .padding(.bottom, 5)
+            .padding(.bottom, 8)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)

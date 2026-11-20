@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var showDashboardWallpaper = false
     @State private var showSigninDetail = false
     @StateObject private var signin = SigninStore()
+    @StateObject private var profileStore = UserProfileStore()
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -52,7 +53,9 @@ struct SettingsView: View {
         .animation(nil, value: appearance.resolvedScheme)
         .task(id: activeMainTab) {
             guard activeMainTab == .settings else { return }
-            await signin.refresh()
+            async let sign: Void = signin.refresh()
+            async let profile: Void = profileStore.refresh()
+            _ = await (sign, profile)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active, activeMainTab == .settings else { return }
@@ -133,23 +136,18 @@ struct SettingsView: View {
     // MARK: - 账号
 
     private var accountCard: some View {
-        AppleCard {
+        let profile = profileStore.profile
+        return AppleCard {
             VStack(spacing: 14) {
                 HStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Theme.brand.opacity(0.12))
-                            .frame(width: 52, height: 52)
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(Theme.brand)
-                    }
+                    avatarView(profile)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("极核账号")
+                        Text(profile?.nickName.isEmpty == false ? profile!.nickName : "极核骑手")
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
-                        Text(ZeehoClient.shared.userId.map { "UID \($0)" } ?? "未获取到 UID")
+                            .lineLimit(1)
+                        Text(profileSubtitle(profile))
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
@@ -163,22 +161,42 @@ struct SettingsView: View {
                 HairLine()
 
                 HStack(spacing: 0) {
-                    accountStat(title: "车辆", value: "\(model.vehicles.count)", unit: "台")
+                    accountStat(title: "积分", value: profile.map { "\($0.score)" } ?? "--", unit: nil)
                     accountDivider
-                    accountStat(
-                        title: "当前电量",
-                        value: model.selectedVehicle.map { "\($0.soc)" } ?? "--",
-                        unit: "%"
-                    )
+                    accountStat(title: "帖子", value: profile.map { "\($0.postsNum)" } ?? "--", unit: nil)
                     accountDivider
-                    accountStat(
-                        title: "主视觉",
-                        value: backdropShort,
-                        unit: nil
-                    )
+                    accountStat(title: "粉丝", value: profile.map { "\($0.fansNum)" } ?? "--", unit: nil)
+                    accountDivider
+                    accountStat(title: "获赞", value: profile.map { "\($0.likeTimes)" } ?? "--", unit: nil)
                 }
             }
         }
+    }
+
+    private func avatarView(_ profile: UserProfileStore.Profile?) -> some View {
+        ZStack {
+            Circle()
+                .fill(Theme.brand.opacity(0.12))
+            if let url = profile?.avatarURL {
+                CachedRemoteImage(url: url, contentMode: .fill)
+                    .clipShape(Circle())
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Theme.brand)
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(Circle())
+    }
+
+    private func profileSubtitle(_ profile: UserProfileStore.Profile?) -> String {
+        if let profile {
+            if !profile.signature.isEmpty { return profile.signature }
+            if !profile.userShowId.isEmpty { return "ID \(profile.userShowId)" }
+            if !profile.userId.isEmpty { return "UID \(profile.userId)" }
+        }
+        return ZeehoClient.shared.userId.map { "UID \($0)" } ?? "未获取到 UID"
     }
 
     private func accountStat(title: String, value: String, unit: String?) -> some View {

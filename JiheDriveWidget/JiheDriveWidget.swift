@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 import UIKit
@@ -45,11 +46,11 @@ struct SnapshotProvider: TimelineProvider {
         snap.soc = 57
         snap.rangeKm = 62
         snap.charging = false
-        snap.todayKm = 0
-        snap.todayMin = 0
+        snap.todayKm = 12.4
+        snap.todayMin = 28
         snap.accel = 0
         snap.brake = 0
-        snap.maxSpeed = 0
+        snap.maxSpeed = 46
         snap.pointsTotal = 7102
         snap.pointsToday = 1
         snap.continueDays = 8
@@ -81,99 +82,60 @@ struct JiheDriveWidgetEntryView: View {
         .containerBackground(for: .widget) { widgetBackground }
     }
 
-    // MARK: - Medium（对齐 Scriptable 截图）
+    // MARK: - Medium（对齐 Scriptable：顶栏 + 今日骑行/积分 + 电量/按钮 | 车图）
 
     private var medium: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("今日骑行")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Color(hex: 0x0F172A))
+        VStack(alignment: .leading, spacing: 5) {
+            headerRow(titleSize: 13)
+
+            HStack(alignment: .firstTextBaseline) {
                 Text(todayRideLine)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(hex: 0x94A3B8))
-
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text("\(snap.soc)%")
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(hex: 0x0F172A))
-                        .monospacedDigit()
-                    Text("\(snap.rangeKm) km")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(hex: 0x6B7280))
-                }
-                .padding(.top, 4)
-
-                progress
-                    .padding(.top, 2)
-
-                Text(snap.charging ? "充电中" : "未充电")
-                    .font(.system(size: 10))
-                    .foregroundStyle(snap.charging ? Color(hex: 0x0369A1) : Color(hex: 0x94A3B8))
-                    .padding(.top, 1)
-
-                HStack(spacing: 0) {
-                    behavior(snap.accel, "加速")
-                    behavior(snap.brake, "急刹")
-                    behavior(snap.maxSpeed, "极速")
-                }
-                .padding(.top, 6)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x6B7280))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Spacer(minLength: 6)
+                pointsInline
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 4) {
-                    Spacer(minLength: 0)
-                    pill(
-                        snap.communityDone ? "社区已做" : "社区未做",
-                        bg: snap.communityDone ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
-                        fg: snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C)
-                    )
-                    pill(
-                        lotteryPillText,
-                        bg: Color(hex: 0xFEF3C7),
-                        fg: Color(hex: 0xB45309)
-                    )
-                    pill(
-                        snap.signedToday ? "已签" : "未签",
-                        bg: snap.signedToday ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
-                        fg: snap.signedToday ? Color(hex: 0x166534) : Color(hex: 0xEA580C)
-                    )
-                    Text(timeText)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color(hex: 0x94A3B8))
-                        .monospacedDigit()
+            HStack(alignment: .bottom, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(snap.soc)")
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color(hex: 0x0F172A))
+                            .monospacedDigit()
+                        Text("%")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9AA4B2))
+                        Text("\(snap.rangeKm) km")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(hex: 0x6B7280))
+                        if snap.charging {
+                            Text("充电中")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color(hex: 0x0369A1))
+                        }
+                    }
+                    progress
+                    controlBar
+                        .padding(.top, 8)
                 }
-                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(spacing: 6) {
-                    Text("积分 \(snap.pointsTotal)")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color(hex: 0x0F172A))
-                    Text("今日 +\(snap.pointsToday)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0x10B981))
-                    Text("连签 \(snap.continueDays) 天")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0x3B82F6))
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-
-                vehicleImage
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                HStack(alignment: .bottom) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    vehicleImage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if !tireLabel.isEmpty {
-                        Spacer(minLength: 0)
-                        Text(tireLabel)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color(hex: 0x64748B))
+                        Text("胎压 \(tireLabel)")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Color(hex: 0x9AA4B2))
                             .lineLimit(1)
                     }
                 }
+                .frame(width: 138)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxHeight: .infinity)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -183,82 +145,65 @@ struct JiheDriveWidgetEntryView: View {
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("今日骑行")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color(hex: 0x0F172A))
-                Spacer(minLength: 0)
-                Text(snap.signedToday ? "已签" : "未签")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(snap.signedToday ? Color(hex: 0x166534) : Color(hex: 0xEA580C))
-            }
+            headerRow(titleSize: 12, compact: true)
             Text(todayRideLine)
-                .font(.system(size: 10))
-                .foregroundStyle(Color(hex: 0x94A3B8))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color(hex: 0x6B7280))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("\(snap.soc)%")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text("\(snap.soc)")
+                    .font(.system(size: 26, weight: .heavy, design: .rounded))
                     .monospacedDigit()
+                Text("%")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x9AA4B2))
                 Text("\(snap.rangeKm) km")
                     .font(.system(size: 11))
                     .foregroundStyle(Color(hex: 0x6B7280))
             }
             progress
+            controlBar
+                .padding(.top, 6)
             Spacer(minLength: 0)
             HStack {
-                Text(snap.communityDone ? "社区已做" : "社区未做")
+                Text(snap.pointsTotal > 0 ? "\(snap.pointsTotal) 分" : "-- 分")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C))
+                    .foregroundStyle(Color(hex: 0x0F172A))
                 Spacer(minLength: 0)
                 Text(lotteryPillText)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color(hex: 0xB45309))
             }
         }
-        .padding(14)
+        .padding(12)
     }
 
     // MARK: - Large
 
     private var large: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 5) {
-                Text("今日骑行")
-                    .font(.system(size: 15, weight: .bold))
+        VStack(alignment: .leading, spacing: 8) {
+            headerRow(titleSize: 15)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(todayRideLine)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color(hex: 0x0F172A))
                     .lineLimit(1)
-                Spacer(minLength: 0)
-                pill(
-                    snap.communityDone ? "社区已做" : "社区未做",
-                    bg: snap.communityDone ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
-                    fg: snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C)
-                )
-                pill(
-                    lotteryPillText,
-                    bg: Color(hex: 0xFEF3C7),
-                    fg: Color(hex: 0xB45309)
-                )
-                pill(
-                    snap.signedToday ? "已签" : "未签",
-                    bg: snap.signedToday ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
-                    fg: snap.signedToday ? Color(hex: 0x166534) : Color(hex: 0xEA580C)
-                )
-                Text(timeText)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color(hex: 0x94A3B8))
-                    .monospacedDigit()
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                pointsInline
             }
-
-            Text(todayRideLine)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color(hex: 0x0F172A))
 
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(snap.soc)%")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(snap.soc)")
+                            .font(.system(size: 32, weight: .heavy, design: .rounded))
                             .monospacedDigit()
+                        Text("%")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9AA4B2))
                         Text("\(snap.rangeKm) km")
                             .font(.system(size: 13))
                             .foregroundStyle(Color(hex: 0x6B7280))
@@ -267,39 +212,23 @@ struct JiheDriveWidgetEntryView: View {
                     Text(snap.charging ? "充电中" : "未充电")
                         .font(.system(size: 11))
                         .foregroundStyle(Color(hex: 0x94A3B8))
-                    HStack(spacing: 0) {
-                        behavior(snap.accel, "加速")
-                        behavior(snap.brake, "急刹")
-                        behavior(snap.maxSpeed, "极速")
-                    }
-                    .padding(.top, 6)
+                    controlBar
+                        .padding(.top, 8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .trailing, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Text("积分 \(snap.pointsTotal)")
-                            .font(.system(size: 13, weight: .bold))
-                        Text("今日 +\(snap.pointsToday)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0x10B981))
-                        Text("连签 \(snap.continueDays) 天")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color(hex: 0x3B82F6))
-                    }
+                VStack(alignment: .trailing, spacing: 4) {
                     vehicleImage
                         .frame(maxWidth: .infinity, maxHeight: 120)
                     if !tireLabel.isEmpty {
-                        HStack {
-                            Spacer()
-                            Text(tireLabel)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Color(hex: 0x64748B))
-                        }
+                        Text("胎压 \(tireLabel)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color(hex: 0x9AA4B2))
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(width: 168)
             }
+            .frame(maxHeight: .infinity)
 
             HStack {
                 Text(snap.locked ? "已关锁" : "未关锁")
@@ -317,22 +246,72 @@ struct JiheDriveWidgetEntryView: View {
     // MARK: - Pieces
 
     private var todayRideLine: String {
-        if snap.todayKm > 0.01 || snap.todayMin > 0 {
-            return String(format: "%.1f km · %@", snap.todayKm, durationLabel(snap.todayMin))
-        }
-        if snap.lastKm > 0.01 {
-            return String(format: "最近 %.1f km · %@", snap.lastKm, durationLabel(snap.lastMin))
+        if snap.todayKm > 0.01 || snap.todayMin > 0 || snap.maxSpeed > 0 {
+            return "今日骑行 \(fmtKm(snap.todayKm)) km · \(durationLabel(snap.todayMin)) · \(snap.maxSpeed) km/h"
         }
         return "今日暂无骑行"
+    }
+
+    private func fmtKm(_ value: Double) -> String {
+        if value >= 100 { return String(Int(value.rounded())) }
+        let rounded = (value * 10).rounded() / 10
+        return rounded == rounded.rounded() ? String(Int(rounded)) : String(format: "%.1f", rounded)
     }
 
     private func durationLabel(_ minutes: Int) -> String {
         if minutes >= 60 {
             let hours = minutes / 60
             let rest = minutes % 60
-            return rest == 0 ? "\(hours)h" : "\(hours)h\(rest)min"
+            return rest == 0 ? "\(hours)h" : "\(hours)h\(rest)m"
         }
         return "\(minutes) min"
+    }
+
+    private func headerRow(titleSize: CGFloat, compact: Bool = false) -> some View {
+        HStack(spacing: compact ? 4 : 5) {
+            Text("极核")
+                .font(.system(size: titleSize, weight: .heavy))
+                .foregroundStyle(Color(hex: 0x0F172A))
+            Spacer(minLength: 0)
+            if !compact {
+                pill(
+                    snap.communityDone ? "社区已做" : "社区未做",
+                    bg: snap.communityDone ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
+                    fg: snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C)
+                )
+            }
+            pill(
+                lotteryPillText,
+                bg: Color(hex: 0xFEF3C7),
+                fg: Color(hex: 0xB45309)
+            )
+            pill(
+                snap.signedToday ? "已签" : "未签",
+                bg: snap.signedToday ? Color(hex: 0xDCFCE7) : Color(hex: 0xFEE2E2),
+                fg: snap.signedToday ? Color(hex: 0x166534) : Color(hex: 0x991B1B)
+            )
+            if !compact {
+                Text(timeText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color(hex: 0x9AA4B2))
+                    .monospacedDigit()
+            }
+        }
+        .minimumScaleFactor(0.75)
+    }
+
+    private var pointsInline: some View {
+        HStack(spacing: 0) {
+            Text("总积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
+                .foregroundStyle(Color(hex: 0x0F172A))
+            Text(" · 今日 +\(snap.pointsToday)")
+                .foregroundStyle(Color(hex: 0x10B981))
+            Text(" · 连签 \(snap.continueDays)天")
+                .foregroundStyle(Color(hex: 0x3B82F6))
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
     }
 
     private var tireLabel: String {
@@ -341,8 +320,11 @@ struct JiheDriveWidgetEntryView: View {
     }
 
     private var lotteryPillText: String {
+        if snap.lotteryLeft == 0 || snap.lotteryClaimed {
+            if snap.lotteryText.contains("盲盒") { return snap.lotteryText }
+            return snap.lotteryClaimed ? "盲盒已领" : "盲盒可抽"
+        }
         if !snap.lotteryText.isEmpty { return snap.lotteryText }
-        if snap.lotteryLeft == 0 { return "盲盒可领" }
         return "盲盒\(snap.lotteryLeft)天"
     }
 
@@ -358,17 +340,56 @@ struct JiheDriveWidgetEntryView: View {
         .frame(height: 7)
     }
 
-    private func behavior(_ value: Int, _ label: String) -> some View {
-        VStack(spacing: 1) {
-            Text("\(value)")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(Color(hex: 0x0F172A))
-                .monospacedDigit()
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(Color(hex: 0x94A3B8))
+    private var controlBar: some View {
+        HStack(spacing: 10) {
+            controlButton(
+                intent: WidgetLockIntent(),
+                symbol: "power",
+                tint: snap.locked ? Color(hex: 0x30D158) : Color(hex: 0xFF9F0A),
+                label: snap.locked ? "开机" : "关机"
+            )
+            controlButton(
+                intent: WidgetCushionIntent(),
+                symbol: "chair.lounge.fill",
+                tint: Color(hex: 0x0F172A),
+                label: "坐垫"
+            )
+            controlButton(
+                intent: WidgetFindIntent(),
+                symbol: "light.beacon.max.fill",
+                tint: Color(hex: 0x0F172A),
+                label: "寻车"
+            )
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    private func controlButton<I: AppIntent>(
+        intent: I,
+        symbol: String,
+        tint: Color,
+        label: String
+    ) -> some View {
+        Button(intent: intent) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.white.opacity(0.95)))
+                    .overlay(
+                        Circle().strokeBorder(Color(hex: 0xE2E8F0), lineWidth: 0.8)
+                    )
+                Text(label)
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x64748B))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     private var vehicleImage: some View {
@@ -428,6 +449,7 @@ private extension Color {
 struct JiheDriveWidgetBundle: WidgetBundle {
     var body: some Widget {
         JiheDriveHomeWidget()
+        ChargeLiveActivity()
     }
 }
 

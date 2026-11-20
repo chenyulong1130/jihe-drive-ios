@@ -15,9 +15,14 @@ struct SigninInfo: Hashable {
     var signedInToday: Bool { Self.isToday(lastTime) }
 
     var daysUntilLottery: Int {
-        if continueDays > 0, continueDays % 30 == 0 { return 0 }
-        let left = 30 - (continueDays % 30)
-        return left == 30 ? 0 : left
+        if continueDays <= 0 { return 30 }
+        if continueDays % 30 == 0 { return 0 }
+        return 30 - (continueDays % 30)
+    }
+
+    var cycleDayInRound: Int {
+        if continueDays <= 0 { return 0 }
+        return continueDays % 30 == 0 ? 30 : continueDays % 30
     }
 
     var todayRuleScore: Int {
@@ -55,5 +60,56 @@ struct SigninInfo: Hashable {
             }(),
             scoreList: rules
         )
+    }
+}
+
+struct SigninPrize: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var imageURL: URL?
+    var createDate: String
+    var distributed: Bool
+
+    static func parse(_ data: Any?) -> [SigninPrize] {
+        let items: [[String: Any]]
+        if let list = data as? [[String: Any]] {
+            items = list
+        } else if let map = data as? [String: Any] {
+            items = (map["list"] as? [[String: Any]])
+                ?? (map["records"] as? [[String: Any]])
+                ?? (map["rows"] as? [[String: Any]])
+                ?? []
+        } else {
+            items = []
+        }
+        return items.compactMap { item in
+            let id = Self.text(item["uuid"] ?? item["id"])
+            let name = Self.text(item["prizesName"] ?? item["name"] ?? item["prizeName"])
+            guard !id.isEmpty || !name.isEmpty else { return nil }
+            let date = Self.text(item["createDate"])
+            let dist = Self.text(item["distribute"])
+            return SigninPrize(
+                id: id.isEmpty ? name + date : id,
+                name: name.isEmpty ? "盲盒奖品" : name,
+                imageURL: Self.imageURL(item["fileurl"] ?? item["imageUrl"] ?? item["prizeUrl"] ?? item["url"]),
+                createDate: date,
+                distributed: dist == "1" || dist.lowercased() == "true"
+            )
+        }
+    }
+
+    private static func text(_ raw: Any?) -> String {
+        guard let raw, !(raw is NSNull) else { return "" }
+        let value = "\(raw)".trimmingCharacters(in: .whitespaces)
+        return value == "<null>" ? "" : value
+    }
+
+    private static func imageURL(_ raw: Any?) -> URL? {
+        let value = text(raw)
+        if value.isEmpty { return nil }
+        if value.hasPrefix("http") { return URL(string: value) }
+        if value.hasPrefix("//") { return URL(string: "https:" + value) }
+        if value.hasPrefix("/") { return URL(string: H5Client.host + value) }
+        return URL(string: value)
     }
 }

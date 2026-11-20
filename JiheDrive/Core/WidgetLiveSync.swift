@@ -1,9 +1,9 @@
 import Foundation
 import WidgetKit
 
-/// 小组件与 App 共用的云端刷新。
-/// timeline：拉车辆 + 任务状态 + 盲盒（15 分钟一次）。
-/// reuse：App 已拉过车辆，只补任务/盲盒/积分并写快照。
+/// 小组件与 App 共用的云端刷新（对齐 Scriptable 闸门）。
+/// 常更新：车辆 / 电量 / 骑行 / 胎压 / 积分，写入 App Group。
+/// 一天一次：签到、社区；未到盲盒日完全不打盲盒接口。
 enum WidgetLiveSync {
     enum Mode {
         case timeline
@@ -51,71 +51,72 @@ enum WidgetLiveSync {
 
         let cachedSnap = WidgetSnapshot.read()
         let cachedIsToday = Self.snapIsToday(cachedSnap)
-        let localCommunityDone: Bool = {
-            if existing?.communityDone == true { return true }
-            if cachedIsToday, cachedSnap?.communityDone == true { return true }
-            if let uid = ZeehoClient.shared.userId {
-                return CommunityTask.isDoneToday(userId: uid)
-            }
-            return false
-        }()
-        let knownSigned = existing?.signedToday == true
+        let uid = ZeehoClient.shared.userId
+
+        var signedToday = existing?.signedToday == true
+            || WidgetSnapshot.signedTodayGate()
             || (cachedIsToday && cachedSnap?.signedToday == true)
-        let canReuseStatus = knownSigned && localCommunityDone
+        var communityDone = existing?.communityDone == true
+            || CommunityTask.isDoneToday(userId: uid)
+            || (cachedIsToday && cachedSnap?.communityDone == true)
+        var continueDays = existing?.continueDays
+            ?? (cachedIsToday ? cachedSnap?.continueDays : nil)
+            ?? 0
+        var totalSignCount = existing?.totalSignCount
+            ?? cachedSnap?.totalSignCount
+            ?? 0
+        var todayScore = existing?.todayScore
+            ?? (cachedIsToday ? cachedSnap?.todaySignScore : nil)
+            ?? 0
 
-        var status = TaskStatus()
-        if canReuseStatus {
-            status.signed = true
-            status.community = true
-            status.continueDays = existing?.continueDays ?? cachedSnap?.continueDays ?? 0
-            status.totalSignCount = existing?.totalSignCount ?? cachedSnap?.totalSignCount ?? 0
-            status.todayScore = existing?.todayScore ?? cachedSnap?.todaySignScore ?? 0
-        } else {
-            status = await fetchTaskStatus()
-        }
-
-        let signedAlready = status.signed || knownSigned
-        let communityAlready = status.community || localCommunityDone
-
-        // 今天任务都做完：不再签到、不再跑社区
-        if signedAlready && communityAlready {
-            snap.signedToday = true
-            snap.communityDone = true
-        } else {
-            if !signedAlready {
-                await signInIfNeeded()
-            }
-            if !communityAlready, let uid = ZeehoClient.shared.userId, !uid.isEmpty {
-                let result = await CommunityTask.run(userId: uid)
-                snap.communityDone = result.success || CommunityTask.isDoneToday(userId: uid)
+        // 签到：今天做过就不再打 info / POST
+        if !signedToday {
+            let status = await fetchSigninStatus()
+            if status.continueDays > 0 { continueDays = status.continueDays }
+            if status.totalSignCount > 0 { totalSignCount = status.totalSignCount }
+            if status.todayScore > 0 { todayScore = status.todayScore }
+            if status.signed {
+                signedToday = true
             } else {
-                snap.communityDone = communityAlready
+                let sign = await signInIfNeeded()
+                if sign.signed { signedToday = true }
+                if sign.continueDays > 0 { continueDays = sign.continueDays }
+                if sign.todayScore > 0 { todayScore = sign.todayScore }
             }
-            status = await fetchTaskStatus()
-            snap.signedToday = status.signed || signedAlready
-            snap.communityDone = snap.communityDone || status.community || communityAlready
+        }
+        if signedToday { WidgetSnapshot.markSignedToday() }
+
+        // 社区：今天做过就整串跳过
+        if !communityDone, let uid, !uid.isEmpty {
+            let result = await CommunityTask.run(userId: uid)
+            communityDone = result.success || CommunityTask.isDoneToday(userId: uid)
         }
 
-        snap.continueDays = status.continueDays > 0 ? status.continueDays : (existing?.continueDays ?? 0)
-        snap.totalSignCount = status.totalSignCount > 0 ? status.totalSignCount : (existing?.totalSignCount ?? 0)
-        snap.todaySignScore = status.todayScore
-        if snap.continueDays == 0, let existingDays = existing?.continueDays {
-            snap.continueDays = existingDays
-        }
-        snap.lotteryLeft = lotteryLeft(snap.continueDays)
+        snap.signedToday = signedToday
+        snap.communityDone = communityDone
+        snap.continueDays = continueDays
+        snap.totalSignCount = totalSignCount
+        snap.todaySignScore = todayScore
+        snap.lotteryLeft = lotteryLeft(continueDays)
 
-        let lotteryDue = snap.continueDays > 0 && snap.continueDays % 30 == 0
-        let shouldLottery = mode == .timeline || lotteryDue || !WidgetSnapshot.lotteryCheckedToday()
+        let lotteryDue = continueDays > 0 && continueDays % 30 == 0
         var lottery = Lottery()
         lottery.left = snap.lotteryLeft
-        if shouldLottery {
-            lottery = await runLottery(continueDays: snap.continueDays, signCount: snap.totalSignCount)
-            WidgetSnapshot.markLotteryChecked()
-        } else if let cached = cachedSnap {
-            lottery.text = cached.lotteryText
-            lottery.claimed = cached.lotteryClaimed
+        if lotteryDue, !WidgetSnapshot.lotteryClaimedToday() {
+            lottery = await claimLottery()
+            if lottery.claimed {
+                WidgetSnapshot.markLotteryClaimed()
+            }
+        } else if lotteryDue, let cached = cachedSnap, cachedIsToday {
+            lottery.text = cached.lotteryText.isEmpty ? "盲盒可抽" : cached.lotteryText
+            lottery.claimed = cached.lotteryClaimed || WidgetSnapshot.lotteryClaimedToday()
             lottery.score = cached.lotteryScore
-            lottery.left = cached.lotteryLeft
+            lottery.left = 0
+        } else {
+            lottery.text = continueDays == 0 ? "盲盒30天" : "盲盒\(snap.lotteryLeft)天"
+            if let cached = cachedSnap, cachedIsToday, !cached.lotteryText.isEmpty, !lotteryDue {
+                lottery.text = cached.lotteryText
+            }
         }
         snap.lotteryText = lottery.text
         snap.lotteryClaimed = lottery.claimed
@@ -124,10 +125,8 @@ enum WidgetLiveSync {
             snap.lotteryLeft = lottery.left
         }
 
-        if mode == .timeline || cachedSnap == nil || (cachedSnap?.pointsTotal ?? 0) == 0 || lottery.score > 0 {
-            let points = await fetchPoints(
-                claimedExtra: lottery.score + (snap.signedToday ? status.todayScore : 0) + (snap.communityDone ? 3 : 0)
-            )
+        let points = await fetchPoints()
+        if points.total > 0 {
             snap.pointsTotal = points.total
             snap.pointsToday = points.today
         } else {
@@ -270,12 +269,8 @@ enum WidgetLiveSync {
         var todayScore = 0
     }
 
-    private static func fetchTaskStatus() async -> TaskStatus {
+    private static func fetchSigninStatus() async -> TaskStatus {
         var status = TaskStatus()
-        if let uid = ZeehoClient.shared.userId, !uid.isEmpty {
-            status.community = await CommunityTask.resolveDone(userId: uid)
-        }
-
         if let res = try? await H5Client.get("/cfmotoservermine/H5/signin/info") {
             var raw = res
             if ZeehoClient.codeString(raw["code"]) != "10000" {
@@ -285,23 +280,27 @@ enum WidgetLiveSync {
                let info = SigninInfo.parse(raw["data"]) {
                 status.continueDays = info.continueDays
                 status.todayScore = info.todayRuleScore
-                if info.signedInToday { status.signed = true }
+                status.signed = info.signedInToday
                 if status.totalSignCount == 0 { status.totalSignCount = info.days }
             }
-        }
-
-        if let res = try? await ZeehoClient.shared.get("/v1.0/mine/cfmotoservermine/signin/count"),
-           ZeehoClient.codeString(res["code"]) == "10000",
-           let data = res["data"] as? [String: Any] {
-            if "\(data["signStatus"] ?? "")" == "1" { status.signed = true }
-            let count = Int("\(data["count"] ?? "")") ?? 0
-            if count > 0 { status.totalSignCount = count }
         }
         return status
     }
 
-    private static func signInIfNeeded() async {
-        _ = try? await H5Client.post("/cfmotoservermine/H5/signin")
+    private static func signInIfNeeded() async -> (signed: Bool, continueDays: Int, todayScore: Int) {
+        guard let res = try? await H5Client.post("/cfmotoservermine/H5/signin") else {
+            return (false, 0, 0)
+        }
+        let code = ZeehoClient.codeString(res["code"])
+        let message = "\(res["message"] ?? res["msg"] ?? "")"
+        let already = code == "repeatedly_operation"
+            || message.contains("已签")
+            || message.contains("重复")
+        let ok = code == "10000" || already
+        let data = res["data"] as? [String: Any]
+        let continueDays = Int("\(data?["continueDays"] ?? data?["days"] ?? 0)") ?? 0
+        let todayScore = Int("\(data?["integralScore"] ?? data?["integral"] ?? 0)") ?? 0
+        return (ok, continueDays, todayScore)
     }
 
     // MARK: - 30 天盲盒
@@ -319,87 +318,119 @@ enum WidgetLiveSync {
         return 30 - (continueDays % 30)
     }
 
-    private static func runLottery(continueDays: Int, signCount: Int) async -> Lottery {
+    /// 仅盲盒日且今天还没领过才调用。对齐 Scriptable：lottery → supplementPrize。
+    private static func claimLottery() async -> Lottery {
         var result = Lottery()
-        result.left = lotteryLeft(continueDays)
-        var cycleCount = signCount
-        let month = String(CommunityTask.todayKey().prefix(7))
-        var monthQuery = H5Client.mineQuery
-        monthQuery["month"] = month
-        if let res = try? await H5Client.get("/cfmotoservermine/signin/info", query: monthQuery),
-           ZeehoClient.codeString(res["code"]) == "10000",
-           let data = res["data"] as? [String: Any] {
-            let count = Int("\(data["signCount"] ?? "")") ?? 0
-            if count > 0 { cycleCount = count }
+        result.left = 0
+        var lotteryQuery = H5Client.mineQuery
+        lotteryQuery["boxType"] = "0"
+        lotteryQuery["version"] = "v2"
+        if let parsed = parseLottery(
+            try? await H5Client.get("/cfmotoservermine/H5/signin/lottery", query: lotteryQuery)
+        ) {
+            return parsed
         }
-        let due = (continueDays > 0 && continueDays % 30 == 0)
-            || (cycleCount >= 30 && continueDays > 0 && continueDays % 30 == 0)
 
-        if due {
-            let today = CommunityTask.todayKey()
-            var query = H5Client.mineQuery
-            query["supplementDate"] = today
-            var claimed = false
-            var score = 0
-            var name = ""
-            for path in [
-                "/cfmotoservermine/signin/supplementPrize",
-                "/cfmotoservermine/H5/signin/supplementPrize"
-            ] {
-                guard let res = try? await H5Client.get(path, query: query) else { continue }
-                if ZeehoClient.codeString(res["code"]) == "10000" {
-                    claimed = true
-                    let data = res["data"] as? [String: Any]
-                    score = Int("\(data?["integral"] ?? data?["integralScore"] ?? 0)") ?? 0
-                    name = "\(data?["prizesName"] ?? data?["prizeName"] ?? "")"
-                    break
-                }
+        var query = H5Client.mineQuery
+        query["supplementDate"] = CommunityTask.todayKey()
+        for path in [
+            "/cfmotoservermine/H5/signin/supplementPrize",
+            "/cfmotoservermine/signin/supplementPrize"
+        ] {
+            if let parsed = parseLottery(try? await H5Client.get(path, query: query)) {
+                return parsed
             }
-            result.claimed = claimed
-            result.score = score
-            if claimed {
-                result.text = score > 0 ? "盲盒+\(score)" : (name.isEmpty ? "盲盒已领" : "盲盒 \(name)")
-                result.left = 0
-            } else {
-                result.text = "盲盒可领"
-                result.left = 0
-            }
+        }
+        result.text = "盲盒可抽"
+        return result
+    }
+
+    private static func parseLottery(_ res: [String: Any]?) -> Lottery? {
+        guard let res else { return nil }
+        let code = ZeehoClient.codeString(res["code"])
+        let message = "\(res["message"] ?? res["msg"] ?? "")"
+        let already = message.contains("已领") || message.contains("已抽") || message.contains("重复")
+        let ok = code == "10000" || already
+        guard ok else { return nil }
+        var result = Lottery()
+        result.left = 0
+        result.claimed = true
+        let data = res["data"] as? [String: Any]
+        result.score = Int("\(data?["integral"] ?? data?["integralScore"] ?? data?["score"] ?? 0)") ?? 0
+        let name = "\(data?["prizesName"] ?? data?["prizeName"] ?? "")"
+        if already {
+            result.text = "盲盒已领"
+        } else if result.score > 0 {
+            result.text = "盲盒+\(result.score)"
+        } else if !name.isEmpty {
+            result.text = "盲盒 \(name)"
         } else {
-            result.text = result.left == 30 && continueDays == 0 ? "盲盒30天" : "盲盒\(result.left)天"
+            result.text = "盲盒已领"
         }
-
-        var prizeQuery = H5Client.mineQuery
-        prizeQuery["page"] = "1"
-        prizeQuery["pageSize"] = "10"
-        _ = try? await H5Client.get("/cfmotoservermine/H5/signin/prizesDetail", query: prizeQuery)
         return result
     }
 
     // MARK: - Points
 
-    private static func fetchPoints(claimedExtra: Int) async -> (total: Int, today: Int) {
-        var total = 0
-        if let res = try? await ZeehoClient.shared.get("/v1.0/mine/cfmotoservermine/integral/totalIntegral") {
-            if let number = res["data"] as? NSNumber {
-                total = number.intValue
-            } else if let data = res["data"] as? [String: Any] {
-                total = firstInt(data["integralTotal"], data["totalIntegral"], data["integral"], data["score"])
-            } else {
-                total = firstInt(res["integralTotal"], res["totalIntegral"], res["data"])
-            }
+    private static func fetchPoints() async -> (total: Int, today: Int) {
+        var total = await fetchIntegralTotal()
+        if total == 0 {
+            total = await fetchSettingScore()
         }
+        guard total > 0 else { return (0, 0) }
+
         let todayKey = CommunityTask.todayKey()
         let defaults = WidgetSnapshot.suiteDefaults()
+        let versionKey = "widget_points_baseline_v2"
         let baselineDate = defaults?.string(forKey: "widget_points_baseline_date") ?? ""
         var baseline = defaults?.integer(forKey: "widget_points_baseline") ?? 0
-        if baselineDate != todayKey {
-            baseline = max(0, total - claimedExtra)
+        let needReset = defaults?.bool(forKey: versionKey) != true || baselineDate != todayKey
+        if needReset {
+            baseline = total
+            defaults?.set(true, forKey: versionKey)
             defaults?.set(todayKey, forKey: "widget_points_baseline_date")
             defaults?.set(baseline, forKey: "widget_points_baseline")
             defaults?.synchronize()
         }
-        let today = max(0, total - baseline)
-        return (total, today)
+        return (total, max(0, total - baseline))
+    }
+
+    private static func fetchIntegralTotal() async -> Int {
+        guard let res = try? await ZeehoClient.shared.get("/v1.0/mine/cfmotoservermine/integral/totalIntegral") else {
+            return 0
+        }
+        return parseIntegral(res)
+    }
+
+    private static func fetchSettingScore() async -> Int {
+        guard let uid = ZeehoClient.shared.userId, !uid.isEmpty else { return 0 }
+        let encoded = uid.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? uid
+        guard let res = try? await ZeehoClient.shared.get("/v1.0/mine/cfmotoservermine/setting/\(encoded)") else {
+            return 0
+        }
+        return parseIntegral(res)
+    }
+
+    private static func parseIntegral(_ res: [String: Any]) -> Int {
+        let data = res["data"]
+        if let number = data as? NSNumber { return number.intValue }
+        if let number = data as? Int { return number }
+        if let number = data as? Double { return Int(number) }
+        if let text = data as? String { return firstInt(text) }
+        let map = data as? [String: Any]
+        return firstInt(
+            map?["score"],
+            map?["integralTotal"],
+            map?["totalIntegral"],
+            map?["integral"],
+            map?["point"],
+            map?["points"],
+            map?["totalScore"],
+            map?["userScore"],
+            res["score"],
+            res["integralTotal"],
+            res["totalIntegral"]
+        )
     }
 
     private static func firstInt(_ values: Any?...) -> Int {

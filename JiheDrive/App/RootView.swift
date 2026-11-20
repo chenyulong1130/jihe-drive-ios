@@ -7,6 +7,7 @@ struct RootView: View {
     @StateObject private var wallpaperStore = WallpaperStore()
     @StateObject private var videoStore = VideoBackdropStore()
     @StateObject private var appearance = AppearanceStore()
+    @StateObject private var messages = MessageStore()
 
     var body: some View {
         ZStack {
@@ -25,6 +26,7 @@ struct RootView: View {
         .environmentObject(wallpaperStore)
         .environmentObject(videoStore)
         .environmentObject(appearance)
+        .environmentObject(messages)
         .preferredColorScheme(appearance.resolvedScheme)
         .tint(Theme.brand)
         .animation(Motion.spring, value: model.isLoggedIn)
@@ -40,6 +42,15 @@ struct RootView: View {
         .onAppear {
             appearance.refreshResolved()
             LocationPermissionRequester.shared.request()
+            messages.requestPermission()
+        }
+        .task(id: model.isLoggedIn) {
+            guard model.isLoggedIn else { return }
+            await messages.refresh()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 600_000_000_000)
+                await messages.refresh()
+            }
         }
         .onChange(of: appearance.mode) { _, _ in
             var transaction = Transaction()

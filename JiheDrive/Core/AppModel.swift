@@ -210,10 +210,10 @@ final class AppModel: ObservableObject {
 
     // MARK: - 电池
 
-    func loadBattery(vin: String) async {
-        batteryLoading = true
+    func loadBattery(vin: String, quiet: Bool = false) async {
+        if !quiet { batteryLoading = true }
         batteryError = nil
-        defer { batteryLoading = false }
+        defer { if !quiet { batteryLoading = false } }
 
         do {
             // 小程序规则：V2 给充电骨架（功率/充满文案），batteryInfo 覆盖 soc/电压/电流

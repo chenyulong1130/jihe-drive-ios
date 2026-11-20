@@ -2,19 +2,30 @@ import Foundation
 import MapKit
 import SwiftUI
 
-/// 轨迹回放：路线卡（点开全屏地图）+ 指标 + 速度曲线 + 起终点 + 脚注，
-/// 底部常驻播放条，路线上的光点和曲线进度条跟着回放走。
+/// 轨迹回放：Z-Link 弱化底图 + 自有速度着色轨迹，默认全览、不自动播。
 struct RideReplayView: View {
     let vehicle: Vehicle
-    let track: RideTrack
+    let tracks: [RideTrack]
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var progress: Double = 0
     @State private var playing = false
     @State private var rate: Double = 1
-    @State private var follow = true
+    @State private var follow = false
     @State private var showFullMap = false
+
+    init(vehicle: Vehicle, track: RideTrack) {
+        self.vehicle = vehicle
+        self.tracks = [track]
+    }
+
+    init(vehicle: Vehicle, tracks: [RideTrack]) {
+        self.vehicle = vehicle
+        self.tracks = tracks
+    }
+
+    private var track: RideTrack { RideTrack.merged(tracks) }
 
     // MARK: - 数据
 
@@ -24,21 +35,18 @@ struct RideReplayView: View {
 
     private var speeds: [Double] { track.speedSamples }
 
-    /// 回放时长：按行程拉长，约 24–50 秒，避免一闪而过
+    private var clock: (times: [TimeInterval], duration: TimeInterval) {
+        ReplayClock.make(track)
+    }
+
+    /// 回放墙钟时长：压缩真实行程，点与点之间的时间比例保持不变
     private var playbackSeconds: Double {
-        let minutes = max(track.durationMinutes, 1)
-        let byTrip = min(50, max(24, Double(minutes) * 2.4))
-        let byPoints = min(50, max(24, Double(max(track.points.count, 1)) * 0.32))
-        return max(byTrip, byPoints)
+        let real = max(clock.duration, 1)
+        return min(50, max(24, real / 48))
     }
 
     private var currentSpeed: Double {
-        let samples = speeds
-        guard samples.count > 1 else { return 0 }
-        let raw = min(max(progress, 0), 1) * Double(samples.count - 1)
-        let index = min(samples.count - 2, max(0, Int(raw)))
-        let fraction = raw - Double(index)
-        return samples[index] + (samples[index + 1] - samples[index]) * fraction
+        ReplayClock.sample(track, progress: progress).speed
     }
 
     private var maxSpeedValue: Double {
@@ -61,20 +69,12 @@ struct RideReplayView: View {
                     header
                     routeCard
                     metricsCard
-                    speedCard
                     placeCard
                     footnote
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.top, 8)
-                .padding(.bottom, 132)
-            }
-
-            playbackBar
-        }
-        .onAppear {
-            if !playing, progress == 0 {
-                playing = true
+                .padding(.bottom, 28)
             }
         }
         .task(id: playing) {
@@ -125,52 +125,84 @@ struct RideReplayView: View {
             }
 
             Spacer(minLength: 0)
+
+            Button {
+                showFullMap = true
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Theme.label)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Theme.surface))
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            .accessibilityLabel("全屏")
         }
     }
 
     private var subtitle: String {
         let time = track.startTime ?? "未记录时间"
-        return vehicle.name.isEmpty ? time : "\(vehicle.name) · \(time)"
+        if tracks.count > 1 {
+            return "\(tracks.count) 段 · \(time)"
+        }
+        return time
     }
 
     // MARK: - 路线卡
 
     private var routeCard: some View {
         ZStack {
-            ReplayMap(points: coordinates, speeds: speeds, progress: progress, follow: false)
+            ReplayMap(
+                points: coordinates,
+                speeds: speeds,
+                times: clock.times,
+                duration: clock.duration,
+                progress: progress,
+                follow: false
+            )
                 .allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    chip(text: playing ? "回放中" : "轨迹", icon: playing ? "play.fill" : "map", tint: .white)
+                HStack(alignment: .top, spacing: 6) {
+                    Button {
+                        if progress >= 1 { progress = 0 }
+                        playing.toggle()
+                    } label: {
+                        chip(text: playing ? "暂停" : "回放", icon: playing ? "pause.fill" : "play.fill", tint: .white)
+                    }
+                    .buttonStyle(.plain)
                     Spacer(minLength: 0)
                     Button {
                         showFullMap = true
                     } label: {
-                        chip(text: "全屏", icon: "arrow.up.left.and.arrow.down.right", tint: .white)
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color(hex: 0x2563EB))
+                            .frame(width: 36, height: 36)
+                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white))
+                            .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+                    .accessibilityLabel("全屏")
                 }
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 6) {
-                    chip(text: String(format: "%.1f km", track.mileage), icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .white)
-                    chip(text: RideTrackService.durationText(track.durationMinutes), icon: "clock", tint: .white)
+                HStack(alignment: .bottom, spacing: 8) {
+                    TrackSpeedLegend(compact: true)
                     Spacer(minLength: 0)
+                    chip(text: String(format: "%.1f km", track.mileage), icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .white)
                 }
             }
             .padding(12)
         }
-        .frame(height: 268)
+        .frame(height: 300)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8)
         )
         .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 6)
-        .contentShape(Rectangle())
-        .onTapGesture { showFullMap = true }
     }
 
     private func chip(text: String, icon: String, tint: Color) -> some View {
@@ -414,83 +446,89 @@ struct RideReplayView: View {
         .padding(.bottom, 8)
     }
 
-    // MARK: - 全屏地图（放大回放：地图占满 + 底部速度曲线与时间轴联动）
+    // MARK: - 全屏地图（全览底图 + 自有轨迹，无时间轴）
 
     private var fullMap: some View {
-        ZStack(alignment: .bottom) {
-            ReplayMap(points: coordinates, speeds: speeds, progress: progress, follow: follow)
-                .ignoresSafeArea()
-
+            ReplayMap(
+            points: coordinates,
+            speeds: speeds,
+            times: clock.times,
+            duration: clock.duration,
+            progress: progress,
+            follow: playing,
+            edgePadding: UIEdgeInsets(top: 108, left: 40, bottom: 72, right: 40)
+        )
+        .ignoresSafeArea()
+        .overlay(alignment: .top) {
             LinearGradient(
-                colors: [Color.black.opacity(0.38), Color.clear],
+                colors: [
+                    Color.black.opacity(0.64),
+                    Color.black.opacity(0.28),
+                    Color.clear
+                ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 140)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(height: 168)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
-
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    Button {
-                        showFullMap = false
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(.ultraThinMaterial))
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(String(format: "%.1f km · %d 分钟", track.mileage, track.durationMinutes))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                        Text(vehicle.name)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.75))
-                    }
-
-                    Spacer(minLength: 0)
-
-                    // 当前速度大字
-                    VStack(alignment: .trailing, spacing: 1) {
-                        HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text(speeds.count > 1 ? String(format: "%.0f", currentSpeed) : "--")
-                                .font(.system(size: 28, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                            Text("km/h")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-                        Text(playing ? "回放中" : "已暂停")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-
-                    Button {
-                        follow.toggle()
-                    } label: {
-                        Image(systemName: follow ? "location.fill" : "location")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(.ultraThinMaterial))
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-                }
-                .padding(.horizontal, Theme.page)
-                .padding(.top, ScreenMetrics.statusBarHeight + 4)
-
-                Spacer(minLength: 0)
-
-                fullMapBottomPanel
-            }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            fullMapChrome
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                TrackSpeedLegend()
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.page)
+            .padding(.bottom, 10)
+        }
+        // 底图强制浅色，顶栏用深色方案：状态栏和时间文字都是白的，才压得住浅地图
+        .preferredColorScheme(.dark)
+        .background(Color.black.ignoresSafeArea())
+    }
+
+    private var fullMapChrome: some View {
+        HStack(spacing: 10) {
+            Button {
+                showFullMap = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Color.white.opacity(0.2)))
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            .accessibilityLabel("退出全屏")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(format: "%.1f km · %@", track.mileage, RideTrackService.durationText(track.durationMinutes)))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text(tracks.count > 1 ? "\(tracks.count) 段轨迹" : "轨迹全览")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                if progress >= 1 { progress = 0 }
+                playing.toggle()
+            } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Color.white.opacity(0.2)))
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+        }
+        .padding(.horizontal, Theme.page)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
     }
 
     /// 底部：速度折线 + 时间轴，共用 progress，拖曲线或滑条都会联动地图
@@ -599,9 +637,14 @@ struct RideReplayView: View {
     // MARK: - 工具
 
     private func timeText(_ ratio: Double) -> String {
-        let total = Double(track.durationMinutes) * 60 * min(max(ratio, 0), 1)
-        let minutes = Int(total) / 60
-        let seconds = Int(total) % 60
+        let elapsed = clock.duration * min(max(ratio, 0), 1)
+        let total = Int(elapsed.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
         return String(format: "%d:%02d", minutes, seconds)
     }
 }

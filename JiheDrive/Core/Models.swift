@@ -529,6 +529,12 @@ struct RideTrack: Identifiable, Hashable {
     var socUsed: Double? = nil
     /// 本次能耗 Wh（接口给大数时）
     var energyWh: Double? = nil
+    /// 与 points 对齐的采样 Unix 秒；0 表示该点没有时间
+    var timestamps: [TimeInterval] = []
+    /// 行程开始（Unix 秒），来自 startTime 原文
+    var startedAt: TimeInterval? = nil
+    /// 行程结束（Unix 秒），来自 endTime 原文
+    var endedAt: TimeInterval? = nil
 
     static func parse(_ response: [String: Any]) -> [RideTrack] {
         guard let data = response["data"] else { return [] }
@@ -554,6 +560,51 @@ struct RideTrack: Identifiable, Hashable {
         }
     }
 
+    static func merged(_ tracks: [RideTrack]) -> RideTrack {
+        let sorted = tracks.sorted { ($0.startTime ?? "") < ($1.startTime ?? "") }
+        guard let first = sorted.first else {
+            return RideTrack(id: "empty", startTime: nil, mileage: 0, durationMinutes: 0, points: [])
+        }
+        if sorted.count == 1 { return first }
+
+        var points: [Coordinate] = []
+        var speeds: [Double] = []
+        var stamps: [TimeInterval] = []
+        for item in sorted {
+            points.append(contentsOf: item.points)
+            if item.speedSamples.count == item.points.count {
+                speeds.append(contentsOf: item.speedSamples)
+            } else {
+                speeds.append(contentsOf: Array(repeating: 0, count: item.points.count))
+            }
+            if item.timestamps.count == item.points.count {
+                stamps.append(contentsOf: item.timestamps)
+            } else {
+                stamps.append(contentsOf: Array(repeating: 0, count: item.points.count))
+            }
+        }
+        return RideTrack(
+            id: sorted.map(\.id).joined(separator: "+"),
+            startTime: first.startTime,
+            mileage: sorted.reduce(0) { $0 + $1.mileage },
+            durationMinutes: sorted.reduce(0) { $0 + $1.durationMinutes },
+            points: points,
+            endTime: sorted.last?.endTime,
+            maxSpeed: sorted.compactMap(\.maxSpeed).max() ?? speeds.max(),
+            startAddress: first.startAddress,
+            endAddress: sorted.last?.endAddress,
+            speedSamples: speeds,
+            accelTimes: sorted.reduce(0) { $0 + $1.accelTimes },
+            brakeTimes: sorted.reduce(0) { $0 + $1.brakeTimes },
+            bendTimes: sorted.reduce(0) { $0 + $1.bendTimes },
+            thumbnailURL: first.thumbnailURL,
+            dayKey: first.dayKey,
+            timestamps: stamps,
+            startedAt: first.startedAt,
+            endedAt: sorted.last?.endedAt
+        )
+    }
+
     static func points(_ raw: Any?) -> [Coordinate] {
         guard let array = raw as? [[String: Any]] else { return [] }
         return array.compactMap { point in
@@ -562,5 +613,155 @@ struct RideTrack: Identifiable, Hashable {
                   lat != 0, lng != 0 else { return nil }
             return Coordinate(latitude: lat, longitude: lng)
         }
+    }
+}
+
+/// 把回放进度映射到真实行程时间：停车时段标记停在原地，而不是按点序号匀速跳。
+enum ReplayClock {
+    static func make(_ track: RideTrack) -> (times: [TimeInterval], duration: TimeInterval) {
+        let count = track.points.count
+        let apiDuration = TimeInterval(max(track.durationMinutes, 0) * 60)
+        guard count > 0 else {
+            return ([], max(apiDuration, 1))
+        }
+
+        var unix = track.timestamps
+        if unix.count != count {
+            unix = Array(repeating: 0, count: count)
+        }
+
+        let firstKnown = unix.first(where: isUnix)
+        let lastKnown = unix.last(where: isUnix)
+        let start = track.startedAt ?? firstKnown ?? 0
+        var end = track.endedAt ?? lastKnown ?? 0
+        if isUnix(start), apiDuration > 0 {
+            end = max(end, start + apiDuration)
+        }
+        if end <= start {
+            end = start + max(apiDuration, TimeInterval(max(count - 1, 1) * 10))
+        }
+
+        let originHint = isUnix(start) ? start : (firstKnown ?? 0)
+        let filled = fill(unix, start: originHint, end: end)
+        let origin = isUnix(start) ? min(start, filled.first ?? start) : (filled.first ?? 0)
+        let finish = max(filled.last ?? origin, isUnix(end) ? end : origin, origin + 1)
+        let duration = max(finish - origin, 1)
+        let relative = filled.map { max(0, min(duration, $0 - origin)) }
+        return (relative, duration)
+    }
+
+    static func sample(_ track: RideTrack, progress: Double) -> (point: Coordinate, speed: Double) {
+        let clock = make(track)
+        return interpolate(
+            points: track.points,
+            speeds: track.speedSamples,
+            times: clock.times,
+            duration: clock.duration,
+            progress: progress
+        )
+    }
+
+    static func interpolate(
+        points: [Coordinate],
+        speeds: [Double],
+        times: [TimeInterval],
+        duration: TimeInterval,
+        progress: Double
+    ) -> (point: Coordinate, speed: Double) {
+        let clamped = min(max(progress, 0), 1)
+        guard let first = points.first else {
+            return (Coordinate(latitude: 0, longitude: 0), 0)
+        }
+        guard points.count > 1 else {
+            return (first, speeds.first ?? 0)
+        }
+
+        let lastTime = times.last ?? 0
+        let firstTime = times.first ?? 0
+        let useTime = times.count == points.count && duration > 0 && lastTime > firstTime
+        let index: Int
+        let fraction: Double
+        if useTime {
+            (index, fraction) = bracket(times, t: clamped * duration)
+        } else {
+            let raw = clamped * Double(points.count - 1)
+            index = min(points.count - 2, max(0, Int(raw)))
+            fraction = raw - Double(index)
+        }
+
+        let a = points[index]
+        let b = points[min(index + 1, points.count - 1)]
+        let point = Coordinate(
+            latitude: a.latitude + (b.latitude - a.latitude) * fraction,
+            longitude: a.longitude + (b.longitude - a.longitude) * fraction
+        )
+        let sa = speeds.indices.contains(index) ? speeds[index] : 0
+        let sb = speeds.indices.contains(index + 1) ? speeds[index + 1] : sa
+        return (point, sa + (sb - sa) * fraction)
+    }
+
+    private static func isUnix(_ value: TimeInterval) -> Bool {
+        value > 1_000_000_000
+    }
+
+    private static func fill(_ raw: [TimeInterval], start: TimeInterval, end: TimeInterval) -> [TimeInterval] {
+        let n = raw.count
+        guard n > 0 else { return [] }
+        var out = raw
+        let known = (0..<n).filter { isUnix(out[$0]) }
+        if known.isEmpty {
+            guard n > 1 else { return [start] }
+            let span = max(end - start, 1)
+            return (0..<n).map { start + span * Double($0) / Double(n - 1) }
+        }
+
+        let firstIdx = known[0]
+        let firstT = out[firstIdx]
+        let head = isUnix(start) ? min(start, firstT) : firstT
+        if firstIdx > 0 {
+            for i in 0..<firstIdx {
+                out[i] = head + (firstT - head) * Double(i) / Double(firstIdx)
+            }
+        }
+        for k in 0..<(known.count - 1) {
+            let a = known[k]
+            let b = known[k + 1]
+            let ta = out[a]
+            let tb = out[b]
+            let gap = b - a
+            guard gap > 1 else { continue }
+            for i in (a + 1)..<b {
+                out[i] = ta + (tb - ta) * Double(i - a) / Double(gap)
+            }
+        }
+        let lastIdx = known.last!
+        let lastT = out[lastIdx]
+        let tail = end > lastT ? end : lastT
+        if lastIdx < n - 1 {
+            let gap = (n - 1) - lastIdx
+            for i in (lastIdx + 1)..<n {
+                out[i] = lastT + (tail - lastT) * Double(i - lastIdx) / Double(gap)
+            }
+        }
+        for i in 1..<n where out[i] < out[i - 1] {
+            out[i] = out[i - 1]
+        }
+        return out
+    }
+
+    private static func bracket(_ times: [TimeInterval], t: TimeInterval) -> (Int, Double) {
+        let n = times.count
+        guard n > 1 else { return (0, 0) }
+        if t <= times[0] { return (0, 0) }
+        if t >= times[n - 1] { return (n - 2, 1) }
+        var lo = 0
+        var hi = n - 1
+        while lo + 1 < hi {
+            let mid = (lo + hi) / 2
+            if times[mid] <= t { lo = mid } else { hi = mid }
+        }
+        let span = times[hi] - times[lo]
+        if span <= 0.001 { return (lo, 0) }
+        return (lo, min(1, max(0, (t - times[lo]) / span)))
     }
 }

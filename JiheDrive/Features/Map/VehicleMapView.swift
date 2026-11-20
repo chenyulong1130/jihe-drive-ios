@@ -18,13 +18,10 @@ struct VehicleMapView: UIViewRepresentable {
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.delegate = context.coordinator
-        map.mapType = .standard
-        map.showsCompass = false
-        map.showsScale = false
+        MapAppearance.apply(to: map)
         map.showsUserLocation = showsUser
         map.isRotateEnabled = false
         map.isPitchEnabled = false
-        map.pointOfInterestFilter = .excludingAll
         map.register(
             VehiclePinView.self,
             forAnnotationViewWithReuseIdentifier: VehiclePinView.reuseID

@@ -200,7 +200,10 @@ enum RideTrackService {
                 dayKey: dayKey(start)
                     ?? dayKey(item["dayTime"] ?? item["date"] ?? item["_groupDay"]),
                 socUsed: energy.soc,
-                energyWh: energy.wh
+                energyWh: energy.wh,
+                timestamps: samples.map(\.time),
+                startedAt: unixDate(start),
+                endedAt: unixDate(end)
             )
             return (start ?? "", track)
         }
@@ -497,6 +500,7 @@ enum RideTrackService {
     private struct Sample {
         let coordinate: Coordinate
         let speed: Double
+        let time: TimeInterval
     }
 
     private static func trajectory(_ raw: Any?) -> [Sample] {
@@ -511,11 +515,40 @@ enum RideTrackService {
             let speed = parts.count >= 3
                 ? (Double(String(parts[2]).trimmingCharacters(in: .whitespaces)) ?? 0)
                 : 0
+            let stamp = parts.count >= 4
+                ? (Double(String(parts[3]).trimmingCharacters(in: .whitespaces)) ?? 0)
+                : 0
+            let unix: TimeInterval = {
+                if stamp > 1e12 { return stamp / 1000 }
+                if stamp > 1e9 { return stamp }
+                return 0
+            }()
             return Sample(
                 coordinate: Coordinate(latitude: lat, longitude: lng),
-                speed: speed
+                speed: speed,
+                time: unix
             )
         }
+    }
+
+    /// "2026.11.13 08:12:33" / "2026-11-13 08:12" → Unix 秒
+    private static func unixDate(_ raw: String?) -> TimeInterval? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let normalized = raw
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: "T", with: " ")
+        let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"]
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        for format in formats {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: String(normalized.prefix(19))) {
+                return date.timeIntervalSince1970
+            }
+        }
+        return nil
     }
 
     private static func unwrapMap(_ raw: Any?) -> [String: Any]? {

@@ -44,6 +44,8 @@ targets:
       - sdk: SceneKit.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: WidgetKit.framework
+      - sdk: ActivityKit.framework
+      - sdk: UserNotifications.framework
     entitlements:
       path: JiheDrive/JiheDrive.entitlements
 
@@ -66,6 +68,7 @@ targets:
       - path: JiheDrive/Core/RideTrackService.swift
       - path: JiheDrive/Core/CommunityTask.swift
       - path: JiheDrive/Core/SigninInfo.swift
+      - path: JiheDrive/Core/ChargeActivityAttributes.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.liruixin.jihedrive.widget
@@ -79,6 +82,8 @@ targets:
     dependencies:
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
+      - sdk: AppIntents.framework
+      - sdk: ActivityKit.framework
       - sdk: Security.framework
       - sdk: CryptoKit.framework
     entitlements:
