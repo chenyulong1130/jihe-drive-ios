@@ -1,3 +1,4 @@
+import SceneKit
 import SwiftUI
 import UIKit
 
@@ -15,14 +16,17 @@ enum BackdropSelection: Equatable {
     }
 }
 
-/// 车辆主视觉
-/// 背景走 `.background`，完全不参与布局测量，避免视频/图片把整页撑宽
+/// 车辆主视觉：铺满屏幕宽度，背景走 `.background` 不参与布局测量
 struct HeroStage: View {
     let vehicle: Vehicle
     let selection: BackdropSelection
     let videoURL: URL?
     let videoPoster: UIImage?
     let photo: UIImage?
+    let modelScene: SCNScene?
+    var topInset: CGFloat = 12
+    var height: CGFloat = 420
+    var cornerRadius: CGFloat = 28
     let onPickVehicle: () -> Void
     let onOpenTheme: () -> Void
 
@@ -34,28 +38,34 @@ struct HeroStage: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             carLayer
-                .padding(.bottom, 52)
 
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 0)
                 bottomBar
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 16)
+            .padding(.top, topInset)
+            .padding(.bottom, 16)
         }
-        .frame(height: 322)
+        .frame(height: height)
         .frame(maxWidth: .infinity)
         .background { backdrop }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: cornerRadius,
+                bottomTrailingRadius: cornerRadius,
+                topTrailingRadius: 0
+            )
+        )
+        .overlay(alignment: .bottom) {
             if !onDark {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Theme.separator.opacity(0.7), lineWidth: 0.5)
+                Rectangle()
+                    .fill(Theme.separator.opacity(0.7))
+                    .frame(height: 0.5)
             }
         }
-        .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 8)
     }
 
     // MARK: - 背景
@@ -161,33 +171,63 @@ struct HeroStage: View {
 
     // MARK: - 车
 
+    @ViewBuilder
     private var carLayer: some View {
-        ZStack(alignment: .bottom) {
-            Ellipse()
-                .fill(Color.black.opacity(onDark ? 0.30 : 0.10))
-                .frame(width: 196, height: 14)
-                .blur(radius: 11)
-                .offset(y: 4)
+        if let modelScene {
+            ZStack(alignment: .bottom) {
+                VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
+                    .padding(.bottom, 34)
 
-            Group {
-                if let url = vehicle.imageURL {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFit()
-                        } else {
-                            placeholder
+                modelBadge
+                    .padding(.bottom, 96)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+        } else {
+            ZStack(alignment: .bottom) {
+                Ellipse()
+                    .fill(Color.black.opacity(onDark ? 0.30 : 0.10))
+                    .frame(width: 224, height: 16)
+                    .blur(radius: 12)
+                    .offset(y: 6)
+
+                Group {
+                    if let url = vehicle.imageURL {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFit()
+                            } else {
+                                placeholder
+                            }
                         }
+                    } else {
+                        placeholder
                     }
-                } else {
-                    placeholder
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 224)
+                .shadow(color: Color.black.opacity(onDark ? 0.34 : 0.12), radius: 18, x: 0, y: 12)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 206)
-            .shadow(color: Color.black.opacity(onDark ? 0.34 : 0.12), radius: 16, x: 0, y: 10)
+            .padding(.bottom, 54)
+            .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity)
-        .allowsHitTesting(false)
+    }
+
+    private var modelBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "cube.transparent.fill")
+                .font(.system(size: 9, weight: .semibold))
+            Text("3D 模型")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(primary.opacity(0.9))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background {
+            Capsule(style: .continuous)
+                .fill(onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surfaceAlt))
+        }
     }
 
     private var placeholder: some View {
@@ -207,7 +247,7 @@ struct HeroStage: View {
             Button(action: onPickVehicle) {
                 HStack(spacing: 5) {
                     Text(vehicle.name)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.system(size: 21, weight: .semibold))
                         .foregroundStyle(primary)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
@@ -266,10 +306,10 @@ struct HeroStage: View {
 
             statusTag
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .background {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surface.opacity(0.92)))
         }
     }

@@ -7,6 +7,8 @@ struct VehicleView: View {
     @EnvironmentObject private var videoStore: VideoBackdropStore
     @Environment(\.scenePhase) private var scenePhase
 
+    @StateObject private var model3D = VehicleModelLoader()
+
     @State private var busy: String?
     @State private var toast: String?
 
@@ -18,33 +20,25 @@ struct VehicleView: View {
     @State private var showReplay = false
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 14) {
-                if let vehicle = model.selectedVehicle {
-                    hero(vehicle)
-                    actionCard(vehicle)
-                    batteryCard(vehicle)
-                    tireCard(vehicle)
-                    locationCard(vehicle)
-                    rideCard(vehicle)
-                    infoCard(vehicle)
-                    footer(vehicle)
-                } else if model.loading {
-                    loadingState
-                } else {
-                    emptyState
+        GeometryReader { proxy in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    if let vehicle = model.selectedVehicle {
+                        hero(vehicle, proxy: proxy)
+                        content(vehicle)
+                    } else if model.loading {
+                        loadingState
+                    } else {
+                        emptyState
+                    }
                 }
-
-                if let error = model.errorMessage {
-                    SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
-                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 128)
             }
-            .padding(.horizontal, Theme.page)
-            .padding(.top, 4)
-            .padding(.bottom, 130)
-            .frame(maxWidth: .infinity)
+            .ignoresSafeArea(edges: .top)
+            .refreshable { await model.refreshAll() }
         }
-        .refreshable { await model.refreshAll() }
+        .background(Theme.groupedBackground)
         .overlay(alignment: .bottom) {
             if let message = toast {
                 ToastView(text: message)
@@ -68,8 +62,11 @@ struct VehicleView: View {
         }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
+            model3D.load(model.selectedVehicle?.model3DURL)
             await model.loadBattery(vin: vin)
             await model.loadDetail(vin: vin)
+            // 详情接口回来后才可能有 3D 模型地址
+            model3D.load(model.selectedVehicle?.model3DURL)
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             guard oldPhase == .background, newPhase == .active else { return }
@@ -79,13 +76,19 @@ struct VehicleView: View {
 
     // MARK: - 主视觉
 
-    private func hero(_ vehicle: Vehicle) -> some View {
-        HeroStage(
+    private func hero(_ vehicle: Vehicle, proxy: GeometryProxy) -> some View {
+        let fullHeight = proxy.size.height + proxy.safeAreaInsets.top
+
+        return HeroStage(
             vehicle: vehicle,
             selection: themeStore.selection,
             videoURL: videoStore.url,
             videoPoster: videoStore.poster,
             photo: wallpaperStore.image,
+            modelScene: model3D.scene,
+            topInset: proxy.safeAreaInsets.top + 10,
+            height: max(400, fullHeight * 0.60),
+            cornerRadius: 30,
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -95,6 +98,26 @@ struct VehicleView: View {
             },
             onOpenTheme: { showTheme = true }
         )
+    }
+
+    // MARK: - 内容
+
+    private func content(_ vehicle: Vehicle) -> some View {
+        VStack(spacing: 14) {
+            actionCard(vehicle)
+            batteryCard(vehicle)
+            tireCard(vehicle)
+            locationCard(vehicle)
+            rideCard(vehicle)
+            infoCard(vehicle)
+            footer(vehicle)
+
+            if let error = model.errorMessage {
+                SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
+            }
+        }
+        .padding(.horizontal, Theme.page)
+        .padding(.top, 16)
     }
 
     // MARK: - 操作区
