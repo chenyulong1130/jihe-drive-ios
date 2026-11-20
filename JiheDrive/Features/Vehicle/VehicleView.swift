@@ -304,35 +304,29 @@ struct VehicleView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Theme.surface)
-                        .shadow(color: Theme.cardShadow, radius: 10, y: 4)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(tint.opacity(0.18), lineWidth: 1)
-                        )
-                    if busy {
-                        ProgressView().tint(tint)
-                    } else {
-                        Image(systemName: icon)
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(tint)
-                            .symbolRenderingMode(.hierarchical)
-                    }
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.surface)
+                    .shadow(color: Theme.cardShadow, radius: 10, y: 4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(tint.opacity(0.18), lineWidth: 1)
+                    )
+                if busy {
+                    ProgressView().tint(tint)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .symbolRenderingMode(.hierarchical)
                 }
-                .frame(width: 58, height: 58)
-
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.label)
             }
-            .frame(width: 64)
+            .frame(width: 58, height: 72)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
         .disabled(self.busy != nil)
+        .accessibilityLabel(title)
     }
 
     /// 对齐 Flutter / 小程序：横向大按钮「一键解锁 / 点击关锁」
