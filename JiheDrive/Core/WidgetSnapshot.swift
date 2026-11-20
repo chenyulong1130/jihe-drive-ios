@@ -157,6 +157,7 @@ enum WidgetSnapshot {
         suiteDefaults()?.synchronize()
     }
 
+#if !WIDGET_EXTENSION
     @MainActor
     static func publish(
         from model: AppModel,
@@ -212,6 +213,7 @@ enum WidgetSnapshot {
         WidgetCenter.shared.reloadTimelines(ofKind: kind)
         WidgetCenter.shared.reloadAllTimelines()
     }
+#endif
 
     static func write(_ snap: WidgetSnap) {
         var payload = snap.dictionary
