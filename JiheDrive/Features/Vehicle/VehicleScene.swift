@@ -160,7 +160,7 @@ enum VehicleSceneBuilder {
 
     static func groundNode() -> SCNNode {
         let plane = SCNPlane(width: 3.4, height: 3.4)
-        plane.firstMaterial = material(shadowTexture(), metalness: 0, roughness: 1)
+        plane.firstMaterial = material(UIColor.clear, metalness: 0, roughness: 1)
         plane.firstMaterial?.diffuse.contents = shadowTexture()
         plane.firstMaterial?.isDoubleSided = false
         plane.firstMaterial?.lightingModel = .constant
@@ -258,7 +258,7 @@ enum VehicleSceneBuilder {
         shape.firstMaterial = material(UIColor(white: 0.11, alpha: 1), metalness: 0.2, roughness: 0.7)
 
         let node = SCNNode(geometry: shape)
-        node.position = SCNVector3(center.x, center.y, -width / 2)
+        node.position = SCNVector3(center.x, center.y, -Float(width) / 2)
         return node
     }
 
