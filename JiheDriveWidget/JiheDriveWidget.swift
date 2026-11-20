@@ -164,15 +164,13 @@ struct JiheDriveWidgetEntryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 HStack(alignment: .bottom) {
-                    Text(vehicleLabel)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color(hex: 0x94A3B8))
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(tireLabel)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color(hex: 0x64748B))
-                        .lineLimit(1)
+                    if !tireLabel.isEmpty {
+                        Spacer(minLength: 0)
+                        Text(tireLabel)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color(hex: 0x64748B))
+                            .lineLimit(1)
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -225,7 +223,7 @@ struct JiheDriveWidgetEntryView: View {
     private var large: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 5) {
-                Text(snap.name.isEmpty ? "今日骑行" : snap.name)
+                Text("今日骑行")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Color(hex: 0x0F172A))
                     .lineLimit(1)
@@ -291,14 +289,13 @@ struct JiheDriveWidgetEntryView: View {
                     }
                     vehicleImage
                         .frame(maxWidth: .infinity, maxHeight: 120)
-                    HStack {
-                        Text(vehicleLabel)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color(hex: 0x94A3B8))
-                        Spacer()
-                        Text(tireLabel)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color(hex: 0x64748B))
+                    if !tireLabel.isEmpty {
+                        HStack {
+                            Spacer()
+                            Text(tireLabel)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color(hex: 0x64748B))
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -320,18 +317,27 @@ struct JiheDriveWidgetEntryView: View {
     // MARK: - Pieces
 
     private var todayRideLine: String {
-        String(format: "%.1f km · %d min", snap.todayKm, snap.todayMin)
+        if snap.todayKm > 0.01 || snap.todayMin > 0 {
+            return String(format: "%.1f km · %@", snap.todayKm, durationLabel(snap.todayMin))
+        }
+        if snap.lastKm > 0.01 {
+            return String(format: "最近 %.1f km · %@", snap.lastKm, durationLabel(snap.lastMin))
+        }
+        return "今日暂无骑行"
     }
 
-    private var vehicleLabel: String {
-        let name = snap.name.trimmingCharacters(in: .whitespaces)
-        if name.isEmpty || name == "我的车辆" { return "未绑定" }
-        return name
+    private func durationLabel(_ minutes: Int) -> String {
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let rest = minutes % 60
+            return rest == 0 ? "\(hours)h" : "\(hours)h\(rest)min"
+        }
+        return "\(minutes) min"
     }
 
     private var tireLabel: String {
         if snap.tireBound, !snap.tireText.isEmpty { return snap.tireText }
-        return "未绑定"
+        return ""
     }
 
     private var lotteryPillText: String {

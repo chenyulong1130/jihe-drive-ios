@@ -112,7 +112,7 @@ struct HeroStage: View {
 
             case .theme(let theme):
                 if theme.isDefault {
-                    Color.clear
+                    Theme.groupedBackground
                 } else if let remote = theme.videoURL {
                     // 云端动态主题：封面垫底 + 循环视频（以前只贴了静图）
                     videoBackdrop(url: remote, poster: .remote(theme.posterURL))
@@ -483,7 +483,7 @@ struct HeroStage: View {
         let front = validBar(frontBar)
         let rear = validBar(rearBar)
 
-        // 无雾蒙底、无进度条；有读数才显示，整块点进详情
+        // 无数据整条不展示；有一侧读数时另一侧显示「未绑定」
         if front != nil || rear != nil {
             Button {
                 onOpenTire?()
@@ -491,11 +491,13 @@ struct HeroStage: View {
                 HStack(spacing: 0) {
                     if let front {
                         tireCell(title: "前轮", bar: front)
-                            .frame(maxWidth: .infinity)
+                    } else {
+                        tireUnbound(title: "前轮")
                     }
                     if let rear {
                         tireCell(title: "后轮", bar: rear)
-                            .frame(maxWidth: .infinity)
+                    } else {
+                        tireUnbound(title: "后轮")
                     }
                 }
                 .padding(.vertical, 6)
@@ -537,6 +539,21 @@ struct HeroStage: View {
                     .foregroundStyle(secondaryText)
                     .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
             }
+        }
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
+    }
+
+    private func tireUnbound(title: String) -> some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(secondaryText)
+                .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
+            Text("未绑定")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(secondaryText.opacity(0.9))
+                .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
         }
         .frame(maxWidth: .infinity)
         .multilineTextAlignment(.center)

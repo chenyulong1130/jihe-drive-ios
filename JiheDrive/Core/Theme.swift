@@ -105,6 +105,17 @@ enum Theme {
     static let captionStrong = Font.system(size: 12, weight: .semibold)
 }
 
+/// 状态栏高度：GeometryReader 在 ignoresSafeArea 后 insets.top 经常是 0
+enum ScreenMetrics {
+    static var statusBarHeight: CGFloat {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if let height = scenes.first?.statusBarManager?.statusBarFrame.height, height > 20 {
+            return height
+        }
+        return 47
+    }
+}
+
 extension Color {
     init(hex: UInt32) {
         self.init(

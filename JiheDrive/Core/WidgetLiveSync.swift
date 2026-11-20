@@ -136,7 +136,8 @@ enum WidgetLiveSync {
         }
 
         applyVehicle(&snap, vehicle: vehicle, tire: tire, ride: ride)
-        if mode == .timeline, let url = vehicle?.imageURL {
+        let vinChanged = cachedSnap?.vin != vehicle?.vinNo
+        if (mode == .timeline || vinChanged), let url = vehicle?.imageURL {
             snap.imageData = await downloadImage(url)
             if let data = snap.imageData {
                 WidgetSnapshot.saveImage(data)
@@ -212,15 +213,7 @@ enum WidgetLiveSync {
 
     private static func fetchRide(vin: String?) async -> RideTrackService.RideExtra? {
         guard let vin, !vin.isEmpty else { return nil }
-        guard let day = await RideTrackService.daySummary(vin: vin) else { return nil }
-        var extra = RideTrackService.RideExtra()
-        extra.todayKm = day.mileage
-        extra.todayMin = day.minutes
-        extra.todayMaxSpeed = day.maxSpeed
-        extra.todayAccel = day.accelTimes
-        extra.todayBrake = day.brakeTimes
-        extra.todayBend = day.bendTimes
-        return extra
+        return await RideTrackService.rideExtra(vin: vin)
     }
 
     private static func detailPayload(_ response: [String: Any]) -> [String: Any]? {
@@ -249,17 +242,14 @@ enum WidgetLiveSync {
         snap.imageURL = vehicle.imageURL?.absoluteString ?? ""
         snap.todayKm = ride?.todayKm ?? 0
         snap.todayMin = ride?.todayMin ?? 0
+        snap.lastKm = ride?.lastKm ?? 0
+        snap.lastMin = ride?.lastMin ?? 0
         snap.accel = ride?.todayAccel ?? 0
         snap.brake = ride?.todayBrake ?? 0
         snap.maxSpeed = Int((ride?.todayMaxSpeed ?? 0).rounded())
-        let reading = tire
-        if let bar = reading?.rearBar ?? reading?.frontBar {
-            let temp = reading?.rearTemp ?? reading?.frontTemp
-            if let temp {
-                snap.tireText = String(format: "%.1fbar %.0f°C", bar, temp)
-            } else {
-                snap.tireText = String(format: "%.1fbar", bar)
-            }
+        let formatted = WidgetSnapshot.tireCaption(tire)
+        if formatted.bound {
+            snap.tireText = formatted.text
             snap.tireBound = true
         } else if vehicle.hasTirePressure, let kpa = vehicle.tireRearKpa ?? vehicle.tireFrontKpa {
             snap.tireText = String(format: "%.1fbar", kpa / 100)

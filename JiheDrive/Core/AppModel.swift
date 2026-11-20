@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import WidgetKit
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -14,15 +15,14 @@ final class AppModel: ObservableObject {
     @Published var selectedVin: String? {
         didSet {
             UserDefaults.standard.set(selectedVin, forKey: Self.vinKey)
-            let suite = UserDefaults(suiteName: WidgetSnapshot.suiteName)
-            suite?.set(selectedVin, forKey: "selectedVin")
-            suite?.synchronize()
+            WidgetSnapshot.persistSelectedVin(selectedVin)
             guard oldValue != selectedVin else { return }
             // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度
             batteries = []
             batteryError = nil
             tire = nil
             detailVehicle = nil
+            WidgetCenter.shared.reloadAllTimelines()
         }
     }
     @Published var errorMessage: String?
@@ -36,6 +36,7 @@ final class AppModel: ObservableObject {
         self.isLoggedIn = client.isLoggedIn
         let saved = UserDefaults.standard.string(forKey: Self.vinKey)
         self.selectedVin = (saved?.isEmpty == false) ? saved : nil
+        WidgetSnapshot.persistSelectedVin(self.selectedVin)
     }
 
     var selectedVehicle: Vehicle? {

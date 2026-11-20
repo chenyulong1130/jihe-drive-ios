@@ -25,6 +25,27 @@ enum AmapGeocode {
         return trimmed
     }
 
+    /// 列表/卡片用短地址：去掉省市区前缀，超长截断
+    static func compact(_ text: String?, limit: Int = 12) -> String? {
+        guard var out = readableAddress(text) else { return nil }
+        if let range = out.range(of: #"^.{1,8}?(省|自治区|特别行政区)"#, options: .regularExpression) {
+            out.removeSubrange(range)
+        }
+        if let range = out.range(of: #"^.{1,10}?(市|州|盟)"#, options: .regularExpression) {
+            out.removeSubrange(range)
+        }
+        if let range = out.range(of: #"^.{1,10}?(区|县|旗|镇)"#, options: .regularExpression) {
+            out.removeSubrange(range)
+        }
+        out = out.replacingOccurrences(of: " ", with: "")
+        out = out.trimmingCharacters(in: CharacterSet(charactersIn: "·，,、-"))
+        guard !out.isEmpty else { return readableAddress(text) }
+        if out.count > limit {
+            return String(out.prefix(limit)) + "…"
+        }
+        return out
+    }
+
     static func reverse(longitude: Double, latitude: Double) async -> String? {
         let cacheKey = String(format: "%.5f,%.5f", longitude, latitude)
         if let hit = cache[cacheKey], !hit.isEmpty { return hit }

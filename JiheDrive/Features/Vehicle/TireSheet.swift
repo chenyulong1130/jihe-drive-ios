@@ -98,9 +98,58 @@ struct TireSheet: View {
 
     private var duoCards: some View {
         HStack(spacing: 10) {
-            ForEach(wheels) { wheel in
-                wheelCard(wheel)
+            if let front {
+                wheelCard(front)
+            } else {
+                unboundCard("前轮")
             }
+            if let rear {
+                wheelCard(rear)
+            } else {
+                unboundCard("后轮")
+            }
+        }
+    }
+
+    private func unboundCard(_ title: String) -> some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Spacer(minLength: 0)
+                Text("未绑定")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Theme.surfaceAlt))
+            }
+            ZStack {
+                Circle()
+                    .strokeBorder(Theme.separator.opacity(0.5), lineWidth: 8)
+                    .frame(width: 72, height: 72)
+                Text("—")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            Text("未绑定")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Theme.tertiary)
+            Text("未安装或未上报传感器")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Theme.surface)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Theme.separator.opacity(0.4), lineWidth: 0.5)
         }
     }
 

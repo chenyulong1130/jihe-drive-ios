@@ -51,8 +51,7 @@ struct VehicleView: View {
             .scrollDisabled(pinningHero)
             .refreshable { await reloadPage() }
         }
-        .ignoresSafeArea(edges: .top)
-        .background(Theme.groupedBackground)
+        .background(Theme.groupedBackground.ignoresSafeArea())
         .overlay(alignment: .bottom) {
             if let message = toast {
                 ToastView(text: message)
@@ -96,6 +95,7 @@ struct VehicleView: View {
                 model3D.clear()
                 loadedModelVin = vin
             }
+            rideExtra = nil
             resolvedAddress = nil
             async let ride: Void = loadRideSummary(vin: vin)
             async let battery: Void = model.loadBattery(vin: vin)
@@ -125,7 +125,8 @@ struct VehicleView: View {
     // MARK: - 主视觉
 
     private func hero(_ vehicle: Vehicle, proxy: GeometryProxy) -> some View {
-        let fullHeight = proxy.size.height + proxy.safeAreaInsets.top
+        let bar = ScreenMetrics.statusBarHeight
+        let fullHeight = proxy.size.height + bar
 
         return HeroStage(
             vehicle: vehicle,
@@ -137,7 +138,7 @@ struct VehicleView: View {
             modelGLBFile: heroGLB,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
-            topInset: proxy.safeAreaInsets.top + 4,
+            topInset: bar + 8,
             height: max(390, fullHeight * 0.46)
                 + ((model.tire?.hasData == true) ? 36 : 0),
             onPickVehicle: {
@@ -395,7 +396,7 @@ struct VehicleView: View {
             locationCard(vehicle)
             rideCard(vehicle)
         }
-        .frame(height: 198)
+        .frame(height: 176)
     }
 
     private func locationCard(_ vehicle: Vehicle) -> some View {
@@ -413,44 +414,39 @@ struct VehicleView: View {
                         .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.75)))
                         .padding(6)
                 }
-                .frame(height: 128)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 1, brightness: 0))
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("车辆位置")
-                        .font(.system(size: 12, weight: .bold))
+            HStack(alignment: .center, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(locationLabel(vehicle))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                    Spacer(minLength: 4)
-                    Button {
-                        navigate(vehicle)
-                    } label: {
-                        Text("导航 ›")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(vehicle.coordinate == nil ? Theme.tertiary : Theme.brand)
+                        .lineLimit(1)
+                    if !locationTimeLabel(vehicle).isEmpty {
+                        Text(locationTimeLabel(vehicle))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.tertiary)
+                            .lineLimit(1)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(vehicle.coordinate == nil)
                 }
-                Text(locationLabel(vehicle))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(locationTimeLabel(vehicle))
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(Theme.tertiary)
-                    .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    navigate(vehicle)
+                } label: {
+                    Text("导航")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(vehicle.coordinate == nil ? Theme.tertiary : Theme.brand)
+                }
+                .buttonStyle(.plain)
+                .disabled(vehicle.coordinate == nil)
             }
-            .padding(.horizontal, 9)
-            .padding(.top, 6)
-            .padding(.bottom, 7)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
@@ -469,9 +465,9 @@ struct VehicleView: View {
         Button {
             showReplay = true
         } label: {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("骑行记录")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.label)
 
                 if rideLoading && rideExtra == nil {
@@ -521,8 +517,8 @@ struct VehicleView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.top, 9)
-            .padding(.bottom, 6)
+            .padding(.top, 8)
+            .padding(.bottom, 5)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -721,7 +717,7 @@ struct VehicleView: View {
             SkeletonBar(height: 88, radius: 16)
                 .padding(.horizontal, 16)
         }
-        .padding(.top, 0)
+        .padding(.top, ScreenMetrics.statusBarHeight)
     }
 
     private var emptyState: some View {
@@ -734,7 +730,7 @@ struct VehicleView: View {
                 .foregroundStyle(Theme.label)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 150)
+        .padding(.top, ScreenMetrics.statusBarHeight + 120)
     }
 
     // MARK: - 工具
@@ -749,9 +745,9 @@ struct VehicleView: View {
     }
 
     private func locationLabel(_ vehicle: Vehicle) -> String {
-        guard vehicle.coordinate != nil else { return "暂无车辆定位" }
-        if let address = AmapGeocode.readableAddress(resolvedAddress)
-            ?? AmapGeocode.readableAddress(vehicle.address) {
+        guard vehicle.coordinate != nil else { return "暂无定位" }
+        if let address = AmapGeocode.compact(resolvedAddress, limit: 12)
+            ?? AmapGeocode.compact(vehicle.address, limit: 12) {
             return address
         }
         return "定位中…"
@@ -760,9 +756,9 @@ struct VehicleView: View {
     private func locationTimeLabel(_ vehicle: Vehicle) -> String {
         guard vehicle.coordinate != nil else { return "" }
         if let raw = vehicle.locationTime, !raw.isEmpty {
-            return "最近上报 \(raw)"
+            return raw
         }
-        return "最近上报 --"
+        return ""
     }
 
     private func resolveAddressIfNeeded() async {

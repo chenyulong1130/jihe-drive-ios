@@ -51,7 +51,7 @@ struct RideHomeView: View {
                 }
             }
             .padding(.horizontal, Theme.page)
-            .padding(.top, showsClose ? 10 : 4)
+            .padding(.top, showsClose ? 10 : 8)
             .padding(.bottom, 120)
         }
         .background(Theme.groupedBackground)
@@ -248,32 +248,34 @@ struct RideHomeView: View {
             }
             .frame(width: 92, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Spacer(minLength: 0)
                     Text(formatKm(track.mileage))
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.brand)
                         .monospacedDigit()
                     Text("km")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.secondary)
-                    Spacer(minLength: 6)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.tertiary)
+                        .padding(.leading, 2)
+                }
+
+                if let route = routeText(track) {
+                    Text(route)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 HStack(spacing: 0) {
                     rideMetric(RideTrackService.durationText(track.durationMinutes), "耗时")
                     rideMetric(speedText(avgSpeed(track)), "均速")
                     rideMetric(speedText(peakSpeed(track)), "极速")
-                }
-
-                if let route = routeText(track) {
-                    Text(route)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(2)
                 }
             }
         }
@@ -429,8 +431,8 @@ struct RideHomeView: View {
     }
 
     private func routeText(_ track: RideTrack) -> String? {
-        let start = track.startAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let end = track.endAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let start = AmapGeocode.compact(track.startAddress, limit: 10) ?? ""
+        let end = AmapGeocode.compact(track.endAddress, limit: 10) ?? ""
         if !start.isEmpty, !end.isEmpty, start != end {
             return "\(start) → \(end)"
         }

@@ -12,6 +12,8 @@ struct WidgetSnap: Equatable {
     var online = false
     var todayKm = 0.0
     var todayMin = 0
+    var lastKm = 0.0
+    var lastMin = 0
     var accel = 0
     var brake = 0
     var maxSpeed = 0
@@ -46,6 +48,8 @@ struct WidgetSnap: Equatable {
             "online": online,
             "todayKm": todayKm,
             "todayMin": todayMin,
+            "lastKm": lastKm,
+            "lastMin": lastMin,
             "accel": accel,
             "brake": brake,
             "maxSpeed": maxSpeed,
@@ -81,6 +85,8 @@ struct WidgetSnap: Equatable {
         snap.online = bool(raw["online"])
         snap.todayKm = double(raw["todayKm"])
         snap.todayMin = int(raw["todayMin"])
+        snap.lastKm = double(raw["lastKm"])
+        snap.lastMin = int(raw["lastMin"])
         snap.accel = int(raw["accel"])
         snap.brake = int(raw["brake"])
         snap.maxSpeed = int(raw["maxSpeed"])
@@ -181,20 +187,16 @@ enum WidgetSnapshot {
         if let ride {
             snap.todayKm = ride.todayKm ?? snap.todayKm
             snap.todayMin = ride.todayMin ?? snap.todayMin
+            snap.lastKm = ride.lastKm ?? snap.lastKm
+            snap.lastMin = ride.lastMin ?? snap.lastMin
             snap.accel = ride.todayAccel ?? snap.accel
             snap.brake = ride.todayBrake ?? snap.brake
             snap.maxSpeed = ride.todayMaxSpeed.map { Int($0.rounded()) } ?? snap.maxSpeed
         }
         if let tire = model.tire {
-            if let bar = tire.rearBar ?? tire.frontBar {
-                let temp = tire.rearTemp ?? tire.frontTemp
-                if let temp {
-                    snap.tireText = String(format: "%.1fbar %.0f°C", bar, temp)
-                } else {
-                    snap.tireText = String(format: "%.1fbar", bar)
-                }
-                snap.tireBound = true
-            }
+            let formatted = WidgetSnapshot.tireCaption(tire)
+            snap.tireText = formatted.text
+            snap.tireBound = formatted.bound
         }
         if let signin {
             snap.signedToday = signin.signedToday
@@ -292,9 +294,45 @@ enum WidgetSnapshot {
         return nil
     }
 
+    static func persistSelectedVin(_ vin: String?) {
+        let value = vin ?? ""
+        suiteDefaults()?.set(value, forKey: "selectedVin")
+        suiteDefaults()?.set(value, forKey: "vin")
+        suiteDefaults()?.synchronize()
+        UserDefaults.standard.set(value, forKey: "selectedVin")
+        UserDefaults.standard.set(value, forKey: "widget_selectedVin")
+        UserDefaults.standard.set(value, forKey: "widget_vin")
+        UserDefaults.standard.synchronize()
+    }
+
     static func selectedVin() -> String? {
-        let vin = suiteDefaults()?.string(forKey: "selectedVin") ?? suiteDefaults()?.string(forKey: "vin")
-        return (vin?.isEmpty == false) ? vin : nil
+        let candidates: [String?] = [
+            suiteDefaults()?.string(forKey: "selectedVin"),
+            suiteDefaults()?.string(forKey: "vin"),
+            UserDefaults.standard.string(forKey: "widget_selectedVin"),
+            UserDefaults.standard.string(forKey: "widget_vin"),
+            UserDefaults.standard.string(forKey: "selectedVin")
+        ]
+        return candidates.compactMap { vin -> String? in
+            guard let vin, !vin.isEmpty else { return nil }
+            return vin
+        }.first
+    }
+
+    static func tireCaption(_ reading: TireReading?) -> (text: String, bound: Bool) {
+        let front = reading?.frontBar
+        let rear = reading?.rearBar
+        let hasFront = (front ?? 0) > 0.3
+        let hasRear = (rear ?? 0) > 0.3
+        if !hasFront && !hasRear { return ("", false) }
+        func one(_ bar: Double?, _ temp: Double?) -> String {
+            guard let bar, bar > 0.3 else { return "未绑定" }
+            if let temp {
+                return String(format: "%.1fbar %.0f°", bar, temp)
+            }
+            return String(format: "%.1fbar", bar)
+        }
+        return ("\(one(front, reading?.frontTemp)) / \(one(rear, reading?.rearTemp))", true)
     }
 
     static func snapshotURL() -> URL? {

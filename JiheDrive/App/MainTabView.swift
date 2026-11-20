@@ -86,7 +86,6 @@ struct MainTabView: View {
                 LiquidTabBar(tab: $tab)
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .ignoresSafeArea(edges: .top)
         }
         .environment(\.activeMainTab, tab)
         .sensoryFeedback(.selection, trigger: tab)

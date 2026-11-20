@@ -24,12 +24,12 @@ struct RideReplayView: View {
 
     private var speeds: [Double] { track.speedSamples }
 
-    /// 回放时长：对齐小程序 8–20s，略放慢到 10–22s
+    /// 回放时长：按行程拉长，约 24–50 秒，避免一闪而过
     private var playbackSeconds: Double {
         let minutes = max(track.durationMinutes, 1)
-        let byTrip = min(20, max(10, Double(minutes == 1 ? 12 : minutes) * 1.1))
-        let byPoints = min(22, max(10, Double(max(track.points.count, 1)) * 0.16))
-        return min(22, max(byTrip, byPoints))
+        let byTrip = min(50, max(24, Double(minutes) * 2.4))
+        let byPoints = min(50, max(24, Double(max(track.points.count, 1)) * 0.32))
+        return max(byTrip, byPoints)
     }
 
     private var currentSpeed: Double {
@@ -71,6 +71,11 @@ struct RideReplayView: View {
             }
 
             playbackBar
+        }
+        .onAppear {
+            if !playing, progress == 0 {
+                playing = true
+            }
         }
         .task(id: playing) {
             guard playing else { return }
@@ -131,44 +136,41 @@ struct RideReplayView: View {
     // MARK: - 路线卡
 
     private var routeCard: some View {
-        Button {
-            showFullMap = true
-        } label: {
-            ZStack {
-                LinearGradient(
-                    colors: [Color(hex: 0x0B1728), Color(hex: 0x162C46)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+        ZStack {
+            ReplayMap(points: coordinates, speeds: speeds, progress: progress, follow: false)
+                .allowsHitTesting(false)
 
-                RouteCanvas(coords: track.points, progress: progress)
-
-                VStack(spacing: 0) {
-                    HStack(spacing: 6) {
-                        chip(text: playing ? "回放中" : "轨迹", icon: playing ? "play.fill" : "map", tint: .white)
-                        Spacer(minLength: 0)
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    chip(text: playing ? "回放中" : "轨迹", icon: playing ? "play.fill" : "map", tint: .white)
+                    Spacer(minLength: 0)
+                    Button {
+                        showFullMap = true
+                    } label: {
                         chip(text: "全屏", icon: "arrow.up.left.and.arrow.down.right", tint: .white)
                     }
-
-                    Spacer(minLength: 0)
-
-                    HStack(spacing: 6) {
-                        chip(text: String(format: "%.1f km", track.mileage), icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .white)
-                        chip(text: "\(track.durationMinutes) 分钟", icon: "clock", tint: .white)
-                        Spacer(minLength: 0)
-                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(12)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 6) {
+                    chip(text: String(format: "%.1f km", track.mileage), icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .white)
+                    chip(text: RideTrackService.durationText(track.durationMinutes), icon: "clock", tint: .white)
+                    Spacer(minLength: 0)
+                }
             }
-            .frame(height: 208)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8)
-            )
-            .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 6)
+            .padding(12)
         }
-        .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+        .frame(height: 268)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8)
+        )
+        .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 6)
+        .contentShape(Rectangle())
+        .onTapGesture { showFullMap = true }
     }
 
     private func chip(text: String, icon: String, tint: Color) -> some View {
@@ -181,7 +183,7 @@ struct RideReplayView: View {
         .foregroundStyle(tint)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Capsule(style: .continuous).fill(Color.black.opacity(0.28)))
+        .background(Capsule(style: .continuous).fill(Color.black.opacity(0.48)))
     }
 
     // MARK: - 指标
@@ -482,7 +484,7 @@ struct RideReplayView: View {
                     .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
                 }
                 .padding(.horizontal, Theme.page)
-                .padding(.top, 8)
+                .padding(.top, ScreenMetrics.statusBarHeight + 4)
 
                 Spacer(minLength: 0)
 

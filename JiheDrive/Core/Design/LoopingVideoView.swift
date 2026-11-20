@@ -36,12 +36,12 @@ final class LoopingPlayerView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .clear
-        isOpaque = false
+        backgroundColor = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
+        isOpaque = true
         isUserInteractionEnabled = false
         clipsToBounds = true
         playerLayer.videoGravity = .resizeAspectFill
-        playerLayer.backgroundColor = UIColor.clear.cgColor
+        playerLayer.backgroundColor = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1).cgColor
         layer.addSublayer(playerLayer)
         Self.activateAudio()
 
