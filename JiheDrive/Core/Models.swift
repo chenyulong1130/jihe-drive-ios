@@ -119,7 +119,9 @@ extension Vehicle {
 
         self.model3DURL = Self.firstString(json, keys: [
             "model3dUrl", "model3DUrl", "model3durl", "threeDModelUrl",
-            "vehicle3dUrl", "modelUrl", "arModelUrl", "vehicleModel"
+            "vehicle3dUrl", "modelUrl", "arModelUrl", "vehicleModel",
+            "model3d", "3dModelUrl", "threeDUrl", "sceneUrl",
+            "modelPath", "modelAddress", "carModelUrl", "gltfUrl"
         ]).flatMap(URL.init(string:))
     }
 

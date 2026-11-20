@@ -87,7 +87,7 @@ struct VehicleView: View {
             photo: wallpaperStore.image,
             modelScene: model3D.scene,
             topInset: proxy.safeAreaInsets.top + 10,
-            height: max(400, fullHeight * 0.60),
+            height: max(400, fullHeight * 0.56),
             cornerRadius: 30,
             onPickVehicle: {
                 if model.vehicles.count > 1 {
