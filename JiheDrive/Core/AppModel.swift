@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var batteries: [BatteryInfo] = []
     @Published private(set) var batteryLoading = false
     @Published var batteryError: String?
+    @Published private(set) var tire: TireReading?
     @Published private(set) var loading = false
     @Published private(set) var detailVehicle: Vehicle?
     @Published var selectedVin: String? {
@@ -17,6 +18,7 @@ final class AppModel: ObservableObject {
             // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度
             batteries = []
             batteryError = nil
+            tire = nil
             detailVehicle = nil
         }
     }
@@ -159,7 +161,15 @@ final class AppModel: ObservableObject {
         if let vin = selectedVehicle?.vinNo {
             await loadBattery(vin: vin)
             await loadDetail(vin: vin)
+            await loadTire(vin: vin)
         }
+    }
+
+    /// 胎压传感器接口，独立于车辆详情，失败不影响主流程
+    func loadTire(vin: String) async {
+        let reading = await TireService.fetch(vin: vin)
+        guard selectedVin == nil || selectedVin == vin else { return }
+        tire = reading
     }
 
     /// 车辆首页接口：胎压、电压、温度、3D 模型这类细节只有这里带

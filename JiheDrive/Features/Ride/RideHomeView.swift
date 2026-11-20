@@ -2,16 +2,21 @@ import SwiftUI
 
 struct RideHomeView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    /// 从车辆页以弹层方式打开时显示关闭按钮
+    var showsClose: Bool = false
 
     @State private var tracks: [RideTrack] = []
-    @State private var usingDemo = false
     @State private var loading = false
+    @State private var days = 7
+    @State private var errorText: String?
     @State private var selected: RideTrack?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
-                LargeTitle("骑行", subtitle: model.selectedVehicle?.name ?? "尚未选择车辆")
+                header
 
                 if let vehicle = model.selectedVehicle {
                     summaryCard(vehicle)
@@ -25,14 +30,46 @@ struct RideHomeView: View {
                 }
             }
             .padding(.horizontal, Theme.page)
-            .padding(.top, 4)
+            .padding(.top, showsClose ? 10 : 4)
             .padding(.bottom, 120)
         }
-        .refreshable { await load() }
-        .task(id: model.selectedVehicle?.vinNo) { await load() }
+        .background(Theme.groupedBackground)
+        .refreshable { await load(days: days) }
+        .task(id: model.selectedVehicle?.vinNo) { await load(days: days) }
         .fullScreenCover(item: $selected) { track in
             if let vehicle = model.selectedVehicle {
                 RideReplayView(vehicle: vehicle, track: track)
+            }
+        }
+    }
+
+    private var header: some View {
+        Group {
+            if showsClose {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("骑行记录")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                        Text(model.selectedVehicle?.name ?? "尚未选择车辆")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Theme.secondary)
+                            .frame(width: 34, height: 34)
+                            .background(Circle().fill(Theme.surfaceAlt))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                }
+                .padding(.bottom, 6)
+            } else {
+                LargeTitle("骑行", subtitle: model.selectedVehicle?.name ?? "尚未选择车辆")
             }
         }
     }
@@ -69,23 +106,12 @@ struct RideHomeView: View {
     @ViewBuilder
     private func trackList(_ vehicle: Vehicle) -> some View {
         VStack(spacing: 10) {
-            if usingDemo {
-                SoftBanner(
-                    text: "云端轨迹接口尚未接入，下面展示的是示例路线，用于预览回放效果。",
-                    icon: "info.circle.fill",
-                    tone: Theme.brand
-                )
+            if let errorText {
+                SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
             }
 
             if loading && tracks.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView().scaleEffect(0.8)
-                    Text("正在读取轨迹")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 30)
+                loadingRow
             } else if tracks.isEmpty {
                 emptyCard
             } else {
@@ -97,8 +123,41 @@ struct RideHomeView: View {
                     }
                     .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
                 }
+
+                Button {
+                    days += 7
+                    Task { await load(days: days) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if loading {
+                            ProgressView().scaleEffect(0.7)
+                        }
+                        Text(loading ? "正在读取" : "查看更早的记录")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.brand)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 42)
+                    .background {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Theme.brand.opacity(0.08))
+                    }
+                }
+                .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+                .disabled(loading)
             }
         }
+    }
+
+    private var loadingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView().scaleEffect(0.8)
+            Text("正在读取轨迹")
+                .font(Theme.footnote)
+                .foregroundStyle(Theme.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
     }
 
     private func trackRow(_ track: RideTrack) -> some View {
@@ -113,10 +172,20 @@ struct RideHomeView: View {
                     .foregroundStyle(Theme.label)
                     .lineLimit(1)
 
+                if let from = track.startAddress, !from.isEmpty {
+                    Text(track.endAddress.map { "\(from) → \($0)" } ?? from)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 HStack(spacing: 12) {
                     label(icon: "point.topleft.down.curvedto.point.bottomright.up", text: String(format: "%.1f km", track.mileage))
                     label(icon: "clock", text: "\(track.durationMinutes) 分钟")
-                    label(icon: "mappin.and.ellipse", text: "\(track.points.count) 点")
+                    if let speed = track.maxSpeed, speed > 0 {
+                        label(icon: "speedometer", text: String(format: "%.0f km/h", speed))
+                    }
                 }
             }
 
@@ -149,10 +218,10 @@ struct RideHomeView: View {
             Image(systemName: "map")
                 .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(Theme.tertiary)
-            Text("还没有轨迹记录")
+            Text("最近 \(days) 天没有骑行轨迹")
                 .font(Theme.headline)
                 .foregroundStyle(Theme.label)
-            Text("骑完一段后回到这里查看回放")
+            Text("车辆上报轨迹后会出现在这里")
                 .font(Theme.footnote)
                 .foregroundStyle(Theme.secondary)
         }
@@ -166,50 +235,34 @@ struct RideHomeView: View {
 
     // MARK: - 数据
 
-    private func load() async {
+    private func load(days: Int) async {
         guard let vehicle = model.selectedVehicle else { return }
         loading = true
+        errorText = nil
         defer { loading = false }
 
-        var collected: [RideTrack] = []
-        let paths = [
-            "/v1.0/app/cfmotoserverapp/ridetrack_v2/\(vehicle.vinNo)",
-            "/v1.0/app/cfmotoserverapp/rideTrack/\(vehicle.vinNo)",
-            "/v1.0/app/cfmotoserverapp/myRideInfo/\(vehicle.vinNo)"
-        ]
+        var results: [RideTrack] = []
+        var lastError: String?
 
-        for path in paths {
-            guard let response = try? await ZeehoClient.shared.get(path) else { continue }
-            let items = RideTrack.parse(response)
-            if !items.isEmpty {
-                collected = items
-                break
-            }
-            let points = RideTrack.points(response["data"])
-            if !points.isEmpty {
-                collected = [
-                    RideTrack(
-                        id: "latest",
-                        startTime: "最近一次骑行",
-                        mileage: vehicle.totalMileKm,
-                        durationMinutes: 30,
-                        points: points
-                    )
-                ]
-                break
+        for offset in 0..<days {
+            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: Date()) else { continue }
+            if let track = await RideTrackService.track(vin: vehicle.vinNo, day: day) {
+                results.append(track)
             }
         }
 
-        if collected.isEmpty {
-            usingDemo = true
-            tracks = [
-                RideDemo.make(near: vehicle.coordinate),
-                RideDemo.make(near: vehicle.coordinate)
-            ]
-        } else {
-            usingDemo = false
-            tracks = collected
+        if results.isEmpty, let firstDay = Calendar.current.date(byAdding: .day, value: -days, to: Date()) {
+            lastError = "已查询 \(days) 天（至 \(dayText(firstDay))），云端没有返回轨迹。若官方 App 能看到行程，说明该账号的轨迹接口参数不同，告诉我我再对接。"
         }
+
+        tracks = results
+        errorText = lastError
+    }
+
+    private func dayText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd"
+        return formatter.string(from: date)
     }
 }
 

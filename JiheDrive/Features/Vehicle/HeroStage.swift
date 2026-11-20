@@ -24,6 +24,9 @@ struct HeroStage: View {
     let videoPoster: UIImage?
     let photo: UIImage?
     let modelScene: SCNScene?
+    /// 官方胎压接口读数（bar），优先于车辆详情里的字段
+    var tireFrontBar: Double? = nil
+    var tireRearBar: Double? = nil
     var topInset: CGFloat = 12
     var height: CGFloat = 470
     var cornerRadius: CGFloat = 30
@@ -330,11 +333,11 @@ struct HeroStage: View {
     @ViewBuilder
     private var tireStrip: some View {
         HStack(spacing: 0) {
-            tireCell(title: "前轮", kpa: vehicle.tireFrontKpa)
+            tireCell(title: "前轮", bar: frontBar)
             Rectangle()
                 .fill(primary.opacity(0.14))
                 .frame(width: 0.5, height: 34)
-            tireCell(title: "后轮", kpa: vehicle.tireRearKpa)
+            tireCell(title: "后轮", bar: rearBar)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -344,16 +347,24 @@ struct HeroStage: View {
         }
     }
 
-    private func tireCell(title: String, kpa: Double?) -> some View {
+    private var frontBar: Double? {
+        tireFrontBar ?? vehicle.tireFrontKpa.map { $0 / 100 }
+    }
+
+    private var rearBar: Double? {
+        tireRearBar ?? vehicle.tireRearKpa.map { $0 / 100 }
+    }
+
+    private func tireCell(title: String, bar: Double?) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(secondaryText)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(kpa.map { String(format: "%.1f", $0 / 100) } ?? "—")
+                    Text(bar.map { String(format: "%.1f", $0) } ?? "—")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(tireTint(kpa))
+                        .foregroundStyle(tireTint(bar))
                         .monospacedDigit()
                     Text("bar")
                         .font(.system(size: 9.5, weight: .medium))
@@ -368,23 +379,23 @@ struct HeroStage: View {
                     .fill(primary.opacity(0.14))
                     .frame(width: 52, height: 5)
                 Capsule()
-                    .fill(tireTint(kpa))
-                    .frame(width: max(5, 52 * tireRatio(kpa)), height: 5)
+                    .fill(tireTint(bar))
+                    .frame(width: max(5, 52 * tireRatio(bar)), height: 5)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 6)
     }
 
-    private func tireRatio(_ kpa: Double?) -> CGFloat {
-        guard let kpa else { return 0.04 }
-        return CGFloat(min(1, max(0.06, kpa / 320)))
+    private func tireRatio(_ bar: Double?) -> CGFloat {
+        guard let bar else { return 0.04 }
+        return CGFloat(min(1, max(0.06, bar / 3.2)))
     }
 
-    private func tireTint(_ kpa: Double?) -> Color {
-        guard let kpa else { return secondaryText }
-        if kpa < 180 { return Theme.red }
-        if kpa < 210 || kpa > 290 { return Theme.orange }
+    private func tireTint(_ bar: Double?) -> Color {
+        guard let bar else { return secondaryText }
+        if bar < 1.8 { return Theme.red }
+        if bar < 2.1 || bar > 2.9 { return Theme.orange }
         return Theme.green
     }
 

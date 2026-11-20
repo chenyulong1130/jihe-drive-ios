@@ -61,13 +61,15 @@ struct VehicleView: View {
             if let vehicle = model.selectedVehicle { Vehicle3DSheet(vehicle: vehicle) }
         }
         .fullScreenCover(isPresented: $showReplay) {
-            if let vehicle = model.selectedVehicle { RideReplayView(vehicle: vehicle) }
+            RideHomeView(showsClose: true)
         }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
             model3D.load(model.selectedVehicle?.model3DURL)
-            await model.loadBattery(vin: vin)
-            await model.loadDetail(vin: vin)
+            async let battery: Void = model.loadBattery(vin: vin)
+            async let detail: Void = model.loadDetail(vin: vin)
+            async let tire: Void = model.loadTire(vin: vin)
+            _ = await (battery, detail, tire)
             // 详情接口回来后才可能有 3D 模型地址
             model3D.load(model.selectedVehicle?.model3DURL)
         }
@@ -89,6 +91,8 @@ struct VehicleView: View {
             videoPoster: videoStore.poster,
             photo: wallpaperStore.image,
             modelScene: model3D.scene,
+            tireFrontBar: model.tire?.frontBar,
+            tireRearBar: model.tire?.rearBar,
             topInset: proxy.safeAreaInsets.top + 10,
             height: max(430, fullHeight * 0.58),
             cornerRadius: 30,
@@ -339,6 +343,8 @@ struct VehicleView: View {
                 Text(locationLabel(vehicle))
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.tertiary)
@@ -397,9 +403,9 @@ struct VehicleView: View {
                 Spacer(minLength: 0)
 
                 HStack(spacing: 5) {
-                    Image(systemName: "play.fill")
+                    Image(systemName: "list.bullet")
                         .font(.system(size: 9, weight: .bold))
-                    Text("轨迹回放")
+                    Text("骑行记录")
                         .font(.system(size: 12.5, weight: .semibold))
                 }
                 .foregroundStyle(Theme.brand)
@@ -509,6 +515,7 @@ struct VehicleView: View {
 
     private func locationLabel(_ vehicle: Vehicle) -> String {
         guard vehicle.coordinate != nil else { return "无位置" }
+        if let address = vehicle.address, !address.isEmpty { return address }
         return shortTime(vehicle.locationTime)
     }
 

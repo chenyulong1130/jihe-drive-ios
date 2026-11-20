@@ -3,7 +3,7 @@ import SwiftUI
 
 struct RideReplayView: View {
     let vehicle: Vehicle
-    var track: RideTrack?
+    let track: RideTrack
 
     @Environment(\.dismiss) private var dismiss
 
@@ -12,23 +12,19 @@ struct RideReplayView: View {
     @State private var rate: Double = 1
     @State private var follow = true
 
-    private var resolved: RideTrack {
-        track ?? RideDemo.make(near: vehicle.coordinate)
-    }
-
     private var coordinates: [CLLocationCoordinate2D] {
-        resolved.points.map { $0.mapCoordinate }
+        track.points.map { $0.mapCoordinate }
     }
 
     /// 回放时长：按真实时长收敛到 8–45 秒，太短看不清、太长会闷
     private var playbackSeconds: Double {
-        let raw = Double(max(1, resolved.durationMinutes)) * 1.4
+        let raw = Double(max(1, track.durationMinutes)) * 1.4
         return min(45, max(8, raw))
     }
 
     private var averageSpeed: Double {
-        let hours = Double(max(1, resolved.durationMinutes)) / 60
-        return resolved.mileage / hours
+        let hours = Double(max(1, track.durationMinutes)) / 60
+        return track.mileage / hours
     }
 
     var body: some View {
@@ -108,9 +104,9 @@ struct RideReplayView: View {
 
     private var statsCard: some View {
         HStack(spacing: 0) {
-            statBlock(title: "里程", value: String(format: "%.1f", resolved.mileage), unit: "km")
+            statBlock(title: "里程", value: String(format: "%.1f", track.mileage), unit: "km")
             statDivider
-            statBlock(title: "时长", value: "\(resolved.durationMinutes)", unit: "min")
+            statBlock(title: "时长", value: "\(track.durationMinutes)", unit: "min")
             statDivider
             statBlock(title: "均速", value: String(format: "%.0f", averageSpeed), unit: "km/h")
         }
@@ -215,12 +211,6 @@ struct RideReplayView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                if track == nil {
-                    Text("示例轨迹")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.tertiary)
-                }
             }
         }
         .padding(14)
@@ -255,36 +245,9 @@ struct RideReplayView: View {
     }
 
     private func timeText(_ value: Double) -> String {
-        let total = Double(resolved.durationMinutes) * 60 * value
+        let total = Double(track.durationMinutes) * 60 * value
         let minutes = Int(total) / 60
         let seconds = Int(total) % 60
         return String(format: "%d:%02d", minutes, seconds)
-    }
-}
-
-/// 没有云端轨迹时用的示例路线：围绕车辆位置画一条环路
-enum RideDemo {
-    static func make(near origin: Coordinate?) -> RideTrack {
-        let base = origin ?? Coordinate(latitude: 30.2741, longitude: 120.1551)
-        var points: [Coordinate] = []
-        let count = 160
-        for index in 0..<count {
-            let t = Double(index) / Double(count) * .pi * 2
-            let radiusLat = 0.0075 + 0.0016 * sin(t * 3)
-            let radiusLng = 0.0105 + 0.0020 * cos(t * 2)
-            points.append(
-                Coordinate(
-                    latitude: base.latitude + sin(t) * radiusLat + 0.0006 * cos(t * 5),
-                    longitude: base.longitude + cos(t) * radiusLng
-                )
-            )
-        }
-        return RideTrack(
-            id: "demo",
-            startTime: "示例路线",
-            mileage: 8.6,
-            durationMinutes: 23,
-            points: points
-        )
     }
 }

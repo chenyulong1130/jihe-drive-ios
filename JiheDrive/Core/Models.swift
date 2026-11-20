@@ -13,6 +13,8 @@ struct Vehicle: Identifiable, Hashable {
     let latitude: Double?
     let longitude: Double?
     let locationTime: String?
+    /// 位置文字（接口给就去掉经纬度兜底）
+    let address: String?
     let imageURL: URL?
     let monthMileage: String?
     /// 胎压，统一换算成 kPa 存，展示时除 100 得到 bar
@@ -51,6 +53,7 @@ struct Vehicle: Identifiable, Hashable {
             latitude: detail.latitude ?? latitude,
             longitude: detail.longitude ?? longitude,
             locationTime: detail.locationTime ?? locationTime,
+            address: detail.address ?? address,
             imageURL: detail.imageURL ?? imageURL,
             monthMileage: detail.monthMileage ?? monthMileage,
             tireFrontKpa: detail.tireFrontKpa ?? tireFrontKpa,
@@ -90,6 +93,10 @@ extension Vehicle {
         self.latitude = (latitude ?? 0) == 0 ? nil : latitude
         self.longitude = (longitude ?? 0) == 0 ? nil : longitude
         self.locationTime = location?["locationTime"] as? String
+        self.address = Self.firstString(json, keys: [
+            "address", "locationAddress", "positionAddress", "lastAddress",
+            "locationDesc", "formattedAddress"
+        ]) ?? location?["address"] as? String
         self.imageURL = Self.firstString(json, keys: ["customImage", "vehicleScalePicUrl", "vehiclePicUrl", "vehicleBackPicUrl", "pic", "imageUrl"]).flatMap(URL.init(string:))
         self.monthMileage = Self.dashValue(json["rideMileageMonth"])
         let fields = Self.merge(json, iot)
@@ -308,6 +315,10 @@ struct RideTrack: Identifiable, Hashable {
     let mileage: Double
     let durationMinutes: Int
     let points: [Coordinate]
+    var endTime: String? = nil
+    var maxSpeed: Double? = nil
+    var startAddress: String? = nil
+    var endAddress: String? = nil
 
     static func parse(_ response: [String: Any]) -> [RideTrack] {
         guard let data = response["data"] else { return [] }
