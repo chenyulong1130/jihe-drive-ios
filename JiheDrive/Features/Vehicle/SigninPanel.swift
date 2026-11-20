@@ -76,6 +76,13 @@ struct SigninPanel: View {
                 score: store.signedToday ? "+\(info.todayEarnedScore)" : "—"
             )
 
+            taskRow(
+                title: "社区",
+                desc: store.communityRunning ? "正在执行发帖 / 点赞 / 分享…" : (store.communityDone ? "今日已完成" : "发帖 / 点赞 / 分享"),
+                done: store.communityDone,
+                score: store.communityDone ? "+3" : "—"
+            )
+
             if let last = info.lastTime, !last.isEmpty {
                 HStack {
                     Text("最近签到")
@@ -88,27 +95,50 @@ struct SigninPanel: View {
                 }
             }
 
-            if !store.signedToday {
+            HStack(spacing: 8) {
+                if !store.signedToday {
+                    Button {
+                        Task { await store.signInToday() }
+                    } label: {
+                        HStack {
+                            if store.signingIn {
+                                ProgressView().tint(.white)
+                            }
+                            Text(store.signingIn ? "签到中…" : "签到 +\(info.todayRuleScore)")
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Theme.brand)
+                        )
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
+                    .disabled(store.signingIn)
+                }
+
                 Button {
-                    Task { await store.signInToday() }
+                    Task { await store.runCommunity() }
                 } label: {
                     HStack {
-                        if store.signingIn {
-                            ProgressView().tint(.white)
+                        if store.communityRunning {
+                            ProgressView().tint(Theme.brand)
                         }
-                        Text(store.signingIn ? "签到中…" : "签到 +\(info.todayRuleScore)")
+                        Text(store.communityRunning ? "社区任务中…" : (store.communityDone ? "社区已完成" : "社区任务 +3"))
                             .font(.system(size: 14, weight: .bold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(store.communityDone ? Theme.tertiary : Theme.brand)
                     .frame(maxWidth: .infinity)
                     .frame(height: 40)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Theme.brand)
+                            .fill(Theme.brand.opacity(0.12))
                     )
                 }
                 .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
-                .disabled(store.signingIn)
+                .disabled(store.communityRunning || store.communityDone)
             }
         }
         .padding(12)

@@ -34,6 +34,7 @@ enum MainTab: String, CaseIterable, Identifiable {
 }
 
 struct MainTabView: View {
+    @EnvironmentObject private var appearance: AppearanceStore
     @State private var tab: MainTab = .vehicle
     /// 手指拖动时的临时位移（左滑为负），松手后归零
     @State private var dragOffset: CGFloat = 0
@@ -63,6 +64,7 @@ struct MainTabView: View {
                 // 拖动中关掉隐式动画，否则 spring 会和手指抢位移，看起来像贴着乱抖
                 .animation(isDragging ? nil : Motion.page, value: tab)
                 .animation(isDragging ? nil : Motion.page, value: dragOffset)
+                .animation(nil, value: appearance.mode)
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
                 .clipShape(HorizontalClip())
                 .contentShape(Rectangle())

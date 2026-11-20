@@ -486,6 +486,7 @@ struct RideTrack: Identifiable, Hashable {
     var accelTimes: Int = 0
     var brakeTimes: Int = 0
     var bendTimes: Int = 0
+    var thumbnailURL: URL? = nil
 
     static func parse(_ response: [String: Any]) -> [RideTrack] {
         guard let data = response["data"] else { return [] }

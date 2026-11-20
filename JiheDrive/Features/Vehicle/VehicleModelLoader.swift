@@ -91,13 +91,10 @@ final class VehicleModelLoader: ObservableObject {
             throw ModelError.unsupported(ext.isEmpty ? "bin" : ext)
         }
         if url.isFileURL { return url }
-
-        let (temp, _) = try await URLSession.shared.download(from: url)
-        let dest = FileManager.default.temporaryDirectory
-            .appendingPathComponent("vehicle-model-\(UUID().uuidString).\(ext)")
-        try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: temp, to: dest)
-        return dest
+        if let cached = await ResourceCache.file(for: url, folder: "models") {
+            return cached
+        }
+        throw ModelError.empty
     }
 
     // MARK: - 归一化

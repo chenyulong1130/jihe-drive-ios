@@ -164,16 +164,8 @@ struct Vehicle3DSheet: View {
                     .offset(y: 74)
 
                 if let url = vehicle.imageURL {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image
-                                .resizable()
-                                .scaledToFit()
-                                .shadow(color: .black.opacity(0.4), radius: 18, x: 0, y: 10)
-                        } else {
-                            ProgressView().tint(.white)
-                        }
-                    }
+                    CachedRemoteImage(url: url, contentMode: .fit)
+                        .shadow(color: .black.opacity(0.4), radius: 18, x: 0, y: 10)
                 } else {
                     VStack(spacing: 8) {
                         Image(systemName: "bolt.car.fill")

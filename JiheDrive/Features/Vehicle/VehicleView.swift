@@ -24,9 +24,9 @@ struct VehicleView: View {
     @State private var showDashboardWallpaper = false
     @State private var showTire = false
     @State private var show3D = false
-    @State private var showDetail = false
     @State private var showSettings = false
     @State private var showReplay = false
+    @State private var pinningHero = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -45,6 +45,7 @@ struct VehicleView: View {
                 .padding(.bottom, 128)
             }
             .ignoresSafeArea(edges: .top)
+            .scrollDisabled(pinningHero)
             .refreshable { await reloadPage() }
         }
         .background(Theme.groupedBackground)
@@ -72,9 +73,6 @@ struct VehicleView: View {
         }
         .sheet(isPresented: $show3D) {
             if let vehicle = model.selectedVehicle { Vehicle3DSheet(vehicle: vehicle) }
-        }
-        .sheet(isPresented: $showDetail) {
-            if let vehicle = model.selectedVehicle { VehicleDetailView(vehicle: vehicle) }
         }
         .sheet(isPresented: $showSettings) {
             if let vehicle = model.selectedVehicle { VehicleSettingsView(vehicle: vehicle) }
@@ -154,7 +152,8 @@ struct VehicleView: View {
             },
             onOpenTire: {
                 showTire = true
-            }
+            },
+            onInteract: { pinningHero = $0 }
         )
     }
 
@@ -211,51 +210,6 @@ struct VehicleView: View {
             if let error = model.errorMessage {
                 SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
             }
-
-            Button {
-                showDetail = true
-            } label: {
-                HStack(spacing: 8) {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
-                            .frame(width: 7, height: 7)
-                            .overlay {
-                                if vehicle.isOnline {
-                                    Circle()
-                                        .stroke(Theme.green.opacity(0.35), lineWidth: 4)
-                                        .frame(width: 11, height: 11)
-                                }
-                            }
-                        Text(vehicle.isOnline ? "在线" : "离线")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.tertiary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill((vehicle.isOnline ? Theme.green : Theme.tertiary).opacity(0.12))
-                    )
-
-                    Text(vehicle.isLocked ? "已关锁" : "未关锁")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(vehicle.isLocked ? Theme.secondary : Theme.orange)
-
-                    Spacer(minLength: 0)
-
-                    Text("车辆详情")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.brand)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Theme.brand.opacity(0.7))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
@@ -311,12 +265,16 @@ struct VehicleView: View {
         Button(action: action) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Theme.surface)
-                    .shadow(color: Theme.cardShadow, radius: 10, y: 4)
+                    .fill(.ultraThinMaterial)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(tint.opacity(0.18), lineWidth: 1)
+                            .fill(tint.opacity(0.10))
                     )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.38), lineWidth: 1)
+                    )
+                    .shadow(color: Theme.cardShadow, radius: 10, y: 4)
                 if busy {
                     ProgressView().tint(tint)
                 } else {
@@ -353,25 +311,28 @@ struct VehicleView: View {
                 try await model.toggleLock(vehicle)
             }
         } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.22))
-                        .frame(width: 40, height: 40)
-                    if loading {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                            .scaleEffect(0.85)
-                    } else {
-                        Image(systemName: locked ? "lock.fill" : "lock.open.fill")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white)
-                            .contentTransition(.symbolEffect(.replace))
+            ZStack {
+                HStack {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.22))
+                            .frame(width: 40, height: 40)
+                        if loading {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                                .scaleEffect(0.85)
+                        } else {
+                            Image(systemName: locked ? "lock.fill" : "lock.open.fill")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.white)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(spacing: 2) {
                     Text(loading ? "请求中…" : (locked ? "一键解锁" : "点击关锁"))
                         .font(.system(size: 16, weight: .heavy))
                         .foregroundStyle(.white)
@@ -381,35 +342,30 @@ struct VehicleView: View {
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
                 }
-
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
             .frame(height: 72)
             .background {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [accent.opacity(0.98), accent.opacity(0.72)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .overlay(alignment: .top) {
+                    .fill(.ultraThinMaterial)
+                    .overlay(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-                            .padding(1)
-                            .mask(
+                            .fill(
                                 LinearGradient(
-                                    colors: [.white, .clear],
+                                    colors: [accent.opacity(0.88), accent.opacity(0.62)],
                                     startPoint: .top,
-                                    endPoint: .center
+                                    endPoint: .bottom
                                 )
                             )
-                    }
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.42), lineWidth: 1)
+                    )
             }
-            .shadow(color: accent.opacity(0.32), radius: 16, x: 0, y: 8)
+            .shadow(color: accent.opacity(0.28), radius: 16, x: 0, y: 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.03))
@@ -422,10 +378,13 @@ struct VehicleView: View {
     // MARK: - 位置 / 骑行
 
     private func duoCards(_ vehicle: Vehicle) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .stretch, spacing: 8) {
             locationCard(vehicle)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             rideCard(vehicle)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func locationCard(_ vehicle: Vehicle) -> some View {
@@ -511,7 +470,9 @@ struct VehicleView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Theme.surface)
@@ -595,7 +556,7 @@ struct VehicleView: View {
                 }
             }
             .padding(12)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Theme.surface)

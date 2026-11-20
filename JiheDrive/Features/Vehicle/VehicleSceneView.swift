@@ -9,6 +9,7 @@ struct VehicleSceneView: UIViewRepresentable {
     var interactive: Bool = true
     var autoSpin: Bool = false
     var spinSpeed: Float = 0.22
+    var onDrag: ((Bool) -> Void)? = nil
 
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView()
@@ -21,12 +22,14 @@ struct VehicleSceneView: UIViewRepresentable {
         view.rendersContinuously = true
         view.isPlaying = true
 
+        context.coordinator.onDrag = onDrag
         context.coordinator.attach(view: view, autoSpin: autoSpin, speed: spinSpeed)
         if interactive { context.coordinator.installGestures() }
         return view
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
+        context.coordinator.onDrag = onDrag
         if view.scene !== scene {
             view.scene = scene
             context.coordinator.attach(view: view, autoSpin: autoSpin, speed: spinSpeed)
@@ -43,6 +46,7 @@ struct VehicleSceneView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject {
+        var onDrag: ((Bool) -> Void)?
         private weak var view: SCNView?
         private var orbit: SCNNode?
         private var rig: SCNNode?
@@ -72,6 +76,7 @@ struct VehicleSceneView: UIViewRepresentable {
 
             let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             pan.maximumNumberOfTouches = 1
+            pan.cancelsTouchesInView = true
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
             view.addGestureRecognizer(pan)
             view.addGestureRecognizer(pinch)
@@ -104,6 +109,8 @@ struct VehicleSceneView: UIViewRepresentable {
             idleUntil = CACurrentMediaTime() + 4
 
             switch gesture.state {
+            case .began:
+                onDrag?(true)
             case .changed:
                 let move = gesture.translation(in: view)
                 gesture.setTranslation(.zero, in: view)
@@ -112,6 +119,7 @@ struct VehicleSceneView: UIViewRepresentable {
                 elevation = min(max(elevation, -0.06), 0.62)
                 apply()
             case .ended, .cancelled:
+                onDrag?(false)
                 // 轻甩的惯性
                 let velocity = Float(gesture.velocity(in: view).x) * 0.0012
                 guard abs(velocity) > 0.02 else { return }

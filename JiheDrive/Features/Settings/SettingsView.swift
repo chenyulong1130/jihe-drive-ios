@@ -47,6 +47,7 @@ struct SettingsView: View {
             .padding(.top, 8)
             .padding(.bottom, 118)
         }
+        .animation(nil, value: appearance.mode)
         .task { await signin.refresh() }
         .sheet(isPresented: $showPicker) {
             VehiclePickerSheet()
@@ -85,7 +86,9 @@ struct SettingsView: View {
     private func appearanceChip(_ mode: AppAppearance) -> some View {
         let selected = appearance.mode == mode
         return Button {
-            withAnimation(Motion.quick) { appearance.mode = mode }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { appearance.mode = mode }
         } label: {
             VStack(spacing: 6) {
                 Image(systemName: mode.icon)

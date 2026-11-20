@@ -39,6 +39,8 @@ struct HeroStage: View {
     let onOpenCushion: () -> Void
     /// 胎压监测二级页
     var onOpenTire: (() -> Void)? = nil
+    /// 拖 3D 时通知外层停掉页面滚动
+    var onInteract: ((Bool) -> Void)? = nil
 
     private var onDark: Bool { !selection.isDefault || videoURL != nil }
 
@@ -135,13 +137,7 @@ struct HeroStage: View {
                 case .remote(let remote):
                     if let remote {
                         Color.clear.overlay {
-                            AsyncImage(url: remote) { phase in
-                                if let image = phase.image {
-                                    image.resizable().scaledToFill()
-                                } else {
-                                    Color(hex: 0x0B1A16)
-                                }
-                            }
+                            CachedRemoteImage(url: remote, contentMode: .fill)
                         }
                         .clipped()
                     } else {
@@ -152,7 +148,7 @@ struct HeroStage: View {
                 }
 
                 GeometryReader { geo in
-                    LoopingVideoView(url: url, muted: true)
+                    CachedLoopingVideo(url: url)
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
                 .clipped()
@@ -182,13 +178,7 @@ struct HeroStage: View {
             ZStack {
                 LinearGradient(colors: theme.colors, startPoint: .topLeading, endPoint: .bottomTrailing)
                 Color.clear.overlay {
-                    AsyncImage(url: poster) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Color.clear
-                        }
-                    }
+                    CachedRemoteImage(url: poster, contentMode: .fill)
                 }
                 .clipped()
             }
@@ -224,7 +214,7 @@ struct HeroStage: View {
     private var carTopPad: CGFloat { topInset + 96 }
     /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
-    private var carBottomPad: CGFloat { hasTire ? 86 : 18 }
+    private var carBottomPad: CGFloat { hasTire ? 92 : 28 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -233,38 +223,46 @@ struct HeroStage: View {
                 if let modelGLBFile {
                     Color.clear
                         .overlay {
-                            ModelViewerWebView(glbFile: modelGLBFile, interactive: true, autoRotate: false)
+                            ModelViewerWebView(
+                                glbFile: modelGLBFile,
+                                interactive: true,
+                                autoRotate: false,
+                                onDrag: onInteract
+                            )
                         }
                         .padding(.top, carTopPad - 8)
                         .padding(.bottom, carBottomPad)
+                        .simultaneousGesture(heroDrag)
                 } else if let modelScene {
-                    VehicleSceneView(scene: modelScene, interactive: true, autoSpin: false, spinSpeed: 0)
+                    VehicleSceneView(
+                        scene: modelScene,
+                        interactive: true,
+                        autoSpin: false,
+                        spinSpeed: 0,
+                        onDrag: onInteract
+                    )
                         .padding(.top, carTopPad - 8)
                         .padding(.bottom, carBottomPad)
+                        .simultaneousGesture(heroDrag)
                 } else {
                     ZStack {
                         Ellipse()
                             .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
-                            .frame(width: 260, height: 14)
+                            .frame(width: 240, height: 12)
                             .blur(radius: 10)
-                            .offset(y: 18)
+                            .offset(y: 16)
 
                         Group {
                             if let url = vehicle.imageURL {
-                                AsyncImage(url: url) { phase in
-                                    if let image = phase.image {
-                                        image.resizable().scaledToFit()
-                                    } else {
-                                        placeholder
-                                    }
-                                }
-                                .id(vehicle.vinNo + (url.absoluteString))
+                                CachedRemoteImage(url: url, contentMode: .fit)
+                                    .id(vehicle.vinNo + url.absoluteString)
                             } else {
                                 placeholder
                             }
                         }
                         .frame(maxWidth: .infinity)
                         .frame(maxHeight: .infinity)
+                        .padding(.horizontal, 32)
                         .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -473,11 +471,6 @@ struct HeroStage: View {
                         tireCell(title: "前轮", bar: front)
                             .frame(maxWidth: .infinity)
                     }
-                    if front != nil && rear != nil {
-                        Rectangle()
-                            .fill(primary.opacity(0.28))
-                            .frame(width: 1, height: 36)
-                    }
                     if let rear {
                         tireCell(title: "后轮", bar: rear)
                             .frame(maxWidth: .infinity)
@@ -506,19 +499,19 @@ struct HeroStage: View {
     }
 
     private func tireCell(title: String, bar: Double) -> some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 1) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(secondaryText)
                 .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(String(format: "%.1f", bar))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(tireTint(bar))
                     .monospacedDigit()
                     .shadow(color: Color.black.opacity(onDark ? 0.65 : 0.22), radius: 3, y: 1)
                 Text("bar")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(secondaryText)
                     .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
             }
@@ -531,5 +524,11 @@ struct HeroStage: View {
         if bar < 1.8 { return Theme.red }
         if bar < 2.1 || bar > 2.9 { return Theme.orange }
         return Theme.green
+    }
+
+    private var heroDrag: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { _ in onInteract?(true) }
+            .onEnded { _ in onInteract?(false) }
     }
 }

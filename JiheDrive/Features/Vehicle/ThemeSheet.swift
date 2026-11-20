@@ -242,18 +242,10 @@ struct ThemeSheet: View {
             withAnimation(Motion.quick) { themeStore.select(theme.id) }
         } label: {
             themeTile(selected: selected, name: theme.name, badge: "play.circle.fill") {
-                Group {
+                ZStack {
+                    LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
                     if let poster = theme.posterURL {
-                        AsyncImage(url: poster) { phase in
-                            switch phase {
-                            case .success(let image):
-                                image.resizable().scaledToFill()
-                            default:
-                                LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
-                            }
-                        }
-                    } else {
-                        LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
+                        CachedRemoteImage(url: poster, contentMode: .fill)
                     }
                 }
             }

@@ -96,13 +96,8 @@ struct VehiclePickerSheet: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Theme.surfaceAlt)
             if let url = vehicle.imageURL {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFit().padding(4)
-                    } else {
-                        placeholder
-                    }
-                }
+                CachedRemoteImage(url: url, contentMode: .fit)
+                    .padding(4)
             } else {
                 placeholder
             }

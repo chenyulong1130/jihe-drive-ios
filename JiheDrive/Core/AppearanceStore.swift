@@ -65,10 +65,19 @@ final class AppearanceStore: ObservableObject {
 
     func applyToWindows() {
         let style = mode.uiUserInterfaceStyle
-        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
-            for window in scene.windows {
-                window.overrideUserInterfaceStyle = style
-                window.backgroundColor = .systemGroupedBackground
+        let canvas = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
+                : UIColor(red: 0.933, green: 0.945, blue: 0.961, alpha: 1)
+        }
+        UIView.performWithoutAnimation {
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows {
+                    window.overrideUserInterfaceStyle = style
+                    window.backgroundColor = canvas
+                    window.tintAdjustmentMode = .normal
+                    window.layer.backgroundColor = canvas.resolvedColor(with: window.traitCollection).cgColor
+                }
             }
         }
     }

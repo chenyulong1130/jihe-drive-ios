@@ -323,12 +323,18 @@ struct RideHomeView: View {
 
     private func trackRow(_ track: RideTrack) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            RouteThumbnail(points: track.points)
-                .frame(width: 62, height: 62)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            ZStack {
+                Theme.surfaceAlt
+                RouteThumbnail(points: track.points)
+                if let thumb = track.thumbnailURL {
+                    CachedRemoteImage(url: thumb, contentMode: .fill)
+                }
+            }
+            .frame(width: 62, height: 62)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(track.startTime ?? "未命名行程")
+                Text(tripClock(track))
                     .font(.system(size: 14.5, weight: .semibold))
                     .foregroundStyle(Theme.label)
                     .lineLimit(1)
@@ -370,6 +376,15 @@ struct RideHomeView: View {
                 .fill(Theme.surface)
         )
         .shadow(color: Theme.cardShadow, radius: 20, x: 0, y: 4)
+    }
+
+    private func tripClock(_ track: RideTrack) -> String {
+        let start = track.startTime ?? ""
+        if start.isEmpty, track.endTime == nil { return "未命名行程" }
+        if let end = track.endTime, !end.isEmpty, end != start {
+            return "\(start) – \(end)"
+        }
+        return start.isEmpty ? "未命名行程" : start
     }
 
     private func label(icon: String, text: String) -> some View {

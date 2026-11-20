@@ -70,6 +70,8 @@ final class SigninStore: ObservableObject {
     @Published private(set) var signedTodayByCount: Bool?
     @Published private(set) var loading = false
     @Published private(set) var signingIn = false
+    @Published private(set) var communityRunning = false
+    @Published private(set) var communityDone = false
     @Published var error: String?
 
     var signedToday: Bool {
@@ -103,6 +105,10 @@ final class SigninStore: ObservableObject {
         }
 
         info = parsed
+        if let uid = ZeehoClient.shared.userId {
+            communityDone = CommunityTask.isDoneToday(userId: uid)
+                || await CommunityTask.doneFromIntegral(userId: uid)
+        }
 
         do {
             let countRes = try await ZeehoClient.shared.get(
@@ -133,5 +139,21 @@ final class SigninStore: ObservableObject {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    func runCommunity() async {
+        guard !communityRunning, !communityDone else { return }
+        guard let uid = ZeehoClient.shared.userId, !uid.isEmpty else {
+            error = "缺少账号 ID，无法做社区任务"
+            return
+        }
+        communityRunning = true
+        defer { communityRunning = false }
+        let result = await CommunityTask.run(userId: uid)
+        communityDone = result.success || CommunityTask.isDoneToday(userId: uid)
+        if !result.success {
+            error = result.summary
+        }
+        await refresh()
     }
 }

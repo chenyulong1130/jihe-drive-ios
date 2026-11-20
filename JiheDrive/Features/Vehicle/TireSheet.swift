@@ -8,6 +8,9 @@ struct TireSheet: View {
 
     @State private var refreshing = false
     @State private var reading: TireReading?
+    @State private var history: TireHistory?
+    @State private var histPeriod = "1"
+    @State private var histBusy = false
 
     private let lowBar: Double = 1.9
     private let highBar: Double = 3.2
@@ -24,12 +27,14 @@ struct TireSheet: View {
                         loading
                     } else if !hasData {
                         empty
+                        historyCard
                     } else {
                         if let banner = bannerText {
                             SoftBanner(text: banner, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                         }
                         duoCards
                         gaugeCard
+                        historyCard
                         tipsCard
                         if let updated = reading?.updatedAt ?? model.tire?.updatedAt {
                             Text("更新于 \(updated)")
@@ -177,7 +182,7 @@ struct TireSheet: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.label)
                 Spacer()
-                Text("安全 1.9 – 3.2 bar")
+                Text("安全 1.9 至 3.2 bar")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
             }
@@ -351,11 +356,96 @@ struct TireSheet: View {
         .disabled(refreshing)
     }
 
+    private var historyCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("胎压历史")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Spacer()
+                HStack(spacing: 6) {
+                    periodChip("24 小时", id: "1")
+                    periodChip("近 7 天", id: "2")
+                }
+            }
+
+            if histBusy && history == nil {
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16)
+            } else if let history, !history.wheels.isEmpty {
+                ForEach(history.wheels) { wheel in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(wheel.pos == "front" ? "前轮" : "后轮")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.label)
+                            Spacer()
+                            Text("均 \(wheel.avg.map { String(format: "%.1f", $0) } ?? "--")  低 \(wheel.min.map { String(format: "%.1f", $0) } ?? "--")  高 \(wheel.max.map { String(format: "%.1f", $0) } ?? "--")")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Theme.tertiary)
+                                .monospacedDigit()
+                        }
+                        historyBars(wheel.points)
+                    }
+                }
+            } else {
+                Text("传感器上报一段时间后可看趋势")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Theme.surface)
+        }
+    }
+
+    private func periodChip(_ title: String, id: String) -> some View {
+        let on = histPeriod == id
+        return Button {
+            histPeriod = id
+            Task { await loadHistory() }
+        } label: {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(on ? .white : Theme.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(on ? Theme.brand : Theme.surfaceAlt))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func historyBars(_ points: [TireHistoryPoint]) -> some View {
+        let sample = Array(points.suffix(48))
+        let values = sample.map(\.value)
+        let lo = min(values.min() ?? 1.6, 1.6)
+        let hi = max(values.max() ?? 3.2, 3.2)
+        let span = max(0.3, hi - lo)
+        return HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(sample.enumerated()), id: \.offset) { _, point in
+                let h = 8 + ((point.value - lo) / span) * 52
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(point.value < 1.9 ? Theme.orange : Theme.brand.opacity(0.75))
+                    .frame(width: 4, height: h)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 62, alignment: .bottom)
+    }
+
     private func reload() async {
         refreshing = true
         await model.loadTire(vin: vehicle.vinNo)
         reading = model.tire
         refreshing = false
+        await loadHistory()
+    }
+
+    private func loadHistory() async {
+        histBusy = true
+        defer { histBusy = false }
+        history = await TireHistoryService.fetch(vin: vehicle.vinNo, period: histPeriod)
     }
 }
 

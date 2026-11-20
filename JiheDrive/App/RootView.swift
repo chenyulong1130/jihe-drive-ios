@@ -28,11 +28,22 @@ struct RootView: View {
         .preferredColorScheme(appearance.mode.colorScheme)
         .tint(Theme.brand)
         .animation(Motion.spring, value: model.isLoggedIn)
-        .animation(Motion.quick, value: appearance.mode)
-        .task { await model.bootstrap() }
+        .animation(nil, value: appearance.mode)
+        .task {
+            await model.bootstrap()
+            if let video = themeStore.resolvedVideoURL(local: videoStore.url) {
+                _ = await ResourceCache.file(for: video, folder: "videos")
+            }
+            _ = await ResourceCache.image(for: themeStore.current.posterURL)
+            _ = await ResourceCache.image(for: model.selectedVehicle?.imageURL)
+        }
         .onAppear { appearance.applyToWindows() }
         .onChange(of: appearance.mode) { _, _ in
-            appearance.applyToWindows()
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                appearance.applyToWindows()
+            }
         }
     }
 }

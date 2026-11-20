@@ -8,6 +8,7 @@ struct ModelViewerWebView: UIViewRepresentable {
     let glbFile: URL
     var interactive: Bool = true
     var autoRotate: Bool = false
+    var onDrag: ((Bool) -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -20,15 +21,24 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.scrollView.backgroundColor = .clear
         view.scrollView.isScrollEnabled = false
         view.scrollView.bounces = false
+        view.scrollView.delaysContentTouches = false
+        view.scrollView.canCancelContentTouches = false
         view.isUserInteractionEnabled = interactive
         view.navigationDelegate = context.coordinator
 
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleOuterPan(_:)))
+        pan.cancelsTouchesInView = false
+        pan.delegate = context.coordinator
+        view.addGestureRecognizer(pan)
+
+        context.coordinator.onDrag = onDrag
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         view.isUserInteractionEnabled = interactive
+        context.coordinator.onDrag = onDrag
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
     }
 
@@ -36,11 +46,28 @@ struct ModelViewerWebView: UIViewRepresentable {
         Coordinator()
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate {
         let scheme = ModelSchemeHandler()
+        var onDrag: ((Bool) -> Void)?
         private var loadedFile: URL?
 
         private var loadedInteractive: Bool?
+
+        @objc func handleOuterPan(_ gesture: UIPanGestureRecognizer) {
+            switch gesture.state {
+            case .began, .changed:
+                onDrag?(true)
+            default:
+                onDrag?(false)
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
 
         func load(into view: WKWebView, glbFile: URL, interactive: Bool, autoRotate: Bool) {
             guard loadedFile != glbFile || loadedInteractive != interactive else { return }
@@ -190,25 +217,23 @@ enum GLBModelStore {
     private static let stripTag = "s2"
 
     static func localFile(for remote: URL) async throws -> URL {
-        let name = "vehicle-\(abs(remote.absoluteString.hashValue))-\(stripTag).glb"
-        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let target = directory.appendingPathComponent(name)
+        let dir = ResourceCache.directory.appendingPathComponent("models", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let key = ResourceCache.hash(remote.absoluteString)
+        let target = dir.appendingPathComponent("\(key)-\(stripTag).glb")
 
         if let size = try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int,
            size > 1024 {
             return target
         }
 
-        let (temp, response) = try await URLSession.shared.download(from: remote)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw URLError(.badServerResponse)
+        guard let source = await ResourceCache.file(for: remote, folder: "models") else {
+            throw URLError(.cannotOpenFile)
         }
-
-        let raw = try Data(contentsOf: temp)
+        let raw = try Data(contentsOf: source)
         let cleaned = GLBNodeStripper.strip(raw)
         try? FileManager.default.removeItem(at: target)
         try cleaned.write(to: target, options: .atomic)
-        try? FileManager.default.removeItem(at: temp)
         return target
     }
 }

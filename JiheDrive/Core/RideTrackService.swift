@@ -131,7 +131,14 @@ enum RideTrackService {
                 ) ?? 0),
                 bendTimes: Int(Vehicle.doubleValue(
                     item["bendingTimes"] ?? item["bendingTimesDay"] ?? item["bendTimes"]
-                ) ?? 0)
+                ) ?? 0),
+                thumbnailURL: remoteURL(
+                    item["trackThumbnails"]
+                        ?? item["trackThumbnail"]
+                        ?? item["thumbnail"]
+                        ?? item["thumbUrl"]
+                        ?? item["rideThumbnail"]
+                )
             )
             return (start ?? "", track)
         }
@@ -465,15 +472,35 @@ enum RideTrackService {
         return nil
     }
 
-    /// "2026.11.13 08:12:33" → "11.13 08:12"
+    /// "2026.11.13 08:12:33" / ISO8601 → "08:12"（列表按日分组，条目不再重复日期）
     private static func display(_ raw: String?) -> String? {
         guard let raw, !raw.isEmpty else { return raw }
-        let normalized = raw.replacingOccurrences(of: "-", with: ".")
-        let segments = normalized.split(separator: " ")
-        guard let datePart = segments.first else { return raw }
-        let timePart = segments.count > 1 ? String(segments[1].prefix(5)) : ""
-        let comps = datePart.split(separator: ".")
-        let shortDate = comps.count >= 3 ? "\(comps[1]).\(comps[2])" : String(datePart)
-        return timePart.isEmpty ? shortDate : "\(shortDate) \(timePart)"
+        if let match = raw.range(of: #"\d{1,2}:\d{2}"#, options: .regularExpression) {
+            let hm = String(raw[match]).split(separator: ":")
+            if hm.count == 2, let hour = Int(hm[0]) {
+                return String(format: "%02d:%@", hour, String(hm[1]))
+            }
+            return String(raw[match])
+        }
+        let segments = raw.replacingOccurrences(of: "-", with: ".").split(separator: " ")
+        if segments.count > 1 {
+            return String(segments[1].prefix(5))
+        }
+        return nil
+    }
+
+    private static func remoteURL(_ raw: Any?) -> URL? {
+        if let url = raw as? URL { return url }
+        if let dict = raw as? [String: Any] {
+            return remoteURL(dict["url"] ?? dict["thumbUrl"] ?? dict["thumbnail"] ?? dict["ossUrl"])
+        }
+        if let list = raw as? [Any] {
+            return remoteURL(list.first)
+        }
+        guard var text = text(raw), !text.isEmpty else { return nil }
+        text = text.replacingOccurrences(of: "\\/", with: "/")
+        if let url = URL(string: text) { return url }
+        return text.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed)
+            .flatMap(URL.init(string:))
     }
 }

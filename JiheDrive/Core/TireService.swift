@@ -101,3 +101,71 @@ enum TireService {
         return String(raw.prefix(16))
     }
 }
+
+struct TireHistoryPoint: Identifiable {
+    var id: Double { time }
+    let time: Double
+    let value: Double
+}
+
+struct TireHistoryWheel: Identifiable {
+    var id: String { pos }
+    let pos: String
+    let points: [TireHistoryPoint]
+    let min: Double?
+    let max: Double?
+    let avg: Double?
+}
+
+struct TireHistory {
+    let from: Double
+    let to: Double
+    let wheels: [TireHistoryWheel]
+}
+
+enum TireHistoryService {
+    static func fetch(vin: String, period: String) async -> TireHistory? {
+        var query = H5Client.mineQuery
+        query["sensorType"] = "EXTERNAL"
+        query["timePeriodType"] = period
+        query["vinNo"] = vin
+        guard let response = try? await H5Client.get(
+            "/cfmotoserverapp/H5/vehicle/tire/statistics",
+            query: query
+        ) else { return nil }
+        let code = ZeehoClient.codeString(response["code"])
+        guard code.isEmpty || code == "10000" else { return nil }
+        return parse(response["data"])
+    }
+
+    static func parse(_ raw: Any?) -> TireHistory? {
+        guard let data = raw as? [String: Any] else { return nil }
+        let list = (data["data"] as? [[String: Any]]) ?? (data["list"] as? [[String: Any]]) ?? []
+        var wheels: [TireHistoryWheel] = []
+        for item in list {
+            let pos = Vehicle.intValue(item["sensorPosition"]) == 1 ? "front" : "rear"
+            guard let stat = item["tirePressureStat"] as? [String: Any] else { continue }
+            let pts = ((stat["list"] as? [[String: Any]]) ?? []).compactMap { row -> TireHistoryPoint? in
+                guard let t = Vehicle.doubleValue(row["time"]),
+                      let v = Vehicle.doubleValue(row["value"]) else { return nil }
+                return TireHistoryPoint(time: t * 1000, value: v)
+            }.sorted { $0.time < $1.time }
+            guard !pts.isEmpty else { continue }
+            wheels.append(
+                TireHistoryWheel(
+                    pos: pos,
+                    points: pts,
+                    min: Vehicle.doubleValue(stat["min"]),
+                    max: Vehicle.doubleValue(stat["max"]),
+                    avg: Vehicle.doubleValue(stat["avg"])
+                )
+            )
+        }
+        guard !wheels.isEmpty else { return nil }
+        return TireHistory(
+            from: (Vehicle.doubleValue(data["startTime"]) ?? 0) * 1000,
+            to: (Vehicle.doubleValue(data["endTime"]) ?? 0) * 1000,
+            wheels: wheels
+        )
+    }
+}

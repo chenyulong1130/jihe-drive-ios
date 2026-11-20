@@ -101,7 +101,13 @@ struct DashboardWallpaperSheet: View {
             }
         }
         .sheetChrome(detents: [.medium, .large])
-        .task { await reload() }
+        .task {
+            async let preloadHome: UIImage? = ResourceCache.image(for: outlines.homeOutlineURL)
+            async let preloadSpeed: UIImage? = ResourceCache.image(for: outlines.speedOutlineURL)
+            async let preloadSubject: UIImage? = ResourceCache.image(for: outlines.speedSubjectURL)
+            _ = await (preloadHome, preloadSpeed, preloadSubject)
+            await reload()
+        }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task { await prepareDraft(item) }
@@ -126,22 +132,12 @@ struct DashboardWallpaperSheet: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(hex: 0x1C1C1E))
                     if let url = item.homeURL {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            } else {
-                                Theme.surfaceAlt
-                            }
-                        }
+                        CachedRemoteImage(url: url, contentMode: .fill)
                     }
-                    if let outline = (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().homeOutlineURL {
-                        AsyncImage(url: outline) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            }
-                        }
-                        .allowsHitTesting(false)
-                    }
+                    WallpaperOutlineLayer(
+                        url: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().homeOutlineURL,
+                        onDark: false
+                    )
                     if item.isLive {
                         Text("使用中")
                             .font(.system(size: 10, weight: .bold))
@@ -236,17 +232,11 @@ struct DashboardWallpaperSheet: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                if let outline {
-                    AsyncImage(url: outline) { phase in
-                        if let img = phase.image { img.resizable().scaledToFill() }
-                    }
-                    .allowsHitTesting(false)
-                }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                WallpaperOutlineLayer(url: outline, onDark: subject != nil)
                 if let subject {
-                    AsyncImage(url: subject) { phase in
-                        if let img = phase.image { img.resizable().scaledToFill() }
-                    }
-                    .allowsHitTesting(false)
+                    CachedRemoteImage(url: subject, stretch: true)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -341,35 +331,16 @@ struct DashboardWallpaperSheet: View {
                 ZStack {
                     Group {
                         if let url {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                default:
-                                    Theme.surfaceAlt
-                                }
-                            }
+                            CachedRemoteImage(url: url, contentMode: .fill)
                         } else {
                             Theme.surfaceAlt
                         }
                     }
 
-                    // 官方轮廓蒙版叠在壁纸上（对齐 Flutter wallpaper_frame_preview）
-                    if let outline {
-                        AsyncImage(url: outline) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            }
-                        }
-                        .allowsHitTesting(false)
-                    }
+                    WallpaperOutlineLayer(url: outline, onDark: isSpeed)
                     if let subject {
-                        AsyncImage(url: subject) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFill()
-                            }
-                        }
-                        .allowsHitTesting(false)
+                        CachedRemoteImage(url: subject, stretch: true)
+                            .allowsHitTesting(false)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: isSpeed ? 14 : 10, style: .continuous))
@@ -537,5 +508,30 @@ struct DashboardWallpaperItem: Identifiable, Hashable {
             }
         }
         return nil
+    }
+}
+
+/// 官方仪表轮廓：主页按原图叠；速度卡提亮成白线（对齐 Flutter wallpaper_frame_preview）
+private struct WallpaperOutlineLayer: View {
+    let url: URL?
+    var onDark: Bool
+
+    var body: some View {
+        if let url {
+            if onDark {
+                ZStack {
+                    CachedRemoteImage(url: url, stretch: true)
+                        .colorMultiply(Color.white.opacity(0.82))
+                    CachedRemoteImage(url: url, stretch: true)
+                        .blendMode(.screen)
+                        .opacity(0.4)
+                }
+                .allowsHitTesting(false)
+            } else {
+                CachedRemoteImage(url: url, stretch: true)
+                    .opacity(0.92)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }
