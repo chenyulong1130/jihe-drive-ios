@@ -80,6 +80,7 @@ struct Vehicle: Identifiable, Hashable {
         )
     }
 
+#if !WIDGET_EXTENSION
     /// 用 V2 / batteryInfo 覆盖电量、续航、充电态（对齐小程序双源合并）
     func withBattery(_ battery: BatteryInfo) -> Vehicle {
         Vehicle(
@@ -113,6 +114,7 @@ struct Vehicle: Identifiable, Hashable {
             shareNickName: shareNickName
         )
     }
+#endif
 
     /// 接口给的是 glb/gltf 时用 model-viewer 渲染
     var isGLBModel: Bool {
