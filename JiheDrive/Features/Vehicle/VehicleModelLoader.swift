@@ -22,10 +22,14 @@ final class VehicleModelLoader: ObservableObject {
         return nil
     }
 
+    func clear() {
+        state = .idle
+        currentURL = nil
+    }
+
     func load(_ url: URL?) {
         guard let url else {
-            state = .idle
-            currentURL = nil
+            clear()
             return
         }
         if currentURL == url, case .ready = state { return }
@@ -37,9 +41,12 @@ final class VehicleModelLoader: ObservableObject {
         }
 
         state = .loading
+        let requested = url
         Task {
             do {
-                let local = try await Self.download(url)
+                let local = try await Self.download(requested)
+                // 切车后旧下载结果作废
+                guard currentURL == requested else { return }
                 let scene = try SCNScene(
                     url: local,
                     options: [
@@ -49,9 +56,11 @@ final class VehicleModelLoader: ObservableObject {
                     ]
                 )
                 let ready = Self.normalized(scene)
-                Self.cache[url.absoluteString] = ready
+                Self.cache[requested.absoluteString] = ready
+                guard currentURL == requested else { return }
                 state = .ready(ready)
             } catch {
+                guard currentURL == requested else { return }
                 state = .failed(Self.message(for: error))
             }
         }

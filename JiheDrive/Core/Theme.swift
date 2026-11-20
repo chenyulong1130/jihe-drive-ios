@@ -3,16 +3,38 @@ import UIKit
 
 /// Apple HIG 设计令牌：语义色随浅/深色自动切换，字号走 SF Pro 默认层级。
 enum Theme {
-    // MARK: - 背景与表面
+    // MARK: - 背景与表面（对齐 Flutter / 小程序冷灰蓝，避免系统白过刺）
 
-    /// 分组列表底色（systemGroupedBackground）
-    static let groupedBackground = Color(uiColor: .systemGroupedBackground)
-    /// 卡片（secondarySystemGroupedBackground）
-    static let surface = Color(uiColor: .secondarySystemGroupedBackground)
-    /// 行内弱填充（tertiarySystemFill）
-    static let surfaceAlt = Color(uiColor: .tertiarySystemFill)
-    /// 抬升一层的填充（深色里比 surface 稍亮）
-    static let elevated = Color(uiColor: .tertiarySystemGroupedBackground)
+    /// 页面底：#EEF1F5 / 深色 #111825
+    static let groupedBackground = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1) // #111825
+            : UIColor(red: 0.933, green: 0.945, blue: 0.961, alpha: 1) // #EEF1F5
+    })
+    /// 卡片：白 / 深色 #1C2534
+    static let surface = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.110, green: 0.145, blue: 0.204, alpha: 1) // #1C2534
+            : UIColor.white
+    })
+    /// 行内弱填充
+    static let surfaceAlt = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.08)
+            : UIColor(red: 0.47, green: 0.52, blue: 0.59, alpha: 0.12)
+    })
+    /// 抬升一层
+    static let elevated = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.106, green: 0.141, blue: 0.196, alpha: 1)
+            : UIColor(red: 0.969, green: 0.976, blue: 0.988, alpha: 1) // #F7F9FC
+    })
+    /// 顶部氛围（小程序 canvas-top #E4EEF8）
+    static let canvasTop = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.078, green: 0.110, blue: 0.165, alpha: 1) // #141C2A
+            : UIColor(red: 0.894, green: 0.933, blue: 0.973, alpha: 1) // #E4EEF8
+    })
 
     // MARK: - 文字
 

@@ -13,8 +13,7 @@ struct VehicleView: View {
     @State private var busy: String?
     @State private var toast: String?
 
-    @State private var todaySummary: RideTrackService.DaySummary?
-    @State private var latestTrack: RideTrack?
+    @State private var rideExtra: RideTrackService.RideExtra?
 
     @State private var showMap = false
     @State private var showPicker = false
@@ -22,6 +21,7 @@ struct VehicleView: View {
     @State private var themeFocus: ThemeFocus = .none
     @State private var showDashboardWallpaper = false
     @State private var showBattery = false
+    @State private var showTire = false
     @State private var show3D = false
     @State private var showDetail = false
     @State private var showSettings = false
@@ -66,6 +66,9 @@ struct VehicleView: View {
         .sheet(isPresented: $showBattery) {
             if let vehicle = model.selectedVehicle { BatterySheet(vehicle: vehicle) }
         }
+        .sheet(isPresented: $showTire) {
+            if let vehicle = model.selectedVehicle { TireSheet(vehicle: vehicle) }
+        }
         .sheet(isPresented: $showMap) {
             if let vehicle = model.selectedVehicle { TrackMapView(vehicle: vehicle) }
         }
@@ -83,6 +86,10 @@ struct VehicleView: View {
         }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
+            // 切车先清掉上一台的模型，避免画面短暂串车
+            heroGLB = nil
+            model3D.clear()
+            rideExtra = nil
             await loadHeroModel()
             async let battery: Void = model.loadBattery(vin: vin)
             async let detail: Void = model.loadDetail(vin: vin)
@@ -130,25 +137,40 @@ struct VehicleView: View {
             },
             onOpenCushion: {
                 run("cushion") { try await model.openCushion(vehicle) }
+            },
+            onOpenTire: {
+                showTire = true
             }
         )
     }
 
-    /// glb 走 model-viewer，其余格式交给 SceneKit
+    /// glb 走 model-viewer，其余格式交给 SceneKit；切车必须强制重载
     private func loadHeroModel() async {
-        guard let vehicle = model.selectedVehicle, let url = vehicle.model3DURL else { return }
+        guard let vehicle = model.selectedVehicle else {
+            heroGLB = nil
+            model3D.clear()
+            return
+        }
+        let vin = vehicle.vinNo
+        guard let url = vehicle.model3DURL else {
+            guard model.selectedVehicle?.vinNo == vin else { return }
+            heroGLB = nil
+            model3D.clear()
+            return
+        }
         if vehicle.isGLBModel {
-            if heroGLB == nil {
-                heroGLB = try? await GLBModelStore.localFile(for: url)
-            }
+            model3D.clear()
+            let file = try? await GLBModelStore.localFile(for: url)
+            guard model.selectedVehicle?.vinNo == vin else { return }
+            heroGLB = file
         } else {
+            heroGLB = nil
             model3D.load(url)
         }
     }
 
     private func loadRideSummary(vin: String) async {
-        todaySummary = await RideTrackService.daySummary(vin: vin)
-        latestTrack = await RideTrackService.tracks(vin: vin, days: 7, pageSize: 1)?.first
+        rideExtra = await RideTrackService.rideExtra(vin: vin)
     }
 
     // MARK: - 内容面板
@@ -167,16 +189,36 @@ struct VehicleView: View {
             Button {
                 showDetail = true
             } label: {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
-                        .frame(width: 6, height: 6)
-                    Text(vehicle.isOnline ? "车辆在线" : "车辆离线")
+                HStack(spacing: 8) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
+                            .frame(width: 7, height: 7)
+                            .overlay {
+                                if vehicle.isOnline {
+                                    Circle()
+                                        .stroke(Theme.green.opacity(0.35), lineWidth: 4)
+                                        .frame(width: 11, height: 11)
+                                }
+                            }
+                        Text(vehicle.isOnline ? "在线" : "离线")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.tertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill((vehicle.isOnline ? Theme.green : Theme.tertiary).opacity(0.12))
+                    )
+
+                    Text(vehicle.isLocked ? "已关锁" : "未关锁")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.secondary)
-                    Text("·")
-                        .foregroundStyle(Theme.tertiary)
-                    Text("查看详情")
+                        .foregroundStyle(vehicle.isLocked ? Theme.secondary : Theme.orange)
+
+                    Spacer(minLength: 0)
+
+                    Text("车辆详情")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.brand)
                     Image(systemName: "chevron.right")
@@ -184,13 +226,13 @@ struct VehicleView: View {
                         .foregroundStyle(Theme.brand.opacity(0.7))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.top, 2)
+                .padding(.top, 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
         }
         .padding(.horizontal, 16)
-        .padding(.top, 14)
+        .padding(.top, 4)
         .padding(.bottom, 8)
         // 对齐小程序：内容区直角，靠英雄区底部渐隐过渡，不要圆角「盖」在视频上
         .background(Theme.groupedBackground)
@@ -291,13 +333,14 @@ struct VehicleView: View {
 
     private func unlockButton(_ vehicle: Vehicle) -> some View {
         let locked = vehicle.isLocked
+        let online = vehicle.isOnline
         let accent = locked ? Theme.unlock : Theme.lock
         let colors: [Color] = locked
-            ? [accent.mixed(with: .white, amount: 0.18), accent]
-            : [accent.mixed(with: .white, amount: 0.22), accent]
+            ? [Color(hex: 0x34C759).mixed(with: .white, amount: 0.12), Color(hex: 0x248A3D)]
+            : [Color(hex: 0xFF9F0A).mixed(with: .white, amount: 0.16), Color(hex: 0xD97706)]
 
         return Button {
-            let queued = !vehicle.isOnline
+            let queued = !online
             run(
                 "lock",
                 success: queued ? "车辆离线，指令已排队" : (locked ? "已发送解锁指令" : "已发送锁车指令")
@@ -305,37 +348,30 @@ struct VehicleView: View {
                 try await model.toggleLock(vehicle)
             }
         } label: {
-            HStack(spacing: 12) {
+            VStack(spacing: 8) {
                 ZStack {
                     Circle()
-                        .fill(Color.white.opacity(0.22))
-                        .frame(width: 40, height: 40)
+                        .fill(Color.white.opacity(0.2))
+                        .frame(width: 44, height: 44)
                     if busy == "lock" {
                         ProgressView()
                             .progressViewStyle(.circular)
                             .tint(.white)
-                            .scaleEffect(0.85)
+                            .scaleEffect(0.9)
                     } else {
                         Image(systemName: locked ? "lock.open.fill" : "lock.fill")
-                            .font(.system(size: 17, weight: .bold))
+                            .font(.system(size: 18, weight: .bold))
                             .contentTransition(.symbolEffect(.replace))
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(locked ? "点击解锁" : "点击关锁")
-                        .font(.system(size: 16, weight: .bold))
-                    Text(vehicle.isOnline ? (locked ? "车辆已上锁" : "车辆已解锁") : "离线 · 指令将排队")
-                        .font(.system(size: 11, weight: .medium))
-                        .opacity(0.88)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .opacity(0.55)
+                Text(locked ? "解锁" : "关锁")
+                    .font(.system(size: 15, weight: .bold))
+                Text(online ? (locked ? "已关锁" : "未关锁") : "离线排队")
+                    .font(.system(size: 10, weight: .medium))
+                    .opacity(0.85)
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
             .frame(height: 86)
             .background {
@@ -349,23 +385,25 @@ struct VehicleView: View {
                     )
                     .overlay {
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.22), Color.clear],
-                                    startPoint: .top,
-                                    endPoint: .center
-                                )
-                            )
-                            .blendMode(.plusLighter)
+                            .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
+                    }
+                    .overlay(alignment: .top) {
+                        // 在线指示：右上角小点
+                        Circle()
+                            .fill(online ? Color.white : Color.white.opacity(0.35))
+                            .frame(width: 7, height: 7)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             .allowsHitTesting(false)
                     }
             }
-            .shadow(color: accent.opacity(0.38), radius: 16, x: 0, y: 8)
+            .shadow(color: accent.opacity(0.34), radius: 14, x: 0, y: 7)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.02))
         .disabled(busy != nil)
         .animation(Motion.spring, value: locked)
+        .animation(Motion.quick, value: online)
     }
 
     // MARK: - 位置 / 骑行
@@ -384,8 +422,16 @@ struct VehicleView: View {
                     showMap = true
                 } label: {
                     mapBody(vehicle)
-                        .frame(height: 88)
+                        .frame(height: 96)
                         .frame(maxWidth: .infinity)
+                        .overlay {
+                            LinearGradient(
+                                colors: [.clear, Theme.surface.opacity(0.92)],
+                                startPoint: .center,
+                                endPoint: .bottom
+                            )
+                            .allowsHitTesting(false)
+                        }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle(scale: 1, brightness: 0))
@@ -394,34 +440,39 @@ struct VehicleView: View {
                     Button {
                         navigate(vehicle)
                     } label: {
-                        Text("导航")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("导航")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Theme.brand.opacity(0.92)))
+                        .shadow(color: Theme.brand.opacity(0.35), radius: 6, y: 2)
                     }
                     .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
                     .padding(8)
                 }
             }
             .clipShape(UnevenRoundedRectangle(
-                topLeadingRadius: 16,
+                topLeadingRadius: 18,
                 bottomLeadingRadius: 0,
                 bottomTrailingRadius: 0,
-                topTrailingRadius: 16,
+                topTrailingRadius: 18,
                 style: .continuous
             ))
 
             Button {
                 showMap = true
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 4) {
                         Image(systemName: "mappin.and.ellipse")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.brand)
-                        Text("车辆位置")
+                        Text("位置")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Theme.label)
                         Spacer(minLength: 0)
@@ -438,7 +489,7 @@ struct VehicleView: View {
                         .frame(minHeight: 28, alignment: .topLeading)
 
                     Text(shortTime(vehicle.locationTime))
-                        .font(.system(size: 10))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.tertiary)
                 }
                 .padding(.horizontal, 12)
@@ -452,7 +503,11 @@ struct VehicleView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Theme.surface)
         }
-        .shadow(color: Theme.cardShadow, radius: 14, x: 0, y: 4)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
+        }
+        .shadow(color: Theme.cardShadow, radius: 12, x: 0, y: 4)
     }
 
     private func rideCard(_ vehicle: Vehicle) -> some View {
@@ -461,18 +516,24 @@ struct VehicleView: View {
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 4) {
-                    Text("骑行记录")
+                    Image(systemName: "figure.outdoor.cycle")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                    Text("骑行")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.label)
                     Spacer(minLength: 0)
+                    Text("回放")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Theme.tertiary)
+                        .foregroundStyle(Theme.brand.opacity(0.7))
                 }
 
                 HStack(alignment: .top, spacing: 0) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(latestTrack.map { String(format: "%.1f", $0.mileage) } ?? "—")
+                        Text(rideExtra?.lastKm.map { String(format: "%.1f", $0) } ?? "—")
                             .font(.system(size: 22, weight: .semibold, design: .rounded))
                             .foregroundStyle(Theme.label)
                             .monospacedDigit()
@@ -486,7 +547,7 @@ struct VehicleView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(latestTrack.map { "\($0.durationMinutes)" } ?? "—")
+                        Text(rideExtra?.lastMin.map { "\($0)" } ?? "—")
                             .font(.system(size: 22, weight: .semibold, design: .rounded))
                             .foregroundStyle(Theme.label)
                             .monospacedDigit()
@@ -504,17 +565,17 @@ struct VehicleView: View {
 
                 HStack(spacing: 0) {
                     rideStat(
-                        value: todaySummary.map { String(format: "%.1f", $0.mileage) } ?? "—",
+                        value: rideExtra?.todayKm.map { String(format: "%.1f", $0) } ?? "—",
                         unit: "km",
                         label: "今日"
                     )
                     rideStat(
-                        value: todaySummary.map { formatSpeed($0.maxSpeed) } ?? "—",
+                        value: rideExtra?.todayMaxSpeed.map { formatSpeed($0) } ?? "—",
                         unit: "km/h",
                         label: "极速"
                     )
                     rideStat(
-                        value: todaySummary.map { "\($0.minutes)" } ?? "—",
+                        value: rideExtra?.todayMin.map { "\($0)" } ?? "—",
                         unit: "min",
                         label: "时长"
                     )
@@ -526,7 +587,11 @@ struct VehicleView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Theme.surface)
             }
-            .shadow(color: Theme.cardShadow, radius: 14, x: 0, y: 4)
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
+            }
+            .shadow(color: Theme.cardShadow, radius: 12, x: 0, y: 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
@@ -683,10 +748,10 @@ struct VehicleView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text("电池健康")
+                        Text("电池")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Theme.label)
-                        Text(battery?.stateText ?? (charging ? "充电中" : "正常"))
+                        Text(battery?.stateText ?? (charging ? "充电中" : "\(level)%"))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(tint)
                             .padding(.horizontal, 7)
@@ -784,7 +849,7 @@ struct VehicleView: View {
     }
 
     private func formatTodayDuration() -> String {
-        guard let minutes = todaySummary?.minutes, minutes > 0 else { return "—" }
+        guard let minutes = rideExtra?.todayMin, minutes > 0 else { return "—" }
         let h = minutes / 60
         let m = minutes % 60
         if h > 0 { return "\(h)时\(m)分" }

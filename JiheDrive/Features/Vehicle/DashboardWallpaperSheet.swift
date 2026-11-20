@@ -104,24 +104,32 @@ struct DashboardWallpaperSheet: View {
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .topTrailing) {
-                    Group {
-                        if let url = item.homeURL {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                default:
-                                    Theme.surfaceAlt
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(hex: 0x1C1C1E))
+                        Group {
+                            if let url = item.homeURL {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image.resizable().scaledToFill()
+                                    default:
+                                        Theme.surfaceAlt
+                                    }
                                 }
+                            } else {
+                                Theme.surfaceAlt
                             }
-                        } else {
-                            Theme.surfaceAlt
                         }
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .padding(5)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 92)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
 
                     if item.isLive {
                         Text("仪表使用中")
@@ -149,8 +157,20 @@ struct DashboardWallpaperSheet: View {
         }) {
             ScrollView {
                 VStack(spacing: 16) {
-                    previewBlock(title: "主页", url: item.homeURL, ratio: 1024 / 600)
-                    previewBlock(title: "速度卡", url: item.speedURL, ratio: 307 / 460)
+                    previewBlock(
+                        title: "主页",
+                        url: item.homeURL,
+                        outline: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().homeOutlineURL,
+                        subject: nil,
+                        ratio: 1024 / 600
+                    )
+                    previewBlock(
+                        title: "速度卡",
+                        url: item.speedURL,
+                        outline: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().speedOutlineURL,
+                        subject: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().speedSubjectURL,
+                        ratio: 307 / 460
+                    )
 
                     Button(role: .destructive) {
                         Task { await delete(item) }
@@ -182,32 +202,73 @@ struct DashboardWallpaperSheet: View {
         .sheetChrome(detents: [.medium, .large])
     }
 
-    private func previewBlock(title: String, url: URL?, ratio: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func previewBlock(
+        title: String,
+        url: URL?,
+        outline: URL?,
+        subject: URL?,
+        ratio: CGFloat
+    ) -> some View {
+        let isSpeed = title.contains("速度")
+        return VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.secondary)
-            Group {
-                if let url {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFit()
-                        default:
+
+            ZStack {
+                RoundedRectangle(cornerRadius: isSpeed ? 22 : 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: 0x1C1C1E), Color(hex: 0x2C2C2E)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: isSpeed ? 22 : 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1.2)
+                    )
+                    .shadow(color: Color.black.opacity(0.22), radius: 14, y: 6)
+
+                ZStack {
+                    Group {
+                        if let url {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                default:
+                                    Theme.surfaceAlt
+                                }
+                            }
+                        } else {
                             Theme.surfaceAlt
                         }
                     }
-                } else {
-                    Theme.surfaceAlt
+
+                    // 官方轮廓蒙版叠在壁纸上（对齐 Flutter wallpaper_frame_preview）
+                    if let outline {
+                        AsyncImage(url: outline) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            }
+                        }
+                        .allowsHitTesting(false)
+                    }
+                    if let subject {
+                        AsyncImage(url: subject) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            }
+                        }
+                        .allowsHitTesting(false)
+                    }
                 }
+                .clipShape(RoundedRectangle(cornerRadius: isSpeed ? 14 : 10, style: .continuous))
+                .padding(isSpeed ? 10 : 8)
             }
             .frame(maxWidth: .infinity)
             .aspectRatio(ratio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Theme.surface)
-            )
         }
     }
 
@@ -302,6 +363,7 @@ struct DashboardWallpaperItem: Identifiable, Hashable {
     let homeURL: URL?
     let speedURL: URL?
     let isLive: Bool
+    var outlines: WallpaperOutlines? = nil
 
     static func parseList(_ data: Any?) -> [DashboardWallpaperItem] {
         let rawList: [[String: Any]]
@@ -324,7 +386,8 @@ struct DashboardWallpaperItem: Identifiable, Hashable {
                 name: (name?.isEmpty == false ? name! : "未命名"),
                 homeURL: parseContentURL(map["wallpaperContent"], type: "2"),
                 speedURL: parseContentURL(map["wallpaperContent"], type: "1"),
-                isLive: live
+                isLive: live,
+                outlines: WallpaperOutlines.parse(map["wallpaperConfigSnapshot"] ?? map["subjectWallpaperConfig"])
             )
         }
     }

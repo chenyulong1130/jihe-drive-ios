@@ -37,6 +37,8 @@ struct HeroStage: View {
     /// 车辆页动态主题（视频背景）
     let onOpenTheme: () -> Void
     let onOpenCushion: () -> Void
+    /// 胎压监测二级页
+    var onOpenTire: (() -> Void)? = nil
 
     private var onDark: Bool { !selection.isDefault || videoURL != nil }
 
@@ -58,7 +60,8 @@ struct HeroStage: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
-            .padding(.bottom, 28)
+            // 胎压条抬到渐隐之上，避免被底部 mask 洗白
+            .padding(.bottom, 52)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
@@ -68,13 +71,13 @@ struct HeroStage: View {
             LinearGradient(
                 colors: [
                     Color.clear,
-                    (onDark ? Theme.groupedBackground.opacity(0.35) : Theme.groupedBackground.opacity(0.75)),
+                    (onDark ? Theme.groupedBackground.opacity(0.28) : Theme.groupedBackground.opacity(0.55)),
                     Theme.groupedBackground
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 88)
+            .frame(height: 56)
             .allowsHitTesting(false)
         }
     }
@@ -218,8 +221,8 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图顶距：躲开顶栏 + 电量区（对齐 Flutter headerSlack≈100 / 小程序 header 下方）
-    private var carTopPad: CGFloat { topInset + 108 }
+    /// 车图顶距：躲开顶栏 + 电量区；再下移一点，避免「车太高」
+    private var carTopPad: CGFloat { topInset + 128 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -255,6 +258,7 @@ struct HeroStage: View {
                                         placeholder
                                     }
                                 }
+                                .id(vehicle.vinNo + (url.absoluteString))
                             } else {
                                 placeholder
                             }
@@ -397,42 +401,49 @@ struct HeroStage: View {
     }
 
     private var statusRow: some View {
-        HStack(spacing: 8) {
-            statusChip(
-                icon: vehicle.isOnline ? "wifi" : "wifi.slash",
-                text: vehicle.isOnline ? "在线" : "离线",
-                tint: vehicle.isOnline ? Theme.green : secondaryText
-            )
-            statusChip(
-                icon: "cellularbars",
-                text: "信号 \(vehicle.signalLevel)",
-                tint: secondaryText
-            )
-            statusChip(
-                icon: vehicle.isCharging ? "bolt.fill" : (vehicle.isLocked ? "lock.fill" : "lock.open.fill"),
-                text: vehicle.isCharging ? "充电中" : (vehicle.isLocked ? "已上锁" : "未解锁"),
-                tint: vehicle.isCharging
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(vehicle.isOnline ? Theme.green : secondaryText.opacity(0.55))
+                    .frame(width: 6, height: 6)
+                Text(vehicle.isOnline ? "在线" : "离线")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(vehicle.isOnline ? Theme.green : secondaryText)
+            }
+
+            signalBars
+
+            HStack(spacing: 4) {
+                Image(systemName: vehicle.isCharging
+                      ? "bolt.fill"
+                      : (vehicle.isLocked ? "lock.fill" : "lock.open.fill"))
+                    .font(.system(size: 11, weight: .semibold))
+                Text(vehicle.isCharging ? "充电中" : (vehicle.isLocked ? "已关锁" : "未关锁"))
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(
+                vehicle.isCharging
                     ? Theme.green
-                    : (vehicle.isLocked ? primary.opacity(0.9) : Color(hex: 0xFF9F0A))
+                    : (vehicle.isLocked ? primary.opacity(0.92) : Color(hex: 0xFF9F0A))
             )
+
             Spacer(minLength: 0)
         }
     }
 
-    private func statusChip(icon: String, text: String, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-            Text(text)
-                .font(.system(size: 11, weight: .medium))
+    /// 四格信号（对齐小程序 / Flutter），用 gsmRxLevel 0–5
+    private var signalBars: some View {
+        let level = min(5, max(0, vehicle.signalLevel))
+        let active = onDark ? Color.white : Theme.brand
+        let inactive = onDark ? Color.white.opacity(0.28) : Theme.tertiary.opacity(0.45)
+        return HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<4, id: \.self) { index in
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(index < level ? active : inactive)
+                    .frame(width: 3.5, height: CGFloat(5 + index * 3))
+            }
         }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background {
-            Capsule(style: .continuous)
-                .fill(primary.opacity(onDark ? 0.12 : 0.06))
-        }
+        .accessibilityLabel(vehicle.signalText ?? "信号 \(level)")
     }
 
     private var soc: Int { min(max(vehicle.soc, 0), 100) }
@@ -449,31 +460,44 @@ struct HeroStage: View {
 
     @ViewBuilder
     private var tireStrip: some View {
-        let front = frontBar
-        let rear = rearBar
+        let front = validBar(frontBar)
+        let rear = validBar(rearBar)
 
+        // 无有效读数时完全不占位，也不画白底条；整块可点进胎压详情
         if front != nil || rear != nil {
-            HStack(spacing: 0) {
-                if let front {
-                    tireCell(title: "前轮", bar: front)
-                }
+            Button {
+                onOpenTire?()
+            } label: {
+                HStack(spacing: 0) {
+                    if let front {
+                        tireCell(title: "前轮", bar: front)
+                    }
 
-                if front != nil && rear != nil {
-                    Rectangle()
-                        .fill(primary.opacity(0.14))
-                        .frame(width: 0.5, height: 30)
-                }
+                    if front != nil && rear != nil {
+                        Rectangle()
+                            .fill(primary.opacity(0.18))
+                            .frame(width: 0.5, height: 26)
+                    }
 
-                if let rear {
-                    tireCell(title: "后轮", bar: rear)
+                    if let rear {
+                        tireCell(title: "后轮", bar: rear)
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(secondaryText.opacity(0.7))
+                        .padding(.trailing, 4)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(primary.opacity(onDark ? 0.14 : 0.08))
+                }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
+            .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
+            .disabled(onOpenTire == nil)
         }
     }
 
@@ -483,6 +507,12 @@ struct HeroStage: View {
 
     private var rearBar: Double? {
         tireRearBar ?? vehicle.tireRearKpa.map { $0 / 100 }
+    }
+
+    /// 0 / 异常值不当成有效胎压
+    private func validBar(_ value: Double?) -> Double? {
+        guard let value, value > 0.3, value < 6 else { return nil }
+        return value
     }
 
     private func tireCell(title: String, bar: Double) -> some View {
@@ -504,13 +534,14 @@ struct HeroStage: View {
 
             Spacer(minLength: 4)
 
+            // 进度条：透明底轨，不要白底块
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(primary.opacity(0.14))
-                    .frame(width: 48, height: 4)
+                    .fill(primary.opacity(0.18))
+                    .frame(width: 48, height: 3.5)
                 Capsule()
                     .fill(tireTint(bar))
-                    .frame(width: max(4, 48 * tireRatio(bar)), height: 4)
+                    .frame(width: max(4, 48 * tireRatio(bar)), height: 3.5)
             }
         }
         .frame(maxWidth: .infinity)

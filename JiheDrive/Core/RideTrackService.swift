@@ -88,15 +88,18 @@ enum RideTrackService {
         let pairs = items.enumerated().compactMap { index, item -> (String, RideTrack)? in
             let samples = trajectory(item["trajectory"])
             let points = samples.map { $0.coordinate }
-            guard points.count > 1 else { return nil }
+            let mileage = Vehicle.doubleValue(item["rideMileage"] ?? item["mileage"] ?? item["distance"]) ?? 0
+            let minutes = Int(Vehicle.doubleValue(item["ridingTimeUnitMinute"] ?? item["ridingTimeDayUnitMinute"]) ?? 0)
+            // 列表可无轨迹（只显示里程/时长）；回放页再筛 points.count > 1
+            guard points.count > 1 || mileage > 0 || minutes > 0 else { return nil }
 
             let start = text(item["startTime"] ?? item["beginTime"] ?? item["rideBeginTime"])
             let end = text(item["endTime"] ?? item["finishTime"] ?? item["rideEndTime"])
             let track = RideTrack(
                 id: text(item["rideId"] ?? item["id"]) ?? "ride-\(index)",
                 startTime: display(start),
-                mileage: Vehicle.doubleValue(item["rideMileage"] ?? item["mileage"] ?? item["distance"]) ?? 0,
-                durationMinutes: max(Int(Vehicle.doubleValue(item["ridingTimeUnitMinute"]) ?? 0), 1),
+                mileage: mileage,
+                durationMinutes: max(minutes, points.count > 1 ? 1 : 0),
                 points: points,
                 endTime: display(end),
                 maxSpeed: Vehicle.doubleValue(item["maxSpeed"]),
@@ -118,6 +121,15 @@ enum RideTrackService {
         var maxSpeed: Double
     }
 
+    /// 车辆页双卡：最近骑行 + 今日（对齐 Flutter homeRideInfo + rideDayInfo）
+    struct RideExtra {
+        var lastKm: Double?
+        var lastMin: Int?
+        var todayKm: Double?
+        var todayMin: Int?
+        var todayMaxSpeed: Double?
+    }
+
     static func daySummary(vin: String, date: Date = Date()) async -> DaySummary? {
         let query = [
             "vinNo": vin,
@@ -137,6 +149,53 @@ enum RideTrackService {
             minutes: Int(Vehicle.doubleValue(data["ridingTimeDayUnitMinute"]) ?? 0),
             maxSpeed: Vehicle.doubleValue(data["maxSpeed"]) ?? 0
         )
+    }
+
+    /// 面板骑行卡权威数据源：homeRideInfo（最近）+ rideDayInfo（今日时长/极速）
+    static func rideExtra(vin: String) async -> RideExtra {
+        var extra = RideExtra()
+
+        if let response = try? await ZeehoClient.shared.get(
+            "/v1.0/app/cfmotoserverapp/homeRideInfo",
+            query: ["vinNo": vin]
+        ) {
+            let code = ZeehoClient.codeString(response["code"])
+            if code.isEmpty || code == "10000",
+               let data = response["data"] as? [String: Any] {
+                let mileages = (data["mileages"] as? [Any])?
+                    .compactMap { Vehicle.doubleValue($0) }
+                    .filter { $0 > 0 } ?? []
+                let times = (data["ridingTimes"] as? [Any])?
+                    .compactMap { Vehicle.doubleValue($0).map { Int($0) } }
+                    .filter { $0 > 0 } ?? []
+
+                extra.lastKm = positive(Vehicle.doubleValue(data["lastRideMileage"]))
+                    ?? mileages.last
+                extra.lastMin = positiveInt(
+                    Vehicle.doubleValue(data["lastRidingTimeUnitMinute"])
+                        ?? Vehicle.doubleValue(data["lastRidingTime"])
+                ) ?? times.last
+                extra.todayKm = positive(Vehicle.doubleValue(data["rideMileageDay"]))
+            }
+        }
+
+        if let day = await daySummary(vin: vin) {
+            if extra.todayKm == nil, day.mileage > 0 { extra.todayKm = day.mileage }
+            if day.minutes > 0 { extra.todayMin = day.minutes }
+            if day.maxSpeed > 0 { extra.todayMaxSpeed = day.maxSpeed }
+        }
+
+        return extra
+    }
+
+    private static func positive(_ value: Double?) -> Double? {
+        guard let value, value > 0 else { return nil }
+        return value
+    }
+
+    private static func positiveInt(_ value: Double?) -> Int? {
+        guard let value, value > 0 else { return nil }
+        return Int(value)
     }
 
     // MARK: - 解析工具

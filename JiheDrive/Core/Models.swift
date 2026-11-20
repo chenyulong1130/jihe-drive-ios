@@ -7,9 +7,13 @@ struct Vehicle: Identifiable, Hashable {
     let rangeKm: Int
     let totalMileKm: Double
     let isOnline: Bool
+    /// 接口是否明确给了在线状态（无则 merge 时不覆盖列表）
+    let onlineKnown: Bool
     let isLocked: Bool
     let isCharging: Bool
+    /// 信号格 0–5（gsmRxLevel），不是 dBm
     let signalLevel: Int
+    let signalText: String?
     let latitude: Double?
     let longitude: Double?
     let locationTime: String?
@@ -26,6 +30,8 @@ struct Vehicle: Identifiable, Hashable {
     let cycleCount: Int?
     /// 官方 3D 模型地址（部分车型才有）
     let model3DURL: URL?
+    /// 仪表壁纸轮廓（subjectWallpaperConfig）
+    let wallpaperOutlines: WallpaperOutlines?
 
     var id: String { vinNo }
 
@@ -53,10 +59,13 @@ struct Vehicle: Identifiable, Hashable {
             soc: detail.soc > 0 ? detail.soc : soc,
             rangeKm: detail.rangeKm > 0 ? detail.rangeKm : rangeKm,
             totalMileKm: detail.totalMileKm > 0 ? detail.totalMileKm : totalMileKm,
-            isOnline: isOnline,
-            isLocked: isLocked,
+            // 在线：详情明确给出才覆盖；锁态：详情 headLockState / lockStatus 为准
+            isOnline: detail.onlineKnown ? detail.isOnline : isOnline,
+            onlineKnown: detail.onlineKnown || onlineKnown,
+            isLocked: detail.isLocked,
             isCharging: detail.isCharging || isCharging,
             signalLevel: detail.signalLevel > 0 ? detail.signalLevel : signalLevel,
+            signalText: detail.signalText ?? signalText,
             latitude: detail.latitude ?? latitude,
             longitude: detail.longitude ?? longitude,
             locationTime: detail.locationTime ?? locationTime,
@@ -68,7 +77,59 @@ struct Vehicle: Identifiable, Hashable {
             voltage: detail.voltage ?? voltage,
             temperature: detail.temperature ?? temperature,
             cycleCount: detail.cycleCount ?? cycleCount,
-            model3DURL: detail.model3DURL ?? model3DURL
+            model3DURL: detail.model3DURL ?? model3DURL,
+            wallpaperOutlines: detail.wallpaperOutlines ?? wallpaperOutlines
+        )
+    }
+}
+
+/// 仪表壁纸轮廓 PNG（type 2=主页, type 1=速度卡），对齐 Flutter VehicleWallpaperOutlines
+struct WallpaperOutlines: Hashable {
+    var homeOutlineURL: URL?
+    var speedOutlineURL: URL?
+    var speedSubjectURL: URL?
+
+    static let fallback = WallpaperOutlines(
+        homeOutlineURL: URL(string: "https://oss-cfmoto.zeehoev.com/uploads/zeeho-client-pc/media/1783574792892.png"),
+        speedOutlineURL: URL(string: "https://oss-cfmoto.zeehoev.com/uploads/zeeho-client-pc/media/1783574803780.png"),
+        speedSubjectURL: URL(string: "https://oss-cfmoto.zeehoev.com/uploads/zeeho-client-pc/media/1783574799347.png")
+    )
+
+    static func parse(_ raw: Any?) -> WallpaperOutlines? {
+        let array: [[String: Any]]
+        if let list = raw as? [[String: Any]] {
+            array = list
+        } else if let text = raw as? String,
+                  let data = text.data(using: .utf8),
+                  let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            array = list
+        } else {
+            return nil
+        }
+
+        var home: URL?
+        var speed: URL?
+        var subject: URL?
+        for item in array {
+            let type = "\(item["type"] ?? "")"
+            let url = (item["url"] as? String).flatMap(URL.init(string:))
+            if type == "2", home == nil { home = url }
+            if type == "1" {
+                if speed == nil { speed = url }
+                if subject == nil {
+                    subject = (item["subjectUrl"] as? String).flatMap(URL.init(string:))
+                }
+            }
+        }
+        guard home != nil || speed != nil else { return nil }
+        return WallpaperOutlines(homeOutlineURL: home, speedOutlineURL: speed, speedSubjectURL: subject)
+    }
+
+    func withFallback() -> WallpaperOutlines {
+        WallpaperOutlines(
+            homeOutlineURL: homeOutlineURL ?? Self.fallback.homeOutlineURL,
+            speedOutlineURL: speedOutlineURL ?? Self.fallback.speedOutlineURL,
+            speedSubjectURL: speedSubjectURL ?? Self.fallback.speedSubjectURL
         )
     }
 }
@@ -91,10 +152,17 @@ extension Vehicle {
         self.soc = Self.intValue(json["bmssoc"] ?? iot["BMSSOC"] ?? iot["bmssoc"])
         self.rangeKm = Self.intValue(json["hmiRidableMile"] ?? iot["HMIRidableMile"] ?? iot["hmiRidableMile"])
         self.totalMileKm = Self.doubleValue(json["totalRideMile"] ?? iot["TotalRideMile"]) ?? 0
-        self.isOnline = Self.onlineHint(json) ?? false
+        let online = Self.onlineHint(json)
+        self.isOnline = online ?? false
+        self.onlineKnown = online != nil
         self.isLocked = Self.lockState(json, iot)
         self.isCharging = Self.chargingState(json, iot)
-        self.signalLevel = Self.intValue(json["gsmRxLev"] ?? iot["GSMRxLev"])
+        // 格数用 gsmRxLevel；gsmRxLev 是 dBm（常为负），不能当格数
+        self.signalLevel = Self.signalBars(
+            json["gsmRxLevel"] ?? iot["GSMRxLevel"] ?? json["gsmRxLevValue"]
+        )
+        self.signalText = Self.firstString(json, keys: ["gsmRxLevValue", "signalText"])
+            ?? Self.firstString(iot, keys: ["GSMRxLevValue", "gsmRxLevValue"])
         let latitude = location.flatMap { Self.doubleValue($0["latitude"]) }
         let longitude = location.flatMap { Self.doubleValue($0["longitude"]) }
         self.latitude = (latitude ?? 0) == 0 ? nil : latitude
@@ -140,6 +208,9 @@ extension Vehicle {
             "sceneUrl", "modelPath", "modelAddress", "carModelUrl", "gltfUrl"
         ]).flatMap(URL.init(string:))
         self.model3DURL = explicitModel ?? Self.findModelURL(in: json)
+        self.wallpaperOutlines = WallpaperOutlines.parse(
+            json["subjectWallpaperConfig"] ?? json["wallpaperConfig"]
+        )
     }
 
     /// 在整份响应里递归找模型文件地址（不同车型字段名不统一）
@@ -282,26 +353,42 @@ extension Vehicle {
     }
 
     private static func onlineHint(_ json: [String: Any]) -> Bool? {
-        if let status = (json["onlineStatus"] as? String)?.uppercased() {
-            if status == "ONLINE" { return true }
-            if status == "OFFLINE" { return false }
+        if let raw = json["onlineStatus"] {
+            let status = "\(raw)".trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if status == "ONLINE" || status == "1" || status == "TRUE" { return true }
+            if status == "OFFLINE" || status == "0" || status == "FALSE" { return false }
         }
         if let ride = json["rideState"] as? String {
-            if ride.contains("在线") { return true }
-            if !ride.isEmpty { return false }
+            let text = ride.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.contains("在线") { return true }
+            if text.contains("离线") { return false }
+            // 非空但不含在线/离线时不当作定论（避免误判）
         }
         return nil
     }
 
+    /// 信号格 0–5；拒绝把负 dBm 当格数
+    private static func signalBars(_ raw: Any?) -> Int {
+        guard let value = doubleValue(raw) else { return 0 }
+        if value < 0 { return 0 }
+        return min(5, max(0, Int(value)))
+    }
+
+    /// 对齐 Flutter / 小程序：lockStatus 0=锁 1=开 → headLockState → 缺省已锁
     private static func lockState(_ json: [String: Any], _ iot: [String: Any]) -> Bool {
         if let raw = json["lockStatus"] ?? iot["LockStatus"] ?? iot["lockStatus"] {
-            let text = "\(raw)".lowercased()
+            let text = "\(raw)".trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if text == "0" { return true }
             if text == "1" { return false }
-            return text.contains("lock") && !text.contains("unlock")
         }
         if let head = json["headLockState"] ?? iot["HeadLockState"] {
-            return "\(head)" == "1"
+            let text = "\(head)".trimmingCharacters(in: .whitespacesAndNewlines)
+            if text == "1" { return true }
+            if text == "0" { return false }
+        }
+        if let raw = json["lockStatus"] ?? iot["LockStatus"] ?? iot["lockStatus"] {
+            let text = "\(raw)".lowercased()
+            return text.contains("lock") && !text.contains("unlock")
         }
         return true
     }

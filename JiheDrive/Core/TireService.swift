@@ -20,7 +20,11 @@ enum TireService {
     static func fetch(vin: String) async -> TireReading? {
         guard let response = try? await ZeehoClient.shared.get(
             "/v1.0/app/cfmotoserverapp/app/vehicle/tire/monitoring",
-            query: ["vinNo": vin, "timePeriodType": "1"]
+            query: [
+                "vinNo": vin,
+                "timePeriodType": "1",
+                "sensorType": "EXTERNAL"
+            ]
         ) else { return nil }
 
         let code = ZeehoClient.codeString(response["code"])
@@ -34,19 +38,37 @@ enum TireService {
         reading.updatedAt = shortTime(data["updateTime"] as? String)
 
         if let list = data["realTimeData"] as? [[String: Any]] {
+            var unordered: [(bar: Double, temp: Double?)] = []
+
             for item in list {
                 let position = Vehicle.intValue(item["sensorPosition"])
-                let pressure = Vehicle.doubleValue(item["tirePressure"])
+                guard let pressure = positiveBar(item["tirePressure"]) else { continue }
                 let temperature = Vehicle.doubleValue(item["tireTemp"])
+
                 if position == 1 {
                     reading.frontBar = pressure
                     reading.frontTemp = temperature
                 } else if position == 2 {
                     reading.rearBar = pressure
                     reading.rearTemp = temperature
+                } else {
+                    // 小程序兜底：非 1/2 位号时按出现顺序填前/后轮
+                    unordered.append((pressure, temperature))
                 }
+
                 let warning = Vehicle.intValue(item["warningType"])
                 if warning > 0 { reading.warning = warning }
+            }
+
+            if reading.frontBar == nil, let first = unordered.first {
+                reading.frontBar = first.bar
+                reading.frontTemp = first.temp
+            }
+            if reading.rearBar == nil, unordered.count > 1 {
+                reading.rearBar = unordered[1].bar
+                reading.rearTemp = unordered[1].temp
+            } else if reading.rearBar == nil, unordered.count == 1, reading.frontBar != nil {
+                // 只剩一个未归位传感器且前轮已有时，不当后轮重复
             }
         }
 
@@ -59,13 +81,19 @@ enum TireService {
                 guard let stat = item["tirePressureStat"] as? [String: Any],
                       let points = stat["list"] as? [[String: Any]],
                       let last = points.last,
-                      let value = Vehicle.doubleValue(last["value"]) else { continue }
+                      let value = positiveBar(last["value"]) else { continue }
                 if position == 1 { reading.frontBar = value }
                 if position == 2 { reading.rearBar = value }
             }
         }
 
         return reading.hasData ? reading : nil
+    }
+
+    /// 0 / 负值不当作有效胎压（对齐小程序 firstNum）
+    private static func positiveBar(_ raw: Any?) -> Double? {
+        guard let value = Vehicle.doubleValue(raw), value > 0.3, value < 6 else { return nil }
+        return value
     }
 
     private static func shortTime(_ raw: String?) -> String? {

@@ -24,11 +24,12 @@ struct RideReplayView: View {
 
     private var speeds: [Double] { track.speedSamples }
 
-    /// 回放时长：对齐小程序 playDur——按行程分钟压到 8~20 秒，短途不至于秒切完
+    /// 回放时长：对齐小程序 8–20s，略放慢到 10–22s
     private var playbackSeconds: Double {
-        let byTrip = min(20, max(8, Double(max(track.durationMinutes, 1))))
-        let byPoints = min(30, max(8, Double(max(track.points.count, 1)) * 0.18))
-        return max(byTrip, byPoints)
+        let minutes = max(track.durationMinutes, 1)
+        let byTrip = min(20, max(10, Double(minutes == 1 ? 12 : minutes) * 1.1))
+        let byPoints = min(22, max(10, Double(max(track.points.count, 1)) * 0.16))
+        return min(22, max(byTrip, byPoints))
     }
 
     private var currentSpeed: Double {
@@ -410,56 +411,186 @@ struct RideReplayView: View {
         .padding(.bottom, 8)
     }
 
-    // MARK: - 全屏地图
+    // MARK: - 全屏地图（放大回放：地图占满 + 底部速度曲线与时间轴联动）
 
     private var fullMap: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .bottom) {
             ReplayMap(points: coordinates, speeds: speeds, progress: progress, follow: follow)
                 .ignoresSafeArea()
 
             LinearGradient(
-                colors: [Color.black.opacity(0.30), Color.clear],
+                colors: [Color.black.opacity(0.38), Color.clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 170)
+            .frame(height: 140)
+            .frame(maxHeight: .infinity, alignment: .top)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
 
-            HStack(spacing: 10) {
-                Button {
-                    showFullMap = false
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(Circle().fill(.ultraThinMaterial))
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Button {
+                        showFullMap = false
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "%.1f km · %d 分钟", track.mileage, track.durationMinutes))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text(vehicle.name)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+
+                    Spacer(minLength: 0)
+
+                    // 当前速度大字
+                    VStack(alignment: .trailing, spacing: 1) {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(speeds.count > 1 ? String(format: "%.0f", currentSpeed) : "--")
+                                .font(.system(size: 28, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                            Text("km/h")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        Text(playing ? "回放中" : "已暂停")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+
+                    Button {
+                        follow.toggle()
+                    } label: {
+                        Image(systemName: follow ? "location.fill" : "location")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(.ultraThinMaterial))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
                 }
-                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                .padding(.horizontal, Theme.page)
+                .padding(.top, 8)
 
                 Spacer(minLength: 0)
 
-                Button {
-                    follow.toggle()
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: follow ? "location.fill" : "location")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(follow ? "跟随" : "自由")
-                            .font(.system(size: 11.5, weight: .semibold))
+                fullMapBottomPanel
+            }
+        }
+    }
+
+    /// 底部：速度折线 + 时间轴，共用 progress，拖曲线或滑条都会联动地图
+    private var fullMapBottomPanel: some View {
+        VStack(spacing: 10) {
+            if speeds.count > 1 {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("速度")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                        Spacer(minLength: 0)
+                        Text(String(format: "峰值 %.0f km/h", maxSpeedValue))
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
+                            .monospacedDigit()
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 11)
-                    .frame(height: 34)
-                    .background(Capsule().fill(.ultraThinMaterial))
+
+                    SpeedCurve(
+                        speeds: speeds,
+                        progress: progress,
+                        tint: Theme.brand,
+                        height: 88
+                    ) { value in
+                        playing = false
+                        progress = min(max(value, 0), 1)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    if progress >= 1 { progress = 0 }
+                    playing.toggle()
+                } label: {
+                    Image(systemName: playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle().fill(
+                                LinearGradient(
+                                    colors: [Theme.brand, Color(hex: 0x4B5BFF)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        )
+                }
+                .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
+
+                VStack(spacing: 4) {
+                    HStack(spacing: 0) {
+                        Text(timeText(progress))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                            .monospacedDigit()
+                        Text(" / \(timeText(1))")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.tertiary)
+                            .monospacedDigit()
+                        Spacer(minLength: 0)
+                        if speeds.count > 1 {
+                            Text(String(format: "%.0f km/h", currentSpeed))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.brand)
+                                .monospacedDigit()
+                        }
+                    }
+
+                    Slider(value: $progress, in: 0...1) { editing in
+                        if editing { playing = false }
+                    }
+                    .tint(Theme.brand)
+                }
+
+                Button {
+                    rate = rate >= 4 ? 1 : rate * 2
+                } label: {
+                    Text("\(Int(rate))x")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                        .frame(width: 40, height: 32)
+                        .background(Capsule().fill(Theme.surfaceAlt))
                 }
                 .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
             }
-            .padding(.horizontal, Theme.page)
-            .padding(.top, 6)
         }
-        .overlay(alignment: .bottom) { playbackBar }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 22,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 22,
+                style: .continuous
+            )
+            .fill(.regularMaterial)
+            .shadow(color: Color.black.opacity(0.18), radius: 20, y: -6)
+            .ignoresSafeArea(edges: .bottom)
+        )
     }
 
     // MARK: - 工具
@@ -630,6 +761,7 @@ private struct SpeedCurve: View {
     let speeds: [Double]
     let progress: Double
     var tint: Color = Theme.brand
+    var height: CGFloat = 112
     let onScrub: (Double) -> Void
 
     private var maxValue: Double { max(1, speeds.max() ?? 1) }
@@ -671,7 +803,7 @@ private struct SpeedCurve: View {
                     }
             )
         }
-        .frame(height: 112)
+        .frame(height: height)
     }
 
     private func grid(size: CGSize) -> some View {
@@ -737,16 +869,27 @@ private struct SpeedCurve: View {
         let x = size.width * CGFloat(clamped)
         let y = value(at: clamped, in: points)
         return ZStack {
+            // 已播放区间淡色遮罩，和时间轴同 progress
+            Rectangle()
+                .fill(tint.opacity(0.08))
+                .frame(width: max(0, x), height: size.height)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             Path { path in
                 path.move(to: CGPoint(x: x, y: 0))
                 path.addLine(to: CGPoint(x: x, y: size.height))
             }
-            .stroke(tint.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .stroke(tint.opacity(0.55), style: StrokeStyle(lineWidth: 1.2))
 
             Circle()
-                .fill(tint)
-                .frame(width: 9, height: 9)
-                .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+                .fill(Color.white)
+                .frame(width: 12, height: 12)
+                .shadow(color: tint.opacity(0.45), radius: 4, y: 1)
+                .overlay(
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 7, height: 7)
+                )
                 .position(x: x, y: y)
         }
     }

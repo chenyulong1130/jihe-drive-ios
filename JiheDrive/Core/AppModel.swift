@@ -244,11 +244,77 @@ final class AppModel: ObservableObject {
     // MARK: - Commands
 
     func toggleLock(_ vehicle: Vehicle) async throws {
+        let unlocking = vehicle.isLocked
         _ = try await client.post(
             "/v1.0/app/cfmotoserverapp/vehicleSet/network/unlock",
-            body: ["vinNo": vehicle.vinNo, "lockFlag": vehicle.isLocked ? 1 : 0]
+            body: ["vinNo": vehicle.vinNo, "lockFlag": unlocking ? 1 : 0]
         )
+        // 乐观翻转：列表/详情刷新前先改本地锁态，避免按钮卡住
+        applyOptimisticLock(vin: vehicle.vinNo, locked: !unlocking)
         await loadVehicles()
+        if let vin = selectedVin {
+            await loadDetail(vin: vin)
+        }
+    }
+
+    private func applyOptimisticLock(vin: String, locked: Bool) {
+        if let index = vehicles.firstIndex(where: { $0.vinNo == vin }) {
+            let old = vehicles[index]
+            vehicles[index] = Vehicle(
+                vinNo: old.vinNo,
+                name: old.name,
+                soc: old.soc,
+                rangeKm: old.rangeKm,
+                totalMileKm: old.totalMileKm,
+                isOnline: old.isOnline,
+                onlineKnown: old.onlineKnown,
+                isLocked: locked,
+                isCharging: old.isCharging,
+                signalLevel: old.signalLevel,
+                signalText: old.signalText,
+                latitude: old.latitude,
+                longitude: old.longitude,
+                locationTime: old.locationTime,
+                address: old.address,
+                imageURL: old.imageURL,
+                monthMileage: old.monthMileage,
+                tireFrontKpa: old.tireFrontKpa,
+                tireRearKpa: old.tireRearKpa,
+                voltage: old.voltage,
+                temperature: old.temperature,
+                cycleCount: old.cycleCount,
+                model3DURL: old.model3DURL,
+                wallpaperOutlines: old.wallpaperOutlines
+            )
+        }
+        if let detail = detailVehicle, detail.vinNo == vin {
+            detailVehicle = Vehicle(
+                vinNo: detail.vinNo,
+                name: detail.name,
+                soc: detail.soc,
+                rangeKm: detail.rangeKm,
+                totalMileKm: detail.totalMileKm,
+                isOnline: detail.isOnline,
+                onlineKnown: detail.onlineKnown,
+                isLocked: locked,
+                isCharging: detail.isCharging,
+                signalLevel: detail.signalLevel,
+                signalText: detail.signalText,
+                latitude: detail.latitude,
+                longitude: detail.longitude,
+                locationTime: detail.locationTime,
+                address: detail.address,
+                imageURL: detail.imageURL,
+                monthMileage: detail.monthMileage,
+                tireFrontKpa: detail.tireFrontKpa,
+                tireRearKpa: detail.tireRearKpa,
+                voltage: detail.voltage,
+                temperature: detail.temperature,
+                cycleCount: detail.cycleCount,
+                model3DURL: detail.model3DURL,
+                wallpaperOutlines: detail.wallpaperOutlines
+            )
+        }
     }
 
     func findVehicle(_ vehicle: Vehicle) async throws {

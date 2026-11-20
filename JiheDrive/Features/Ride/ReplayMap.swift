@@ -4,7 +4,6 @@ import UIKit
 
 /// 轨迹回放地图：按速度分段着色（低蓝 → 高红）+ 发光底衬，
 /// 标记在两个采样点之间插值，回放时是平滑移动而不是逐点跳。
-/// 分段只跟速度档位变化次数有关，通常十几条 overlay，比每帧重建整条线轻得多。
 struct ReplayMap: UIViewRepresentable {
     let points: [CLLocationCoordinate2D]
     var speeds: [Double] = []
@@ -57,7 +56,6 @@ struct ReplayMap: UIViewRepresentable {
 
             maxSpeed = max(self.speeds.max() ?? 0, 1)
 
-            // 按速度档位切段，同档合并
             var index = 0
             while index < points.count - 1 {
                 let tone = toneIndex(speed(at: index))
@@ -67,8 +65,8 @@ struct ReplayMap: UIViewRepresentable {
                 }
                 let slice = Array(points[index...end])
                 let color = Self.palette[tone]
-                addLine(map, slice, color: color.withAlphaComponent(0.22), width: 13)
-                addLine(map, slice, color: color, width: 4.5)
+                addLine(map, slice, color: color.withAlphaComponent(0.22), width: 14)
+                addLine(map, slice, color: color, width: 5)
                 index = end
             }
 
@@ -129,9 +127,10 @@ struct ReplayMap: UIViewRepresentable {
                 let point = MKMapPoint(coordinate)
                 rect = rect.union(MKMapRect(x: point.x, y: point.y, width: 0, height: 0))
             }
+            // 底部留给速度面板，顶部留给工具条；整体再近一点
             map.setVisibleMapRect(
                 rect,
-                edgePadding: UIEdgeInsets(top: 100, left: 48, bottom: 150, right: 48),
+                edgePadding: UIEdgeInsets(top: 88, left: 36, bottom: 260, right: 36),
                 animated: false
             )
         }
@@ -157,17 +156,13 @@ struct ReplayMap: UIViewRepresentable {
             }
 
             let now = CACurrentMediaTime()
+            // 更近的跟随视角（约 250–300m 视口）
+            let span = MKCoordinateSpan(latitudeDelta: 0.0028, longitudeDelta: 0.0028)
             if !didZoomFollow {
                 didZoomFollow = true
                 lastCenterAt = now
-                map.setRegion(
-                    MKCoordinateRegion(
-                        center: current,
-                        span: MKCoordinateSpan(latitudeDelta: 0.006, longitudeDelta: 0.006)
-                    ),
-                    animated: true
-                )
-            } else if now - lastCenterAt > 0.25 {
+                map.setRegion(MKCoordinateRegion(center: current, span: span), animated: true)
+            } else if now - lastCenterAt > 0.2 {
                 lastCenterAt = now
                 map.setCenter(current, animated: false)
             }
@@ -179,7 +174,7 @@ struct ReplayMap: UIViewRepresentable {
             }
             let renderer = MKPolylineRenderer(polyline: line)
             renderer.strokeColor = lineColors[ObjectIdentifier(line)] ?? UIColor.systemBlue
-            renderer.lineWidth = lineWidths[ObjectIdentifier(line)] ?? 4.5
+            renderer.lineWidth = lineWidths[ObjectIdentifier(line)] ?? 5
             renderer.lineCap = .round
             renderer.lineJoin = .round
             return renderer
@@ -187,38 +182,106 @@ struct ReplayMap: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             guard let point = annotation as? MKPointAnnotation else { return nil }
-            let identifier = "replay-\(point.title ?? "")"
+            let kind = point.title ?? ""
+            let identifier = "replay-\(kind)"
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
                 ?? MKAnnotationView(annotation: point, reuseIdentifier: identifier)
             view.annotation = point
-            view.image = image(for: point.title ?? "")
-            view.centerOffset = CGPoint(x: 0, y: -9)
-            view.zPriority = .max
+            view.canShowCallout = false
+            view.image = markerImage(for: kind)
+            view.centerOffset = CGPoint(x: 0, y: kind == "车" ? 0 : -14)
+            view.zPriority = kind == "车" ? .max : .defaultHigh
             return view
         }
 
-        private func image(for title: String) -> UIImage {
-            let size = CGSize(width: 26, height: 26)
-            return UIGraphicsImageRenderer(size: size).image { context in
-                let rect = CGRect(origin: .zero, size: size).insetBy(dx: 3, dy: 3)
-                let color: UIColor
-                switch title {
-                case "起": color = .systemGreen
-                case "终": color = .systemOrange
-                default: color = UIColor(red: 0.10, green: 0.45, blue: 0.98, alpha: 1)
+        func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
+            for (index, view) in views.enumerated() {
+                guard (view.annotation as? MKPointAnnotation)?.title != "车" else { continue }
+                let end = view.frame
+                view.frame.origin.y -= 36
+                view.alpha = 0
+                UIView.animate(
+                    withDuration: 0.45,
+                    delay: 0.06 * Double(index),
+                    usingSpringWithDamping: 0.72,
+                    initialSpringVelocity: 0.4,
+                    options: [.curveEaseOut]
+                ) {
+                    view.frame = end
+                    view.alpha = 1
                 }
+            }
+        }
 
-                context.cgContext.setShadow(
-                    offset: .zero,
-                    blur: 7,
-                    color: color.withAlphaComponent(0.65).cgColor
+        private func markerImage(for title: String) -> UIImage {
+            switch title {
+            case "起": return pinImage(fill: UIColor(red: 0.20, green: 0.78, blue: 0.45, alpha: 1), label: "起")
+            case "终": return pinImage(fill: UIColor(red: 1.0, green: 0.55, blue: 0.18, alpha: 1), label: "终")
+            default: return vehicleImage()
+            }
+        }
+
+        /// 起终点：水滴针 + 白字
+        private func pinImage(fill: UIColor, label: String) -> UIImage {
+            let size = CGSize(width: 36, height: 44)
+            return UIGraphicsImageRenderer(size: size).image { ctx in
+                let cg = ctx.cgContext
+                let head = CGRect(x: 4, y: 2, width: 28, height: 28)
+
+                cg.setShadow(offset: CGSize(width: 0, height: 2), blur: 6, color: UIColor.black.withAlphaComponent(0.28).cgColor)
+
+                let path = UIBezierPath()
+                path.addArc(
+                    withCenter: CGPoint(x: head.midX, y: head.midY),
+                    radius: 13,
+                    startAngle: .pi * 0.75,
+                    endAngle: .pi * 0.25,
+                    clockwise: true
                 )
-                context.cgContext.setFillColor(UIColor.white.cgColor)
-                context.cgContext.fillEllipse(in: rect)
-                context.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                path.addLine(to: CGPoint(x: head.midX, y: size.height - 3))
+                path.close()
+                fill.setFill()
+                path.fill()
 
-                context.cgContext.setFillColor(color.cgColor)
-                context.cgContext.fillEllipse(in: rect.insetBy(dx: 4, dy: 4))
+                cg.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.white.withAlphaComponent(0.92).setFill()
+                cg.fillEllipse(in: head.insetBy(dx: 7, dy: 7))
+
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 11, weight: .bold),
+                    .foregroundColor: fill
+                ]
+                let text = label as NSString
+                let textSize = text.size(withAttributes: attrs)
+                text.draw(
+                    at: CGPoint(x: head.midX - textSize.width / 2, y: head.midY - textSize.height / 2 - 0.5),
+                    withAttributes: attrs
+                )
+            }
+        }
+
+        /// 当前车：外圈光晕 + 白环 + 品牌蓝实心
+        private func vehicleImage() -> UIImage {
+            let size = CGSize(width: 44, height: 44)
+            let brand = UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 1)
+            return UIGraphicsImageRenderer(size: size).image { ctx in
+                let cg = ctx.cgContext
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+
+                cg.setShadow(offset: .zero, blur: 10, color: brand.withAlphaComponent(0.55).cgColor)
+                brand.withAlphaComponent(0.25).setFill()
+                cg.fillEllipse(in: CGRect(x: 2, y: 2, width: 40, height: 40))
+                cg.setShadow(offset: .zero, blur: 0, color: nil)
+
+                UIColor.white.setFill()
+                cg.fillEllipse(in: CGRect(x: 10, y: 10, width: 24, height: 24))
+
+                brand.setFill()
+                cg.fillEllipse(in: CGRect(x: 14, y: 14, width: 16, height: 16))
+
+                // 中心小白点
+                UIColor.white.setFill()
+                cg.fillEllipse(in: CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5))
             }
         }
     }
