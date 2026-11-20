@@ -49,8 +49,8 @@ struct MainTabView: View {
 
                 // 三个页面并排摆放，整条 HStack 跟着索引位移，拖动时再叠加手指位移
                 HStack(alignment: .top, spacing: 0) {
-                    ForEach(Array(tabs.enumerated()), id: \.element.id) { pair in
-                        page(pair.element, width: w, pageIndex: pair.offset)
+                    ForEach(tabs.indices, id: \.self) { i in
+                        page(tabs[i], width: w, pageIndex: i)
                     }
                 }
                 .frame(width: w * CGFloat(tabs.count), height: geo.size.height, alignment: .topLeading)
@@ -70,16 +70,18 @@ struct MainTabView: View {
     @ViewBuilder
     private func page(_ item: MainTab, width: CGFloat, pageIndex i: Int) -> some View {
         // travel：该页相对视口的水平偏移，0 表示正中对齐
-        let travel = CGFloat(i - index) * width + dragOffset
-        let progress = min(1, abs(travel) / width)
+        let travel: CGFloat = CGFloat(i - index) * width + dragOffset
+        let progress: CGFloat = min(1, abs(travel) / width)
+        let fade: CGFloat = 1 - progress * 0.3
+        let zoom: CGFloat = 1 - progress * 0.04
 
         pageContent(item)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .frame(width: width)
             .clipped()
             // 越远越缩小、变淡，滑动时有纵深，不会两张图硬切
-            .opacity(1 - progress * 0.3)
-            .scaleEffect(1 - progress * 0.04)
+            .opacity(fade)
+            .scaleEffect(zoom)
             .allowsHitTesting(progress < 0.5)
     }
 
