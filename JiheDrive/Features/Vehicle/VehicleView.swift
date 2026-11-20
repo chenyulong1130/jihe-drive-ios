@@ -378,7 +378,7 @@ struct VehicleView: View {
     // MARK: - 位置 / 骑行
 
     private func duoCards(_ vehicle: Vehicle) -> some View {
-        HStack(alignment: .stretch, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             locationCard(vehicle)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             rideCard(vehicle)

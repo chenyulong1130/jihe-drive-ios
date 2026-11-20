@@ -106,8 +106,11 @@ final class SigninStore: ObservableObject {
 
         info = parsed
         if let uid = ZeehoClient.shared.userId {
-            communityDone = CommunityTask.isDoneToday(userId: uid)
-                || await CommunityTask.doneFromIntegral(userId: uid)
+            var done = CommunityTask.isDoneToday(userId: uid)
+            if !done {
+                done = await CommunityTask.doneFromIntegral(userId: uid)
+            }
+            communityDone = done
         }
 
         do {
