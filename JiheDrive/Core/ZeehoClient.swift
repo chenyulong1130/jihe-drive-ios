@@ -63,6 +63,102 @@ final class ZeehoClient {
         try await send("PUT", path, query: [:], body: body ?? [:], isLogin: false)
     }
 
+    func delete(_ path: String) async throws -> [String: Any] {
+        try await send("DELETE", path, query: [:], body: nil, isLogin: false)
+    }
+
+    /// multipart 按字段顺序交错上传（仪表壁纸 save 接口依赖顺序）
+    func postMultipartOrdered(
+        path: String,
+        parts: [MultipartPart]
+    ) async throws -> [String: Any] {
+        let (url, queryString) = Self.makeURL(path: path, query: [:])
+        // 与 Flutter 一致：multipart 签名不带 body 原文
+        let sign = ZeehoSigner.sign(query: queryString, bodyJSON: "")
+        let boundary = "----Zeeho\(Int(Date().timeIntervalSince1970 * 1000))"
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        request.setValue("zh-CN", forHTTPHeaderField: "Accept-Language")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("2", forHTTPHeaderField: "interfaceversion")
+        request.setValue(sign.sign, forHTTPHeaderField: "Cfmoto-X-Sign")
+        request.setValue(sign.appParam, forHTTPHeaderField: "Cfmoto-X-Param")
+        request.setValue("0", forHTTPHeaderField: "Cfmoto-X-Sign-Type")
+        request.setValue(sign.sign, forHTTPHeaderField: "signature")
+        request.setValue(ZeehoSigner.appId, forHTTPHeaderField: "appid")
+        request.setValue(sign.timestamp, forHTTPHeaderField: "timestamp")
+        request.setValue(sign.nonce, forHTTPHeaderField: "nonce")
+        request.setValue(ZeehoSigner.appInfoHeader(), forHTTPHeaderField: "x-app-info")
+        if let token, !token.isEmpty {
+            request.setValue("bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let userId, !userId.isEmpty {
+            request.setValue(userId, forHTTPHeaderField: "user_id")
+        }
+        request.httpBody = Self.buildMultipartBody(boundary: boundary, parts: parts)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            if error is CancellationError { throw error }
+            if let urlError = error as? URLError, urlError.code == .cancelled { throw CancellationError() }
+            throw ZeehoError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw ZeehoError.decoding("无响应")
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dict = object as? [String: Any] else {
+            throw ZeehoError.decoding("响应解析失败 (\(http.statusCode))")
+        }
+        let code = Self.codeString(dict["code"])
+        if code == "401" {
+            clearSession()
+            throw ZeehoError.unauthorized
+        }
+        if http.statusCode >= 400 {
+            throw ZeehoError.server(
+                code: code,
+                message: Self.errorText(dict) ?? "请求失败 (\(http.statusCode))"
+            )
+        }
+        return dict
+    }
+
+    enum MultipartPart {
+        case field(name: String, value: String)
+        case file(name: String, filename: String, mime: String, data: Data)
+    }
+
+    private static func buildMultipartBody(boundary: String, parts: [MultipartPart]) -> Data {
+        var body = Data()
+        let crlf = "\r\n"
+        for part in parts {
+            body.append("--\(boundary)\(crlf)".data(using: .utf8)!)
+            switch part {
+            case .field(let name, let value):
+                body.append("Content-Disposition: form-data; name=\"\(name)\"\(crlf)\(crlf)".data(using: .utf8)!)
+                body.append(value.data(using: .utf8)!)
+                body.append(crlf.data(using: .utf8)!)
+            case .file(let name, let filename, let mime, let data):
+                body.append(
+                    "Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\(crlf)".data(using: .utf8)!
+                )
+                body.append("Content-Type: \(mime)\(crlf)\(crlf)".data(using: .utf8)!)
+                body.append(data)
+                body.append(crlf.data(using: .utf8)!)
+            }
+        }
+        body.append("--\(boundary)--\(crlf)".data(using: .utf8)!)
+        return body
+    }
+
     func login(phone: String, code: String) async throws -> [String: Any] {
         let body: [String: Any] = [
             "authCode": code,
@@ -99,9 +195,8 @@ final class ZeehoClient {
         let (url, queryString) = Self.makeURL(path: path, query: query)
 
         var bodyString = ""
-        if method == "POST" || method == "PUT" {
-            let payload = body ?? [:]
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        if (method == "POST" || method == "PUT"), let body {
+            let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
             bodyString = String(data: data, encoding: .utf8) ?? "{}"
         }
 
@@ -136,7 +231,7 @@ final class ZeehoClient {
             }
         }
 
-        if method == "POST" || method == "PUT" {
+        if (method == "POST" || method == "PUT"), !bodyString.isEmpty {
             request.httpBody = Data(bodyString.utf8)
         }
 

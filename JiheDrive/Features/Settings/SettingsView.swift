@@ -5,10 +5,12 @@ struct SettingsView: View {
     @EnvironmentObject private var themeStore: ThemeStore
     @EnvironmentObject private var videoStore: VideoBackdropStore
     @EnvironmentObject private var wallpaperStore: WallpaperStore
+    @EnvironmentObject private var appearance: AppearanceStore
 
     @State private var showPicker = false
     @State private var showTheme = false
     @State private var showBattery = false
+    @State private var showDashboardWallpaper = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -21,15 +23,18 @@ struct SettingsView: View {
                 SectionHeader("车辆")
                 vehicleSection.staggerIn(2)
 
+                SectionHeader("外观")
+                appearanceSection.staggerIn(3)
+
                 SectionHeader("个性化")
-                personalSection.staggerIn(3)
+                personalSection.staggerIn(4)
 
                 SectionHeader("关于")
-                aboutCard.staggerIn(4)
+                aboutCard.staggerIn(5)
 
                 logoutButton
                     .padding(.top, 24)
-                    .staggerIn(5)
+                    .staggerIn(6)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -41,11 +46,70 @@ struct SettingsView: View {
         .sheet(isPresented: $showTheme) {
             ThemeSheet()
         }
+        .sheet(isPresented: $showDashboardWallpaper) {
+            if let vehicle = model.selectedVehicle {
+                DashboardWallpaperSheet(vehicle: vehicle)
+            }
+        }
         .sheet(isPresented: $showBattery) {
             if let vehicle = model.selectedVehicle {
                 BatterySheet(vehicle: vehicle)
             }
         }
+    }
+
+    // MARK: - 外观
+
+    private var appearanceSection: some View {
+        AppleCard(padding: EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14)) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("显示模式")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach(AppAppearance.allCases) { mode in
+                        appearanceChip(mode)
+                    }
+                }
+            }
+        }
+    }
+
+    private func appearanceChip(_ mode: AppAppearance) -> some View {
+        let selected = appearance.mode == mode
+        return Button {
+            withAnimation(Motion.quick) { appearance.mode = mode }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: mode.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(mode.title)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(selected ? Color.white : Theme.label)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Theme.surfaceAlt)
+                    if selected {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Theme.brand, Color(hex: 0x4B5BFF)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: - 账号
@@ -167,11 +231,23 @@ struct SettingsView: View {
         AppleCard(padding: EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)) {
             VStack(spacing: 0) {
                 row(
-                    icon: "photo.stack",
-                    title: "车辆背景",
+                    icon: "paintpalette.fill",
+                    title: "车辆背景主题",
                     detail: backdropDetail
                 ) {
                     showTheme = true
+                }
+
+                HairLine().padding(.leading, 44)
+
+                row(
+                    icon: "photo.on.rectangle",
+                    title: "仪表壁纸",
+                    detail: "同步到车机仪表盘"
+                ) {
+                    if model.selectedVehicle != nil {
+                        showDashboardWallpaper = true
+                    }
                 }
             }
         }

@@ -32,17 +32,16 @@ struct HeroStage: View {
     var topInset: CGFloat = 12
     var height: CGFloat = 470
     let onPickVehicle: () -> Void
-    let onOpenWallpaper: () -> Void
+    /// 车机仪表壁纸（不是英雄区背景）
+    let onOpenDashboardWallpaper: () -> Void
+    /// 车辆页动态主题（视频背景）
     let onOpenTheme: () -> Void
     let onOpenCushion: () -> Void
 
-    private var onDark: Bool { !selection.isDefault }
+    private var onDark: Bool { !selection.isDefault || videoURL != nil }
 
     private var primary: Color { onDark ? .white : Theme.label }
     private var secondaryText: Color { onDark ? Color.white.opacity(0.78) : Theme.secondary }
-    private var glass: AnyShapeStyle {
-        onDark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Theme.surface)
-    }
 
     var body: some View {
         ZStack {
@@ -65,16 +64,16 @@ struct HeroStage: View {
         .frame(maxWidth: .infinity)
         .background { backdrop }
         .overlay(alignment: .bottom) {
-            // 向下淡入内容区，避免硬切
+            // 向下淡入内容区，避免硬切（对齐 Flutter 76%→100% 透明）
             LinearGradient(
                 colors: [
                     Color.clear,
-                    (onDark ? Color.black.opacity(0.18) : Theme.groupedBackground.opacity(0.55))
+                    (onDark ? Color.black.opacity(0.22) : Theme.groupedBackground.opacity(0.55))
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(height: 56)
+            .frame(height: 72)
             .allowsHitTesting(false)
         }
         .clipped()
@@ -87,21 +86,7 @@ struct HeroStage: View {
         Group {
             switch selection {
             case .video:
-                if let videoURL {
-                    ZStack {
-                        if let videoPoster {
-                            fillImage(videoPoster)
-                        } else {
-                            Color(hex: 0x0B1A16)
-                        }
-                        Color.clear.overlay {
-                            LoopingVideoView(url: videoURL)
-                        }
-                    }
-                    .overlay(scrim)
-                } else {
-                    placeholderBackdrop.overlay(scrim)
-                }
+                videoBackdrop(url: videoURL, poster: videoPoster.map { .image($0) } ?? .none)
 
             case .photo:
                 if let photo {
@@ -119,12 +104,58 @@ struct HeroStage: View {
             case .theme(let theme):
                 if theme.isDefault {
                     Color.clear
+                } else if let remote = theme.videoURL {
+                    // 云端动态主题：封面垫底 + 循环视频（以前只贴了静图）
+                    videoBackdrop(url: remote, poster: .remote(theme.posterURL))
                 } else {
                     themeBackground(theme).overlay(scrim)
                 }
             }
         }
         .clipped()
+    }
+
+    private enum PosterSource {
+        case none
+        case image(UIImage)
+        case remote(URL?)
+    }
+
+    @ViewBuilder
+    private func videoBackdrop(url: URL?, poster: PosterSource) -> some View {
+        if let url {
+            ZStack {
+                switch poster {
+                case .image(let img):
+                    fillImage(img)
+                case .remote(let remote):
+                    if let remote {
+                        Color.clear.overlay {
+                            AsyncImage(url: remote) { phase in
+                                if let image = phase.image {
+                                    image.resizable().scaledToFill()
+                                } else {
+                                    Color(hex: 0x0B1A16)
+                                }
+                            }
+                        }
+                        .clipped()
+                    } else {
+                        Color(hex: 0x0B1A16)
+                    }
+                case .none:
+                    Color(hex: 0x0B1A16)
+                }
+
+                Color.clear.overlay {
+                    LoopingVideoView(url: url)
+                }
+                .allowsHitTesting(false)
+            }
+            .overlay(scrim)
+        } else {
+            placeholderBackdrop.overlay(scrim)
+        }
     }
 
     private func fillImage(_ image: UIImage) -> some View {
@@ -167,65 +198,87 @@ struct HeroStage: View {
         )
     }
 
-    /// 上暗下更暗，白字在任何背景上都读得清
+    /// 上暗下更暗，白字在任何背景上都读得清（对齐小程序顶部压暗）
     private var scrim: some View {
         LinearGradient(
             stops: [
-                .init(color: Color.black.opacity(0.38), location: 0),
-                .init(color: Color.black.opacity(0.04), location: 0.38),
-                .init(color: Color.black.opacity(0.10), location: 0.68),
-                .init(color: Color.black.opacity(0.42), location: 1)
+                .init(color: Color.black.opacity(0.42), location: 0),
+                .init(color: Color.black.opacity(0.04), location: 0.28),
+                .init(color: Color.black.opacity(0.08), location: 0.68),
+                .init(color: Color.black.opacity(0.38), location: 1)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
+        .allowsHitTesting(false)
     }
 
     // MARK: - 车 / 3D
 
     @ViewBuilder
     private var carLayer: some View {
-        if let modelGLBFile {
-            Color.clear
-                .overlay {
-                    ModelViewerWebView(glbFile: modelGLBFile, interactive: false, autoRotate: true)
-                }
-                .padding(.top, 96)
-                .padding(.bottom, 88)
-                .allowsHitTesting(false)
-        } else if let modelScene {
-            VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
-                .padding(.top, 100)
-                .padding(.bottom, 88)
-                .allowsHitTesting(false)
-        } else {
-            ZStack {
-                Ellipse()
-                    .fill(Color.black.opacity(onDark ? 0.28 : 0.09))
-                    .frame(width: 218, height: 15)
-                    .blur(radius: 12)
-                    .offset(y: 10)
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let modelGLBFile {
+                    Color.clear
+                        .overlay {
+                            ModelViewerWebView(glbFile: modelGLBFile, interactive: false, autoRotate: true)
+                        }
+                        .padding(.top, 96)
+                        .padding(.bottom, 88)
+                        .allowsHitTesting(false)
+                } else if let modelScene {
+                    VehicleSceneView(scene: modelScene, interactive: false, autoSpin: true, spinSpeed: 0.16)
+                        .padding(.top, 100)
+                        .padding(.bottom, 88)
+                        .allowsHitTesting(false)
+                } else {
+                    ZStack {
+                        Ellipse()
+                            .fill(Color.black.opacity(onDark ? 0.28 : 0.09))
+                            .frame(width: 218, height: 15)
+                            .blur(radius: 12)
+                            .offset(y: 10)
 
-                Group {
-                    if let url = vehicle.imageURL {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image {
-                                image.resizable().scaledToFit()
+                        Group {
+                            if let url = vehicle.imageURL {
+                                AsyncImage(url: url) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().scaledToFit()
+                                    } else {
+                                        placeholder
+                                    }
+                                }
                             } else {
                                 placeholder
                             }
                         }
-                    } else {
-                        placeholder
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 210)
+                        .shadow(color: Color.black.opacity(onDark ? 0.30 : 0.10), radius: 18, x: 0, y: 12)
                     }
+                    .frame(maxWidth: .infinity)
+                    .offset(y: 28)
+                    .allowsHitTesting(false)
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 210)
-                .shadow(color: Color.black.opacity(onDark ? 0.30 : 0.10), radius: 18, x: 0, y: 12)
             }
-            .frame(maxWidth: .infinity)
-            .offset(y: 28)
-            .allowsHitTesting(false)
+
+            // 坐垫：叠在车图右上（对齐 Flutter / 小程序），不进顶栏
+            Button(action: onOpenCushion) {
+                SeatIcon(size: 18)
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.92))
+                    )
+                    .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
+            }
+            .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+            .padding(.top, 96)
+            .padding(.trailing, 16)
+            .accessibilityLabel("打开坐垫")
         }
     }
 
@@ -239,18 +292,19 @@ struct HeroStage: View {
         .foregroundStyle(primary.opacity(0.7))
     }
 
-    // MARK: - 顶部：车辆切换 + 壁纸 / 主题 / 坐垫
+    // MARK: - 顶部：车名 + 主题(衣服) + 仪表壁纸 —— 对齐 Flutter
 
     private var topRow: some View {
         HStack(spacing: 10) {
             Button(action: onPickVehicle) {
                 HStack(spacing: 5) {
                     Text(vehicle.name)
-                        .font(.system(size: 23, weight: .semibold))
+                        .font(.system(size: 19, weight: .heavy))
                         .foregroundStyle(primary)
+                        .shadow(color: onDark ? Color.black.opacity(0.2) : .clear, radius: 8)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(secondaryText)
                 }
                 .frame(minHeight: 36, alignment: .leading)
@@ -261,35 +315,40 @@ struct HeroStage: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 8) {
-                circleAction(icon: "photo.on.rectangle.angled", label: "壁纸", action: onOpenWallpaper)
-                circleAction(icon: "paintpalette.fill", label: "主题", action: onOpenTheme)
-                Button(action: onOpenCushion) {
-                    SeatIcon(size: 17)
-                        .foregroundStyle(primary)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(glass))
-                        .contentShape(Circle())
+                // 主题：衣服图标（动态视频背景）
+                frostedCircle(action: onOpenTheme, label: "主题") {
+                    Image("ThemeShirt")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-                .accessibilityLabel("打开坐垫")
+                // 壁纸：车机仪表壁纸
+                frostedCircle(action: onOpenDashboardWallpaper, label: "仪表壁纸") {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                }
             }
         }
     }
 
-    private func circleAction(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    private func frostedCircle<Content: View>(
+        action: @escaping () -> Void,
+        label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(primary)
-                .frame(width: 36, height: 36)
-                .background(Circle().fill(glass))
+            content()
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color.white.opacity(0.82)))
+                .shadow(color: Color.black.opacity(0.06), radius: 6, y: 1)
                 .contentShape(Circle())
                 .accessibilityLabel(label)
         }
         .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
     }
 
-    // MARK: - 电量：百分比 · 细进度条 · 续航（参考图上半布局）
+    // MARK: - 电量
 
     private var batteryBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -384,7 +443,6 @@ struct HeroStage: View {
 
     // MARK: - 胎压
 
-    /// 没有胎压读数就整条不显示，别留一排「—」
     @ViewBuilder
     private var tireStrip: some View {
         let front = frontBar
@@ -410,7 +468,7 @@ struct HeroStage: View {
             .padding(.vertical, 9)
             .background {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(glass)
+                    .fill(.ultraThinMaterial)
             }
         }
     }

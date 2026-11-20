@@ -178,8 +178,11 @@ final class ModelSchemeHandler: NSObject, WKURLSchemeHandler {
 // MARK: - GLB 下载缓存
 
 enum GLBModelStore {
+    /// 缓存名带 strip 版本号，节点清洗规则变更时自动换文件
+    private static let stripTag = "s2"
+
     static func localFile(for remote: URL) async throws -> URL {
-        let name = "vehicle-\(abs(remote.absoluteString.hashValue)).glb"
+        let name = "vehicle-\(abs(remote.absoluteString.hashValue))-\(stripTag).glb"
         let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let target = directory.appendingPathComponent(name)
 
@@ -192,8 +195,12 @@ enum GLBModelStore {
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw URLError(.badServerResponse)
         }
+
+        let raw = try Data(contentsOf: temp)
+        let cleaned = GLBNodeStripper.strip(raw)
         try? FileManager.default.removeItem(at: target)
-        try FileManager.default.moveItem(at: temp, to: target)
+        try cleaned.write(to: target, options: .atomic)
+        try? FileManager.default.removeItem(at: temp)
         return target
     }
 }

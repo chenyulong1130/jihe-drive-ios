@@ -20,6 +20,7 @@ struct VehicleView: View {
     @State private var showPicker = false
     @State private var showTheme = false
     @State private var themeFocus: ThemeFocus = .none
+    @State private var showDashboardWallpaper = false
     @State private var showBattery = false
     @State private var show3D = false
     @State private var showDetail = false
@@ -56,6 +57,11 @@ struct VehicleView: View {
         .sheet(isPresented: $showPicker) { VehiclePickerSheet() }
         .sheet(isPresented: $showTheme, onDismiss: { themeFocus = .none }) {
             ThemeSheet(focus: themeFocus)
+        }
+        .sheet(isPresented: $showDashboardWallpaper) {
+            if let vehicle = model.selectedVehicle {
+                DashboardWallpaperSheet(vehicle: vehicle)
+            }
         }
         .sheet(isPresented: $showBattery) {
             if let vehicle = model.selectedVehicle { BatterySheet(vehicle: vehicle) }
@@ -99,7 +105,7 @@ struct VehicleView: View {
         return HeroStage(
             vehicle: vehicle,
             selection: themeStore.selection,
-            videoURL: videoStore.url,
+            videoURL: themeStore.resolvedVideoURL(local: videoStore.url),
             videoPoster: videoStore.poster,
             photo: wallpaperStore.image,
             modelScene: model3D.scene,
@@ -115,9 +121,8 @@ struct VehicleView: View {
                     showToast("当前账号只有一台车辆")
                 }
             },
-            onOpenWallpaper: {
-                themeFocus = .wallpaper
-                showTheme = true
+            onOpenDashboardWallpaper: {
+                showDashboardWallpaper = true
             },
             onOpenTheme: {
                 themeFocus = .theme
@@ -201,7 +206,7 @@ struct VehicleView: View {
                 style: .continuous
             )
             .fill(Theme.groupedBackground)
-            .shadow(color: Color.black.opacity(0.06), radius: 16, x: 0, y: -4)
+            .shadow(color: Theme.cardShadow, radius: 16, x: 0, y: -4)
         }
         .padding(.top, -18)
     }
@@ -213,11 +218,19 @@ struct VehicleView: View {
             sideActionCard(
                 icon: "light.beacon.max.fill",
                 title: "寻车",
-                hint: "长按鸣笛",
-                tint: Color(hex: 0xFF9F0A)
+                hint: "轻点闪灯",
+                tint: Theme.find,
+                busy: busy == "find"
             ) {
                 run("find") { try await model.findVehicle(vehicle) }
             }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.55).onEnded { _ in
+                    run("find", success: "已发送鸣笛闪灯") {
+                        try await model.loudFindVehicle(vehicle)
+                    }
+                }
+            )
 
             unlockButton(vehicle)
 
@@ -225,10 +238,21 @@ struct VehicleView: View {
                 icon: "gearshape.fill",
                 title: "设置",
                 hint: "车辆控制",
-                tint: Theme.brand
+                tint: Theme.brand,
+                busy: false
             ) {
                 showSettings = true
             }
+        }
+        .padding(6)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Theme.surface)
+                .shadow(color: Theme.cardShadow, radius: 18, x: 0, y: 6)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Theme.separator.opacity(0.55), lineWidth: 0.5)
         }
     }
 
@@ -237,45 +261,55 @@ struct VehicleView: View {
         title: String,
         hint: String,
         tint: Color,
+        busy: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 8) {
+            VStack(spacing: 9) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(tint.opacity(0.12))
-                        .frame(width: 42, height: 42)
-                    Image(systemName: icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(tint)
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [tint.opacity(0.22), tint.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+                    if busy {
+                        ProgressView()
+                            .scaleEffect(0.85)
+                            .tint(tint)
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(tint)
+                            .symbolRenderingMode(.hierarchical)
+                    }
                 }
                 VStack(spacing: 2) {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.label)
                     Text(hint)
-                        .font(.system(size: 10))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.tertiary)
                 }
             }
-            .frame(width: 78)
-            .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.surface)
-            }
-            .shadow(color: Theme.cardShadow, radius: 12, x: 0, y: 3)
+            .frame(width: 76)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
-        .disabled(busy != nil)
+        .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+        .disabled(self.busy != nil)
     }
 
     private func unlockButton(_ vehicle: Vehicle) -> some View {
         let locked = vehicle.isLocked
+        let accent = locked ? Theme.unlock : Theme.lock
         let colors: [Color] = locked
-            ? [Color(hex: 0xFFB04A), Color(hex: 0xFF7A1A)]
-            : [Color(hex: 0x3AA0FF), Color(hex: 0x0A6AE8)]
+            ? [accent.mixed(with: .white, amount: 0.18), accent]
+            : [accent.mixed(with: .white, amount: 0.22), accent]
 
         return Button {
             let queued = !vehicle.isOnline
@@ -286,30 +320,39 @@ struct VehicleView: View {
                 try await model.toggleLock(vehicle)
             }
         } label: {
-            HStack(spacing: 10) {
-                if busy == "lock" {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                        .scaleEffect(0.9)
-                } else {
-                    Image(systemName: locked ? "lock.open.fill" : "lock.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .contentTransition(.symbolEffect(.replace))
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 40, height: 40)
+                    if busy == "lock" {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                            .scaleEffect(0.85)
+                    } else {
+                        Image(systemName: locked ? "lock.open.fill" : "lock.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .contentTransition(.symbolEffect(.replace))
+                    }
                 }
-                VStack(alignment: .leading, spacing: 2) {
+
+                VStack(alignment: .leading, spacing: 3) {
                     Text(locked ? "点击解锁" : "点击关锁")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16, weight: .bold))
                     Text(vehicle.isOnline ? (locked ? "车辆已上锁" : "车辆已解锁") : "离线 · 指令将排队")
                         .font(.system(size: 11, weight: .medium))
-                        .opacity(0.85)
+                        .opacity(0.88)
                 }
                 Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .opacity(0.55)
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
-            .frame(height: 78)
+            .frame(height: 86)
             .background {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(
@@ -319,13 +362,20 @@ struct VehicleView: View {
                             endPoint: .bottomTrailing
                         )
                     )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.22), Color.clear],
+                                    startPoint: .top,
+                                    endPoint: .center
+                                )
+                            )
+                            .blendMode(.plusLighter)
+                            .allowsHitTesting(false)
+                    }
             }
-            .shadow(
-                color: (locked ? Color(hex: 0xFF7A1A) : Color(hex: 0x0A6AE8)).opacity(0.32),
-                radius: 14,
-                x: 0,
-                y: 8
-            )
+            .shadow(color: accent.opacity(0.38), radius: 16, x: 0, y: 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.02))

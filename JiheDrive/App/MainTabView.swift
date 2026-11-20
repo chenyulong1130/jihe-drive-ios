@@ -39,6 +39,8 @@ struct MainTabView: View {
     @State private var dragOffset: CGFloat = 0
     /// 手势方向锁：起点判定一次，之后整个手势只认这个方向
     @State private var panAxis: Axis? = nil
+    /// 手指还在屏幕上：拖动位移绝不跟动画，避免「贴着乱抖」
+    @State private var isDragging = false
 
     private var tabs: [MainTab] { MainTab.allCases }
     private var index: Int { tabs.firstIndex(of: tab) ?? 0 }
@@ -58,10 +60,13 @@ struct MainTabView: View {
                 }
                 .frame(width: w * CGFloat(tabs.count), height: geo.size.height, alignment: .topLeading)
                 .offset(x: -CGFloat(index) * w + dragOffset)
+                // 拖动中关掉隐式动画，否则 spring 会和手指抢位移，看起来像贴着乱抖
+                .animation(isDragging ? nil : Motion.page, value: tab)
+                .animation(isDragging ? nil : Motion.page, value: dragOffset)
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
                 .clipShape(HorizontalClip())
                 .contentShape(Rectangle())
-                .simultaneousGesture(pageDrag(width: w))
+                .highPriorityGesture(pageDrag(width: w))
 
                 LiquidTabBar(tab: $tab)
             }
@@ -69,7 +74,11 @@ struct MainTabView: View {
         }
         .sensoryFeedback(.selection, trigger: tab)
         .onAppear(perform: applyStatusBar)
-        .onChange(of: tab) { _, _ in applyStatusBar() }
+        .onChange(of: tab) { _, _ in
+            // 点底栏切页时清掉残留位移，避免和翻页动画叠在一起抖一下
+            if !isDragging { dragOffset = 0 }
+            applyStatusBar()
+        }
     }
 
     /// 车辆页顶部是深色主视觉铺到状态栏，图标文字要白色才看得清；
@@ -83,16 +92,14 @@ struct MainTabView: View {
         // travel：该页相对视口的水平偏移，0 表示正中对齐
         let travel: CGFloat = CGFloat(i - index) * width + dragOffset
         let progress: CGFloat = min(1, abs(travel) / width)
-        let fade: CGFloat = 1 - progress * 0.3
-        let zoom: CGFloat = 1 - progress * 0.04
+        // 只做轻微淡出，不再 scale——缩放+位移叠在一起最容易抖
+        let fade: CGFloat = 1 - progress * 0.18
 
         pageContent(item)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .frame(width: width)
             .clipShape(HorizontalClip())
-            // 越远越缩小、变淡，滑动时有纵深，不会两张图硬切
             .opacity(fade)
-            .scaleEffect(zoom)
             .allowsHitTesting(progress < 0.5)
     }
 
@@ -106,38 +113,47 @@ struct MainTabView: View {
     }
 
     private func pageDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 10)
+        DragGesture(minimumDistance: 16, coordinateSpace: .local)
             .onChanged { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
 
                 // 方向锁：累计位移超过阈值判一次向，之后整个手势只认这个方向。
-                // 之前用瞬时比例判断，起步阶段 dx 稍大于 dy 页面就被拽走，
-                // 纵向滚动永远到不了翻页这一步。
+                // 水平意图要明显强于纵向（1.35x），避免滚动列表时页面被拽走。
                 if panAxis == nil {
-                    guard abs(dx) > 12 || abs(dy) > 12 else { return }
-                    panAxis = abs(dx) > abs(dy) ? .horizontal : .vertical
+                    guard abs(dx) > 14 || abs(dy) > 14 else { return }
+                    if abs(dx) > abs(dy) * 1.35 {
+                        panAxis = .horizontal
+                        isDragging = true
+                    } else {
+                        panAxis = .vertical
+                    }
                 }
                 guard panAxis == .horizontal else { return }
 
                 var offset = dx
                 // 首尾再往外拖时给阻尼，拖不动但有余量
                 if (index == 0 && offset > 0) || (index == tabs.count - 1 && offset < 0) {
-                    offset *= 0.3
+                    offset *= 0.28
                 }
+                // 直接赋值，无 animation，跟手
                 dragOffset = offset
             }
             .onEnded { value in
                 let horizontal = panAxis == .horizontal
                 panAxis = nil
+                isDragging = false
 
                 // 纵向手势直接放弃，不做任何翻页动作
-                guard horizontal else { return }
+                guard horizontal else {
+                    dragOffset = 0
+                    return
+                }
 
                 let dx = value.translation.width
                 let projected = value.predictedEndTranslation.width
                 let delta = abs(projected) > abs(dx) ? projected : dx
-                let threshold = width * 0.22   // 轻扫即可翻页，不用拖满半屏
+                let threshold = width * 0.18
 
                 var target = index
                 if delta < -threshold {
@@ -147,7 +163,7 @@ struct MainTabView: View {
                 }
 
                 // 位移复位和换页放在同一事务里，避免回弹与翻页分成两段
-                withAnimation(Motion.liqid) {
+                withAnimation(Motion.page) {
                     dragOffset = 0
                     tab = tabs[target]
                 }
@@ -210,7 +226,7 @@ private struct LiquidTabBar: View {
                     lineWidth: 0.8
                 )
         )
-        .shadow(color: Color.black.opacity(0.16), radius: 24, x: 0, y: 10)
+        .shadow(color: Theme.softShadow, radius: 24, x: 0, y: 10)
         .frame(maxWidth: 320)
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
@@ -219,7 +235,7 @@ private struct LiquidTabBar: View {
     private func itemButton(_ item: MainTab) -> some View {
         let selected = tab == item
         return Button {
-            withAnimation(Motion.liqid) { tab = item }
+            withAnimation(Motion.page) { tab = item }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: selected ? item.activeIcon : item.icon)
@@ -260,6 +276,8 @@ private struct LiquidTabBar: View {
 }
 
 extension Motion {
-    /// 液态导航：带一点过冲的回弹
-    static let liqid: Animation = .spring(response: 0.36, dampingFraction: 0.72)
+    /// 翻页：高阻尼、几乎无过冲，切菜单不再「一抖」
+    static let page: Animation = .spring(response: 0.32, dampingFraction: 0.92)
+    /// 保留旧名给别处，避免编译炸；阻尼同样抬高
+    static let liqid: Animation = page
 }

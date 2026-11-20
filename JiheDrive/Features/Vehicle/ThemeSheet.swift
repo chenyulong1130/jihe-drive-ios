@@ -31,7 +31,28 @@ struct ThemeSheet: View {
                     SectionHeader("我的")
                     mineCard
 
-                    SectionHeader("内置壁纸")
+                    SectionHeader("动态视频主题")
+                        .id("theme")
+                    Text("循环静音播放，与 Flutter / 小程序同一批主题")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 8)
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        defaultThemeCell
+                        ForEach(VehicleThemeCatalog.videoThemes) { theme in
+                            videoThemeCell(theme)
+                        }
+                    }
+
+                    SectionHeader("程序动态")
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(AnimatedBackdropKind.allCases) { kind in
+                            animatedCell(kind)
+                        }
+                    }
+
+                    SectionHeader("内置渐变")
                         .id("wallpaper")
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(WallpaperCatalog.all) { wallpaper in
@@ -39,23 +60,12 @@ struct ThemeSheet: View {
                         }
                     }
 
-                    SectionHeader("动态主题")
-                        .id("theme")
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(AnimatedBackdropKind.allCases) { kind in
-                            animatedCell(kind)
-                        }
-                    }
-
-                    SectionHeader("云端封面")
-                    cloudRow
-
                     if let error = videoStore.errorText {
                         SoftBanner(text: error, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                             .padding(.top, 14)
                     }
 
-                    Text("视频和照片都只保存在本机，不会上传；低电量模式下动态主题会自动静止。")
+                    Text("本地视频/照片只保存在本机；云端主题在线播放，不改车机仪表壁纸。")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.tertiary)
                         .multilineTextAlignment(.center)
@@ -258,51 +268,93 @@ struct ThemeSheet: View {
         .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
     }
 
-    // MARK: - 云端封面
+    // MARK: - 动态视频主题
 
-    private var cloudRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(VehicleThemeCatalog.all.filter { $0.posterURL != nil }) { theme in
-                    let selected = themeStore.selectedID == theme.id
-                    Button {
-                        withAnimation(Motion.quick) { themeStore.select(theme.id) }
-                    } label: {
-                        ZStack(alignment: .bottomLeading) {
-                            AsyncImage(url: theme.posterURL) { phase in
+    private var defaultThemeCell: some View {
+        let selected = themeStore.selectedID.isEmpty
+        return Button {
+            withAnimation(Motion.quick) { themeStore.select("") }
+            dismiss()
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.surfaceAlt)
+                        .frame(height: 92)
+                    Image(systemName: "circle.slash")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.white, Theme.brand)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(6)
+                    }
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
+                )
+
+                Text("默认")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(selected ? Theme.brand : Theme.secondary)
+            }
+        }
+        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+    }
+
+    private func videoThemeCell(_ theme: VehicleTheme) -> some View {
+        let selected = themeStore.selectedID == theme.id
+        return Button {
+            withAnimation(Motion.quick) { themeStore.select(theme.id) }
+        } label: {
+            VStack(spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Group {
+                        if let poster = theme.posterURL {
+                            AsyncImage(url: poster) { phase in
                                 if let image = phase.image {
                                     image.resizable().scaledToFill()
                                 } else {
                                     LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
                                 }
                             }
-                            .frame(width: 96, height: 128)
-                            .clipped()
-
-                            LinearGradient(
-                                colors: [Color.black.opacity(0), Color.black.opacity(0.55)],
-                                startPoint: .center,
-                                endPoint: .bottom
-                            )
-
-                            Text(theme.name)
-                                .font(.system(size: 11.5, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(8)
+                        } else {
+                            LinearGradient(colors: theme.colors, startPoint: .top, endPoint: .bottom)
                         }
-                        .frame(width: 96, height: 128)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
-                        )
                     }
-                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                    .frame(height: 92)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2.4)
+                    )
+                    .overlay(alignment: .bottomLeading) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(6)
+                    }
+
+                    if selected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.white, Theme.brand)
+                            .padding(6)
+                    }
                 }
+
+                Text(theme.name)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(selected ? Theme.brand : Theme.secondary)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 2)
         }
+        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
     }
 
     // MARK: - 导入

@@ -257,6 +257,14 @@ final class AppModel: ObservableObject {
         )
     }
 
+    /// 高声寻车：鸣笛 + 闪灯（与 Flutter loudFindVehicle 一致）
+    func loudFindVehicle(_ vehicle: Vehicle) async throws {
+        _ = try await client.post(
+            "/v1.0/app/cfmotoserverapp/vehicleInfo/controlV2",
+            body: ["param": "4", "vin": vehicle.vinNo]
+        )
+    }
+
     func openCushion(_ vehicle: Vehicle) async throws {
         _ = try await client.put(
             "/v1.0/app/cfmotoserverapp/vehicleSet/propertyTwo/one",

@@ -11,6 +11,8 @@ enum Theme {
     static let surface = Color(uiColor: .secondarySystemGroupedBackground)
     /// 行内弱填充（tertiarySystemFill）
     static let surfaceAlt = Color(uiColor: .tertiarySystemFill)
+    /// 抬升一层的填充（深色里比 surface 稍亮）
+    static let elevated = Color(uiColor: .tertiarySystemGroupedBackground)
 
     // MARK: - 文字
 
@@ -24,7 +26,7 @@ enum Theme {
     static let separator = Color(uiColor: .separator)
     static let opaqueSeparator = Color(uiColor: .opaqueSeparator)
 
-    // MARK: - 强调色（语义）
+    // MARK: - 强调色（语义，系统会随深浅微调）
 
     static let brand = Color(uiColor: .systemBlue)
     static let green = Color(uiColor: .systemGreen)
@@ -34,6 +36,21 @@ enum Theme {
     static let indigo = Color(uiColor: .systemIndigo)
     static let yellow = Color(uiColor: .systemYellow)
 
+    /// 寻车强调色
+    static let find = Color(uiColor: .systemOrange)
+    /// 解锁主按钮（锁车态）
+    static let unlock = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.62, blue: 0.22, alpha: 1)
+            : UIColor(red: 1.0, green: 0.48, blue: 0.10, alpha: 1)
+    })
+    /// 关锁主按钮（已解锁态）
+    static let lock = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.35, green: 0.62, blue: 1.0, alpha: 1)
+            : UIColor(red: 0.10, green: 0.45, blue: 0.92, alpha: 1)
+    })
+
     // MARK: - 布局（8pt 网格，4pt 细分）
 
     static let page: CGFloat = 16
@@ -41,9 +58,19 @@ enum Theme {
     static let buttonRadius: CGFloat = 10
     static let tap: CGFloat = 44
 
-    // MARK: - 阴影（只用一种极淡的扩散阴影）
+    // MARK: - 阴影（深色略加强，浅色保持极淡）
 
-    static let cardShadow = Color.black.opacity(0.04)
+    static let cardShadow = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.black.withAlphaComponent(0.45)
+            : UIColor.black.withAlphaComponent(0.06)
+    })
+
+    static let softShadow = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.black.withAlphaComponent(0.55)
+            : UIColor.black.withAlphaComponent(0.10)
+    })
 
     // MARK: - 字号（Dynamic Type 默认值）
 
