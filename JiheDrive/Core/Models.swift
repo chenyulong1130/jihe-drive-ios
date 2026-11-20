@@ -327,6 +327,8 @@ struct RideTrack: Identifiable, Hashable {
     var maxSpeed: Double? = nil
     var startAddress: String? = nil
     var endAddress: String? = nil
+    /// 与 points 对齐的速度采样（km/h），回放按速度着色
+    var speedSamples: [Double] = []
 
     static func parse(_ response: [String: Any]) -> [RideTrack] {
         guard let data = response["data"] else { return [] }

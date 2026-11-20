@@ -86,7 +86,8 @@ enum RideTrackService {
         }
 
         let pairs = items.enumerated().compactMap { index, item -> (String, RideTrack)? in
-            let points = trajectory(item["trajectory"])
+            let samples = trajectory(item["trajectory"])
+            let points = samples.map { $0.coordinate }
             guard points.count > 1 else { return nil }
 
             let start = text(item["startTime"] ?? item["beginTime"] ?? item["rideBeginTime"])
@@ -100,7 +101,8 @@ enum RideTrackService {
                 endTime: display(end),
                 maxSpeed: Vehicle.doubleValue(item["maxSpeed"]),
                 startAddress: address(item["startAddr"] ?? item["startAddress"]),
-                endAddress: address(item["endAddr"] ?? item["endAddress"])
+                endAddress: address(item["endAddr"] ?? item["endAddress"]),
+                speedSamples: samples.map { $0.speed }
             )
             return (start ?? "", track)
         }
@@ -140,7 +142,12 @@ enum RideTrackService {
     // MARK: - 解析工具
 
     /// trajectory = "lng,lat,speed,ts,x" 用 & 连接
-    private static func trajectory(_ raw: Any?) -> [Coordinate] {
+    private struct Sample {
+        let coordinate: Coordinate
+        let speed: Double
+    }
+
+    private static func trajectory(_ raw: Any?) -> [Sample] {
         guard let text = raw as? String, !text.isEmpty else { return [] }
         return text.split(separator: "&").compactMap { segment in
             let parts = segment.split(separator: ",")
@@ -149,7 +156,13 @@ enum RideTrackService {
                   let lat = Double(String(parts[1]).trimmingCharacters(in: .whitespaces)),
                   abs(lat) > 0.0001,
                   abs(lng) > 0.0001 else { return nil }
-            return Coordinate(latitude: lat, longitude: lng)
+            let speed = parts.count >= 3
+                ? (Double(String(parts[2]).trimmingCharacters(in: .whitespaces)) ?? 0)
+                : 0
+            return Sample(
+                coordinate: Coordinate(latitude: lat, longitude: lng),
+                speed: speed
+            )
         }
     }
 

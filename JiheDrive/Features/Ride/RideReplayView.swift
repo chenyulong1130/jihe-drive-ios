@@ -16,10 +16,23 @@ struct RideReplayView: View {
         track.points.map { $0.mapCoordinate }
     }
 
-    /// 回放时长：按真实时长收敛到 8–45 秒，太短看不清、太长会闷
+    /// 回放时长：按采样点数（与安卓版一致，每点 0.12 秒），收敛到 4–45 秒
     private var playbackSeconds: Double {
-        let raw = Double(max(1, track.durationMinutes)) * 1.4
-        return min(45, max(8, raw))
+        min(45, max(4, Double(track.points.count) * 0.12))
+    }
+
+    /// 当前播放位置的速度（两侧采样线性插值）
+    private var currentSpeed: Double {
+        let samples = track.speedSamples
+        guard samples.count > 1 else { return 0 }
+        let raw = min(max(progress, 0), 1) * Double(samples.count - 1)
+        let index = min(samples.count - 2, max(0, Int(raw)))
+        let fraction = raw - Double(index)
+        return samples[index] + (samples[index + 1] - samples[index]) * fraction
+    }
+
+    private var maxSpeedValue: Double {
+        track.maxSpeed ?? (track.speedSamples.max() ?? 0)
     }
 
     private var averageSpeed: Double {
@@ -29,7 +42,7 @@ struct RideReplayView: View {
 
     var body: some View {
         ZStack {
-            ReplayMap(points: coordinates, progress: progress, follow: follow)
+            ReplayMap(points: coordinates, speeds: track.speedSamples, progress: progress, follow: follow)
                 .ignoresSafeArea()
 
             edgeGradient
@@ -104,11 +117,11 @@ struct RideReplayView: View {
 
     private var statsCard: some View {
         HStack(spacing: 0) {
+            statBlock(title: "当前", value: String(format: "%.0f", currentSpeed), unit: "km/h")
+            statDivider
             statBlock(title: "里程", value: String(format: "%.1f", track.mileage), unit: "km")
             statDivider
-            statBlock(title: "时长", value: "\(track.durationMinutes)", unit: "min")
-            statDivider
-            statBlock(title: "均速", value: String(format: "%.0f", averageSpeed), unit: "km/h")
+            statBlock(title: "最高", value: String(format: "%.0f", maxSpeedValue), unit: "km/h")
         }
         .padding(.vertical, 12)
         .background(
