@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum MainTab: String, CaseIterable, Identifiable {
     case vehicle
@@ -36,6 +37,8 @@ struct MainTabView: View {
     @State private var tab: MainTab = .vehicle
     /// 手指拖动时的临时位移（左滑为负），松手后归零
     @State private var dragOffset: CGFloat = 0
+    /// 手势方向锁：起点判定一次，之后整个手势只认这个方向
+    @State private var panAxis: Axis? = nil
 
     private var tabs: [MainTab] { MainTab.allCases }
     private var index: Int { tabs.firstIndex(of: tab) ?? 0 }
@@ -56,7 +59,7 @@ struct MainTabView: View {
                 .frame(width: w * CGFloat(tabs.count), height: geo.size.height, alignment: .topLeading)
                 .offset(x: -CGFloat(index) * w + dragOffset)
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
-                .clipped()
+                .clipShape(HorizontalClip())
                 .contentShape(Rectangle())
                 .simultaneousGesture(pageDrag(width: w))
 
@@ -65,6 +68,14 @@ struct MainTabView: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .sensoryFeedback(.selection, trigger: tab)
+        .onAppear(perform: applyStatusBar)
+        .onChange(of: tab) { _, _ in applyStatusBar() }
+    }
+
+    /// 车辆页顶部是深色主视觉铺到状态栏，图标文字要白色才看得清；
+    /// 其余页是浅色底，用系统默认（浅色模式黑字 / 深色模式白字）。
+    private func applyStatusBar() {
+        UIApplication.shared.statusBarStyle = (tab == .vehicle) ? .lightContent : .default
     }
 
     @ViewBuilder
@@ -78,7 +89,7 @@ struct MainTabView: View {
         pageContent(item)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .frame(width: width)
-            .clipped()
+            .clipShape(HorizontalClip())
             // 越远越缩小、变淡，滑动时有纵深，不会两张图硬切
             .opacity(fade)
             .scaleEffect(zoom)
@@ -95,12 +106,19 @@ struct MainTabView: View {
     }
 
     private func pageDrag(width: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 8)
+        DragGesture(minimumDistance: 10)
             .onChanged { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
-                // 只认水平意图，纵向手势留给页面里的 ScrollView
-                guard abs(dx) > abs(dy) * 1.2 else { return }
+
+                // 方向锁：累计位移超过阈值判一次向，之后整个手势只认这个方向。
+                // 之前用瞬时比例判断，起步阶段 dx 稍大于 dy 页面就被拽走，
+                // 纵向滚动永远到不了翻页这一步。
+                if panAxis == nil {
+                    guard abs(dx) > 12 || abs(dy) > 12 else { return }
+                    panAxis = abs(dx) > abs(dy) ? .horizontal : .vertical
+                }
+                guard panAxis == .horizontal else { return }
 
                 var offset = dx
                 // 首尾再往外拖时给阻尼，拖不动但有余量
@@ -110,6 +128,12 @@ struct MainTabView: View {
                 dragOffset = offset
             }
             .onEnded { value in
+                let horizontal = panAxis == .horizontal
+                panAxis = nil
+
+                // 纵向手势直接放弃，不做任何翻页动作
+                guard horizontal else { return }
+
                 let dx = value.translation.width
                 let projected = value.predictedEndTranslation.width
                 let delta = abs(projected) > abs(dx) ? projected : dx
@@ -128,6 +152,22 @@ struct MainTabView: View {
                     tab = tabs[target]
                 }
             }
+    }
+}
+
+/// 只裁左右：翻页时不让邻页漏进来，但上下不裁——
+/// 页面内容要能顶进状态栏（车辆页的背景视频/壁纸必须铺到屏幕顶），
+/// 之前用 `.clipped()` 把 `ignoresSafeArea` 撑出去的部分全裁了，视频就到不了顶。
+private struct HorizontalClip: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path(
+            CGRect(
+                x: rect.minX,
+                y: rect.minY - 3000,
+                width: rect.width,
+                height: rect.height + 6000
+            )
+        )
     }
 }
 
