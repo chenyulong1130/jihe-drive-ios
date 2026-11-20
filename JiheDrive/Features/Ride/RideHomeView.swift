@@ -206,7 +206,7 @@ struct RideHomeView: View {
                             }
                             .padding(.horizontal, 2)
                             .padding(.top, 8)
-                            .frame(minHeight: 120, alignment: .bottom)
+                            .frame(minHeight: 188, alignment: .bottom)
                         }
                         .onChange(of: selectedIndex) { _, idx in
                             withAnimation(.easeOut(duration: 0.2)) {
@@ -226,7 +226,7 @@ struct RideHomeView: View {
     private func dayBar(_ day: RideTrackService.MonthDay, index: Int) -> some View {
         let selected = index == selectedIndex
         let ratio = CGFloat(day.mileage / maxBar)
-        let height = max(4, 72 * ratio)
+        let height = max(6, 128 * ratio)
         let hasRide = day.mileage > 0
 
         return Button {
@@ -298,21 +298,31 @@ struct RideHomeView: View {
         let mile = daySummary?.mileage ?? selectedDay?.mileage ?? 0
         let mins = daySummary?.minutes ?? selectedDay?.minutes ?? 0
         let speed = daySummary?.maxSpeed ?? 0
+        let accel = daySummary?.accelTimes ?? 0
+        let brake = daySummary?.brakeTimes ?? 0
+        let bend = daySummary?.bendTimes ?? 0
 
-        return HStack(spacing: 10) {
-            MetricChip(title: "里程", value: String(format: "%.1f", mile), unit: "km", icon: "road.lanes")
-            MetricChip(title: "时长", value: "\(mins)", unit: "min", icon: "clock")
-            MetricChip(
-                title: "极速",
-                value: speed > 0 ? String(format: "%.0f", speed) : "--",
-                unit: "km/h",
-                icon: "speedometer"
-            )
+        return VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                MetricChip(title: "里程", value: String(format: "%.1f", mile), unit: "km", icon: "road.lanes")
+                MetricChip(title: "时长", value: "\(mins)", unit: "min", icon: "clock")
+                MetricChip(
+                    title: "极速",
+                    value: speed > 0 ? String(format: "%.0f", speed) : "--",
+                    unit: "km/h",
+                    icon: "speedometer"
+                )
+            }
+            HStack(spacing: 10) {
+                MetricChip(title: "急加速", value: accel > 0 ? "\(accel)" : "--", unit: "次", icon: "arrow.up.right")
+                MetricChip(title: "急刹车", value: brake > 0 ? "\(brake)" : "--", unit: "次", icon: "arrow.down.right")
+                MetricChip(title: "弯道", value: bend > 0 ? "\(bend)" : "--", unit: "次", icon: "arrow.turn.up.right")
+            }
         }
     }
 
     private func trackRow(_ track: RideTrack) -> some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             RouteThumbnail(points: track.points)
                 .frame(width: 62, height: 62)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -324,11 +334,18 @@ struct RideHomeView: View {
                     .lineLimit(1)
 
                 if let from = track.startAddress, !from.isEmpty {
-                    Text(track.endAddress.map { "\(from) → \($0)" } ?? from)
+                    Text(from)
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let to = track.endAddress, !to.isEmpty {
+                        Text(to)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 HStack(spacing: 12) {
@@ -345,6 +362,7 @@ struct RideHomeView: View {
             Image(systemName: "play.circle.fill")
                 .font(.system(size: 26))
                 .foregroundStyle(Theme.brand)
+                .padding(.top, 4)
         }
         .padding(12)
         .background(

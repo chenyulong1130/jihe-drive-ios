@@ -22,13 +22,11 @@ struct VehicleView: View {
     @State private var showTheme = false
     @State private var themeFocus: ThemeFocus = .none
     @State private var showDashboardWallpaper = false
-    @State private var showBattery = false
     @State private var showTire = false
     @State private var show3D = false
     @State private var showDetail = false
     @State private var showSettings = false
     @State private var showReplay = false
-    @State private var showSigninDetail = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -66,9 +64,6 @@ struct VehicleView: View {
                 DashboardWallpaperSheet(vehicle: vehicle)
             }
         }
-        .sheet(isPresented: $showBattery) {
-            if let vehicle = model.selectedVehicle { BatterySheet(vehicle: vehicle) }
-        }
         .sheet(isPresented: $showTire) {
             if let vehicle = model.selectedVehicle { TireSheet(vehicle: vehicle) }
         }
@@ -87,10 +82,6 @@ struct VehicleView: View {
         .fullScreenCover(isPresented: $showReplay) {
             RideHomeView(showsClose: true)
         }
-        .sheet(isPresented: $showSigninDetail) {
-            SigninDetailSheet()
-                .environmentObject(signin)
-        }
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
             // 切车先清掉上一台的模型，避免画面短暂串车
@@ -107,6 +98,9 @@ struct VehicleView: View {
             await loadHeroModel()
             await loadRideSummary(vin: vin)
             await resolveAddressIfNeeded()
+            WidgetSnapshot.publish(from: model, signin: signin)
+        }
+        .onChange(of: model.selectedVehicle?.soc) { _, _ in
             WidgetSnapshot.publish(from: model, signin: signin)
         }
         .onChange(of: model.selectedVehicle?.latitude) { _, _ in
@@ -208,11 +202,6 @@ struct VehicleView: View {
             }
             duoCards(vehicle)
             ridingCard(vehicle)
-            batteryCard(vehicle)
-            SigninPanel(
-                store: signin,
-                onMore: { showSigninDetail = true }
-            )
 
             if let error = model.errorMessage {
                 SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
@@ -273,11 +262,10 @@ struct VehicleView: View {
     // MARK: - 寻车 / 解锁 / 设置
 
     private func actionDock(_ vehicle: Vehicle) -> some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 8) {
             sideActionCard(
                 icon: "light.beacon.max.fill",
                 title: "寻车",
-                hint: "轻点闪灯",
                 tint: Theme.find,
                 busy: busy == "find"
             ) {
@@ -294,10 +282,9 @@ struct VehicleView: View {
             unlockButton(vehicle)
 
             sideActionCard(
-                icon: "gearshape.fill",
+                icon: "slider.horizontal.3",
                 title: "设置",
-                hint: vehicle.isCarMaster ? "车辆控制" : "共享不可用",
-                tint: Theme.brand,
+                tint: vehicle.isCarMaster ? Theme.brand : Theme.tertiary,
                 busy: false
             ) {
                 if vehicle.isCarMaster {
@@ -307,60 +294,41 @@ struct VehicleView: View {
                 }
             }
         }
-        .padding(6)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Theme.surface)
-                .shadow(color: Theme.cardShadow, radius: 18, x: 0, y: 6)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Theme.separator.opacity(0.55), lineWidth: 0.5)
-        }
     }
 
     private func sideActionCard(
         icon: String,
         title: String,
-        hint: String,
         tint: Color,
         busy: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 9) {
+            VStack(spacing: 8) {
                 ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [tint.opacity(0.22), tint.opacity(0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Theme.surface)
+                        .shadow(color: Theme.cardShadow, radius: 10, y: 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(tint.opacity(0.18), lineWidth: 1)
                         )
-                        .frame(width: 44, height: 44)
                     if busy {
-                        ProgressView()
-                            .scaleEffect(0.85)
-                            .tint(tint)
+                        ProgressView().tint(tint)
                     } else {
                         Image(systemName: icon)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(tint)
                             .symbolRenderingMode(.hierarchical)
                     }
                 }
-                VStack(spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.label)
-                    Text(hint)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Theme.tertiary)
-                }
+                .frame(width: 58, height: 58)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.label)
             }
-            .frame(width: 76)
-            .padding(.vertical, 10)
+            .frame(width: 64)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
@@ -417,20 +385,32 @@ struct VehicleView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
-            .frame(height: 78)
+            .frame(height: 72)
             .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [accent.opacity(0.95), accent.opacity(0.78)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+                            colors: [accent.opacity(0.98), accent.opacity(0.72)],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
                     )
+                    .overlay(alignment: .top) {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+                            .padding(1)
+                            .mask(
+                                LinearGradient(
+                                    colors: [.white, .clear],
+                                    startPoint: .top,
+                                    endPoint: .center
+                                )
+                            )
+                    }
             }
-            .shadow(color: accent.opacity(0.28), radius: 14, x: 0, y: 6)
+            .shadow(color: accent.opacity(0.32), radius: 16, x: 0, y: 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0.03))
@@ -518,16 +498,16 @@ struct VehicleView: View {
                     Text(locationLabel(vehicle))
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(minHeight: 28, alignment: .topLeading)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
                     Text(shortTime(vehicle.locationTime))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(Theme.tertiary)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 11)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -575,7 +555,7 @@ struct VehicleView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.tertiary)
                         MiniSparkline(tint: Color(hex: 0xFF5A5F), seed: 1)
-                            .frame(height: 18)
+                            .frame(height: 32)
                             .padding(.top, 2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -589,7 +569,7 @@ struct VehicleView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.tertiary)
                         MiniSparkline(tint: Theme.brand, seed: 2)
-                            .frame(height: 18)
+                            .frame(height: 32)
                             .padding(.top, 2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -614,9 +594,27 @@ struct VehicleView: View {
                         label: "时长"
                     )
                 }
+
+                HStack(spacing: 0) {
+                    rideStat(
+                        value: rideExtra?.todayAccel.map { "\($0)" } ?? "—",
+                        unit: "次",
+                        label: "急加速"
+                    )
+                    rideStat(
+                        value: rideExtra?.todayBrake.map { "\($0)" } ?? "—",
+                        unit: "次",
+                        label: "急刹车"
+                    )
+                    rideStat(
+                        value: rideExtra?.todayBend.map { "\($0)" } ?? "—",
+                        unit: "次",
+                        label: "弯道"
+                    )
+                }
             }
             .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 188, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Theme.surface)
@@ -774,77 +772,6 @@ struct VehicleView: View {
                 .foregroundStyle(Theme.tertiary)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - 电池
-
-    private func batteryCard(_ vehicle: Vehicle) -> some View {
-        let battery = model.batteries.first
-        let charging = battery?.isCharging ?? vehicle.isCharging
-        let level = min(max(battery?.level ?? vehicle.soc, 0), 100)
-        let tint = charging ? Theme.green : Theme.brand
-
-        return Button {
-            showBattery = true
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    RingProgress(
-                        progress: Double(level) / 100,
-                        color: tint,
-                        track: Theme.surfaceAlt,
-                        lineWidth: 3.5,
-                        size: 38
-                    )
-                    Text("\(level)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.label)
-                        .monospacedDigit()
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text("电池")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                        Text(battery?.stateText ?? (charging ? "充电中" : "\(level)%"))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(tint)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(tint.opacity(0.12)))
-                    }
-                    Text(batterySummary(battery, vehicle))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Theme.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.surface)
-            }
-            .shadow(color: Theme.cardShadow, radius: 12, x: 0, y: 3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
-    }
-
-    private func batterySummary(_ battery: BatteryInfo?, _ vehicle: Vehicle) -> String {
-        var parts: [String] = ["续航 \(vehicle.rangeKm) km"]
-        let voltage = battery?.voltage ?? vehicle.voltage ?? 0
-        if voltage > 0 { parts.append(String(format: "%.1f V", voltage)) }
-        let temperature = battery?.temperature ?? vehicle.temperature ?? 0
-        if temperature != 0 { parts.append(String(format: "%.0f ℃", temperature)) }
-        return parts.joined(separator: " · ")
     }
 
     // MARK: - 状态

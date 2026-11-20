@@ -55,24 +55,85 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     private func load() -> WidgetEntry? {
-        guard let defaults = UserDefaults(suiteName: suite) else { return nil }
-        let loggedIn = defaults.bool(forKey: "loggedIn")
+        let payload = readPayload()
+        guard !payload.isEmpty else { return nil }
+        let loggedIn = bool(payload["loggedIn"])
+        let name = string(payload["name"])
+        // 已登录且有车名，或至少有电量数据，都当有效快照
+        guard loggedIn || !name.isEmpty || int(payload["soc"]) > 0 else { return nil }
         return WidgetEntry(
-            date: Date(timeIntervalSince1970: defaults.double(forKey: "updatedAt")),
-            loggedIn: loggedIn,
-            name: defaults.string(forKey: "name") ?? "",
-            soc: defaults.integer(forKey: "soc"),
-            rangeKm: defaults.integer(forKey: "rangeKm"),
-            locked: defaults.bool(forKey: "locked"),
-            online: defaults.bool(forKey: "online"),
-            charging: defaults.bool(forKey: "charging"),
-            tireText: defaults.string(forKey: "tireText") ?? "",
-            signedToday: defaults.bool(forKey: "signedToday"),
-            continueDays: defaults.integer(forKey: "continueDays"),
-            lotteryLeft: defaults.integer(forKey: "lotteryLeft"),
-            monthMile: defaults.string(forKey: "monthMile") ?? "--",
-            totalMile: defaults.double(forKey: "totalMile")
+            date: Date(timeIntervalSince1970: double(payload["updatedAt"])),
+            loggedIn: loggedIn || !name.isEmpty,
+            name: name.isEmpty ? "我的车辆" : name,
+            soc: int(payload["soc"]),
+            rangeKm: int(payload["rangeKm"]),
+            locked: bool(payload["locked"], fallback: true),
+            online: bool(payload["online"]),
+            charging: bool(payload["charging"]),
+            tireText: string(payload["tireText"]),
+            signedToday: bool(payload["signedToday"]),
+            continueDays: int(payload["continueDays"]),
+            lotteryLeft: int(payload["lotteryLeft"]),
+            monthMile: {
+                let text = string(payload["monthMile"])
+                return text.isEmpty ? "--" : text
+            }(),
+            totalMile: double(payload["totalMile"])
         )
+    }
+
+    private func readPayload() -> [String: Any] {
+        if let defaults = UserDefaults(suiteName: suite),
+           defaults.object(forKey: "updatedAt") != nil {
+            return [
+                "loggedIn": defaults.bool(forKey: "loggedIn"),
+                "name": defaults.string(forKey: "name") ?? "",
+                "soc": defaults.integer(forKey: "soc"),
+                "rangeKm": defaults.integer(forKey: "rangeKm"),
+                "locked": defaults.bool(forKey: "locked"),
+                "online": defaults.bool(forKey: "online"),
+                "charging": defaults.bool(forKey: "charging"),
+                "totalMile": defaults.double(forKey: "totalMile"),
+                "monthMile": defaults.string(forKey: "monthMile") ?? "--",
+                "tireText": defaults.string(forKey: "tireText") ?? "",
+                "signedToday": defaults.bool(forKey: "signedToday"),
+                "continueDays": defaults.integer(forKey: "continueDays"),
+                "lotteryLeft": defaults.integer(forKey: "lotteryLeft"),
+                "updatedAt": defaults.double(forKey: "updatedAt")
+            ]
+        }
+        if let url = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: suite)?
+            .appendingPathComponent("widget_snapshot.json"),
+           let data = try? Data(contentsOf: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json
+        }
+        return [:]
+    }
+
+    private func string(_ raw: Any?) -> String {
+        guard let raw else { return "" }
+        return "\(raw)"
+    }
+
+    private func int(_ raw: Any?) -> Int {
+        if let value = raw as? Int { return value }
+        if let value = raw as? Double { return Int(value) }
+        return Int("\(raw ?? "")") ?? 0
+    }
+
+    private func double(_ raw: Any?) -> Double {
+        if let value = raw as? Double { return value }
+        if let value = raw as? Int { return Double(value) }
+        return Double("\(raw ?? "")") ?? 0
+    }
+
+    private func bool(_ raw: Any?, fallback: Bool = false) -> Bool {
+        if let value = raw as? Bool { return value }
+        if let value = raw as? Int { return value != 0 }
+        let text = "\(raw ?? "")"
+        return text == "1" || text.lowercased() == "true" ? true : fallback
     }
 }
 

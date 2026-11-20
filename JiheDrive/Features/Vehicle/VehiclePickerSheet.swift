@@ -53,24 +53,15 @@ struct VehiclePickerSheet: View {
                         }
                     }
 
-                    HStack(spacing: 8) {
-                        if let modelName = vehicle.modelName, !modelName.isEmpty {
-                            Text(modelName)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Theme.secondary)
-                                .lineLimit(1)
-                        } else {
-                            Text(vehicle.isCarMaster ? "我的车辆" : "共享车辆")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Theme.secondary)
-                        }
-
-                        Circle()
-                            .fill(vehicle.isOnline ? Theme.green : Theme.tertiary)
-                            .frame(width: 5, height: 5)
-                        Text(vehicle.isOnline ? "在线" : "离线")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(vehicle.isOnline ? Theme.green : Theme.tertiary)
+                    if let modelName = vehicle.modelName, !modelName.isEmpty {
+                        Text(modelName)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(1)
+                    } else {
+                        Text(vehicle.isCarMaster ? "我的车辆" : "共享车辆")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.secondary)
                     }
 
                     if vehicle.isShared, let nick = vehicle.shareNickName, !nick.isEmpty {
@@ -81,22 +72,6 @@ struct VehiclePickerSheet: View {
                 }
 
                 Spacer(minLength: 0)
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        Text("\(vehicle.soc)")
-                            .font(.system(size: 18, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Theme.label)
-                            .monospacedDigit()
-                        Text("%")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.tertiary)
-                    }
-                    Text("\(vehicle.rangeKm) km")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.tertiary)
-                        .monospacedDigit()
-                }
 
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .regular))

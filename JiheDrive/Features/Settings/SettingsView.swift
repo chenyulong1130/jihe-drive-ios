@@ -11,6 +11,8 @@ struct SettingsView: View {
     @State private var showTheme = false
     @State private var showBattery = false
     @State private var showDashboardWallpaper = false
+    @State private var showSigninDetail = false
+    @StateObject private var signin = SigninStore()
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -20,26 +22,32 @@ struct SettingsView: View {
 
                 accountCard.staggerIn(1)
 
+                SectionHeader("签到")
+                SigninPanel(store: signin, onMore: { showSigninDetail = true })
+                    .padding(.bottom, 8)
+                    .staggerIn(2)
+
                 SectionHeader("车辆")
-                vehicleSection.staggerIn(2)
+                vehicleSection.staggerIn(3)
 
                 SectionHeader("外观")
-                appearanceSection.staggerIn(3)
+                appearanceSection.staggerIn(4)
 
                 SectionHeader("个性化")
-                personalSection.staggerIn(4)
+                personalSection.staggerIn(5)
 
                 SectionHeader("桌面")
-                widgetSection.staggerIn(5)
+                widgetSection.staggerIn(6)
 
                 logoutButton
                     .padding(.top, 24)
-                    .staggerIn(6)
+                    .staggerIn(7)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
             .padding(.bottom, 118)
         }
+        .task { await signin.refresh() }
         .sheet(isPresented: $showPicker) {
             VehiclePickerSheet()
         }
@@ -55,6 +63,10 @@ struct SettingsView: View {
             if let vehicle = model.selectedVehicle {
                 BatterySheet(vehicle: vehicle)
             }
+        }
+        .sheet(isPresented: $showSigninDetail) {
+            SigninDetailSheet()
+                .environmentObject(signin)
         }
     }
 
@@ -244,13 +256,14 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Text("未签名安装时系统可能屏蔽 App Group，需用带描述文件的安装方式才能互通数据。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Button {
                     Task {
-                        if let vin = model.selectedVehicle?.vinNo {
-                            await model.loadBattery(vin: vin)
-                            await model.loadTire(vin: vin)
-                        }
-                        let signin = SigninStore()
+                        await model.refreshAll()
                         await signin.refresh()
                         WidgetSnapshot.publish(from: model, signin: signin)
                     }

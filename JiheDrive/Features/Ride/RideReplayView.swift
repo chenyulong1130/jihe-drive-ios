@@ -326,8 +326,9 @@ struct RideReplayView: View {
             Text(value)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.label)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

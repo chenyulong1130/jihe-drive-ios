@@ -163,6 +163,7 @@ final class AppModel: ObservableObject {
             await loadDetail(vin: vin)
             await loadTire(vin: vin)
         }
+        WidgetSnapshot.publish(from: self)
     }
 
     /// 胎压传感器接口，独立于车辆详情，失败不影响主流程

@@ -83,9 +83,15 @@ struct DashboardWallpaperSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 20)
                     } else {
-                        VStack(spacing: 8) {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.flexible(), spacing: 10),
+                                GridItem(.flexible(), spacing: 10)
+                            ],
+                            spacing: 10
+                        ) {
                             ForEach(items) { item in
-                                wallpaperRow(item)
+                                wallpaperTile(item)
                             }
                         }
                     }
@@ -111,11 +117,11 @@ struct DashboardWallpaperSheet: View {
         }
     }
 
-    private func wallpaperRow(_ item: DashboardWallpaperItem) -> some View {
+    private func wallpaperTile(_ item: DashboardWallpaperItem) -> some View {
         Button {
             selected = item
         } label: {
-            HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(hex: 0x1C1C1E))
@@ -136,33 +142,32 @@ struct DashboardWallpaperSheet: View {
                         }
                         .allowsHitTesting(false)
                     }
+                    if item.isLive {
+                        Text("使用中")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Theme.green.opacity(0.92)))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            .padding(8)
+                    }
                 }
-                .frame(width: 108, height: 64)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(16 / 10, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8)
                 )
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                    if item.isLive {
-                        Text("仪表使用中")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.green)
-                    } else {
-                        Text("云端已保存")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.tertiary)
-                    }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Theme.tertiary)
+                Text(item.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(1)
+                Text(item.isLive ? "仪表使用中" : "云端已保存")
+                    .font(.system(size: 11))
+                    .foregroundStyle(item.isLive ? Theme.green : Theme.tertiary)
             }
             .padding(10)
             .background(
@@ -170,7 +175,7 @@ struct DashboardWallpaperSheet: View {
                     .fill(Theme.surface)
             )
         }
-        .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+        .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
     }
 
     private var draftPreviewSheet: some View {

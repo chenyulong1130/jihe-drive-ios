@@ -129,6 +129,9 @@ enum RideTrackService {
         var mileage: Double
         var minutes: Int
         var maxSpeed: Double
+        var accelTimes: Int
+        var brakeTimes: Int
+        var bendTimes: Int
     }
 
     /// 车辆页双卡：最近骑行 + 今日（对齐 Flutter homeRideInfo + rideDayInfo）
@@ -138,6 +141,9 @@ enum RideTrackService {
         var todayKm: Double?
         var todayMin: Int?
         var todayMaxSpeed: Double?
+        var todayAccel: Int?
+        var todayBrake: Int?
+        var todayBend: Int?
     }
 
     static func daySummary(vin: String, date: Date = Date()) async -> DaySummary? {
@@ -154,10 +160,18 @@ enum RideTrackService {
         guard code.isEmpty || code == "10000" else { return nil }
         guard let data = response["data"] as? [String: Any] else { return nil }
 
+        let maxSpeed = Vehicle.doubleValue(data["maxSpeed"])
+            ?? Vehicle.doubleValue(data["maxSpeedDay"])
+            ?? Vehicle.doubleValue(data["highestSpeed"])
+            ?? Vehicle.doubleValue(data["rideMaxSpeed"])
+            ?? 0
         return DaySummary(
             mileage: Vehicle.doubleValue(data["rideMileageDay"]) ?? 0,
             minutes: Int(Vehicle.doubleValue(data["ridingTimeDayUnitMinute"]) ?? 0),
-            maxSpeed: Vehicle.doubleValue(data["maxSpeed"]) ?? 0
+            maxSpeed: maxSpeed,
+            accelTimes: Int(Vehicle.doubleValue(data["accelerationTimesDay"]) ?? 0),
+            brakeTimes: Int(Vehicle.doubleValue(data["brakesTimesDay"]) ?? 0),
+            bendTimes: Int(Vehicle.doubleValue(data["bendingTimesDay"]) ?? 0)
         )
     }
 
@@ -194,7 +208,7 @@ enum RideTrackService {
             list = []
         }
 
-        return list.compactMap { item in
+        let parsed = list.compactMap { item -> MonthDay? in
             let rawDate = text(item["date"] ?? item["dayTime"] ?? item["rideDate"]) ?? ""
             let date = rawDate.replacingOccurrences(of: "-", with: ".")
             let mileage = Vehicle.doubleValue(item["rideMileage"] ?? item["rideMileageDay"] ?? item["mileage"]) ?? 0
@@ -202,6 +216,52 @@ enum RideTrackService {
             guard !date.isEmpty else { return nil }
             return MonthDay(date: date, mileage: mileage, minutes: minutes)
         }
+        if !parsed.isEmpty { return parsed }
+        // 共享车月汇总常为空，改用当月 ridetrack_v2 按天汇总（Z-Link 同样走轨迹）
+        return await monthFromTracks(vin: vin, month: month)
+    }
+
+    private static func monthFromTracks(vin: String, month: Date) async -> [MonthDay] {
+        let calendar = Calendar.current
+        guard let start = calendar.date(from: calendar.dateComponents([.year, .month], from: month)),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: start) else {
+            return []
+        }
+        let end = min(monthEnd, Date())
+        guard let tracks = await tracks(vin: vin, from: start, to: end, pageSize: 80) else { return [] }
+
+        var buckets: [String: (km: Double, min: Int)] = [:]
+        let display = DateFormatter()
+        display.locale = Locale(identifier: "en_US_POSIX")
+        display.dateFormat = "yyyy.MM.dd"
+        let parse = DateFormatter()
+        parse.locale = Locale(identifier: "en_US_POSIX")
+        parse.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        let year = calendar.component(.year, from: month)
+        for track in tracks {
+            let raw = track.startTime ?? ""
+            let day: String
+            if let date = parse.date(from: raw) ?? parse.date(from: String(raw.prefix(19))) {
+                day = display.string(from: date)
+            } else {
+                let head = raw.split(separator: " ").first.map(String.init) ?? raw
+                let bits = head.split(separator: ".").map(String.init)
+                if bits.count >= 3, bits[0].count == 4 {
+                    day = bits.prefix(3).joined(separator: ".")
+                } else if bits.count >= 2, let monthNum = Int(bits[0]), let dayNum = Int(bits[1]) {
+                    day = String(format: "%04d.%02d.%02d", year, monthNum, dayNum)
+                } else {
+                    continue
+                }
+            }
+            var bucket = buckets[day] ?? (0, 0)
+            bucket.km += track.mileage
+            bucket.min += track.durationMinutes
+            buckets[day] = bucket
+        }
+        return buckets.map { MonthDay(date: $0.key, mileage: $0.value.km, minutes: $0.value.min) }
+            .sorted { $0.date < $1.date }
     }
 
     private static let dottedMonth: DateFormatter = {
@@ -236,15 +296,33 @@ enum RideTrackService {
                         ?? Vehicle.doubleValue(data["lastRidingTime"])
                 ) ?? times.last
                 extra.todayKm = positive(Vehicle.doubleValue(data["rideMileageDay"]))
+                extra.todayMaxSpeed = positive(
+                    Vehicle.doubleValue(data["maxSpeed"])
+                        ?? Vehicle.doubleValue(data["maxSpeedDay"])
+                        ?? Vehicle.doubleValue(data["highestSpeed"])
+                )
             }
         }
 
         if let day = await daySummary(vin: vin) {
-            // rideDayInfo 为今日权威；home 有今日里程时也保留，两者取正值优先 day
+            // rideDayInfo 为今日权威
             if day.mileage > 0 { extra.todayKm = day.mileage }
-            else if extra.todayKm == nil { /* keep nil */ }
             if day.minutes > 0 { extra.todayMin = day.minutes }
             if day.maxSpeed > 0 { extra.todayMaxSpeed = day.maxSpeed }
+            if day.accelTimes > 0 { extra.todayAccel = day.accelTimes }
+            if day.brakeTimes > 0 { extra.todayBrake = day.brakeTimes }
+            if day.bendTimes > 0 { extra.todayBend = day.bendTimes }
+        }
+
+        // 仍无极速时，用今日行程轨迹采样兜底
+        if extra.todayMaxSpeed == nil {
+            if let tracks = await tracks(vin: vin, days: 1), !tracks.isEmpty {
+                let peak = tracks.compactMap { track -> Double? in
+                    if let max = track.maxSpeed, max > 0 { return max }
+                    return track.speedSamples.max()
+                }.max() ?? 0
+                if peak > 0 { extra.todayMaxSpeed = peak }
+            }
         }
 
         return extra

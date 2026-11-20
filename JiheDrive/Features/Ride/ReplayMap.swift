@@ -13,11 +13,15 @@ struct ReplayMap: UIViewRepresentable {
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.delegate = context.coordinator
+        map.mapType = .standard
+        map.overrideUserInterfaceStyle = .light
         map.showsCompass = false
         map.showsUserLocation = false
         map.isRotateEnabled = false
         map.isPitchEnabled = false
         map.pointOfInterestFilter = .excludingAll
+        // 避免深色模式下底图发黑看不清轨迹
+        map.backgroundColor = UIColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
         context.coordinator.configure(map: map, points: points, speeds: speeds)
         return map
     }

@@ -467,24 +467,22 @@ struct HeroStage: View {
             Button {
                 onOpenTire?()
             } label: {
-                HStack(spacing: 16) {
+                HStack(spacing: 0) {
                     if let front {
                         tireCell(title: "前轮", bar: front)
+                            .frame(maxWidth: .infinity)
                     }
                     if front != nil && rear != nil {
                         Rectangle()
-                            .fill(primary.opacity(0.22))
-                            .frame(width: 0.5, height: 22)
+                            .fill(primary.opacity(0.28))
+                            .frame(width: 1, height: 36)
                     }
                     if let rear {
                         tireCell(title: "后轮", bar: rear)
+                            .frame(maxWidth: .infinity)
                     }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(secondaryText.opacity(0.65))
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
@@ -507,18 +505,25 @@ struct HeroStage: View {
     }
 
     private func tireCell(title: String, bar: Double) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
+        VStack(spacing: 3) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(secondaryText)
-            Text(String(format: "%.1f", bar))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(tireTint(bar))
-                .monospacedDigit()
-            Text("bar")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(secondaryText)
+                .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(String(format: "%.1f", bar))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundStyle(tireTint(bar))
+                    .monospacedDigit()
+                    .shadow(color: Color.black.opacity(onDark ? 0.65 : 0.22), radius: 3, y: 1)
+                Text("bar")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(secondaryText)
+                    .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
     }
 
     private func tireTint(_ bar: Double) -> Color {
