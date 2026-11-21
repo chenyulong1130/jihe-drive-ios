@@ -675,6 +675,24 @@ enum ReplayClock {
         return nil
     }
 
+    /// 折线 / 进度条共用：progress 是时间比例，不是点序号。
+    static func sampleValue(
+        _ values: [Double],
+        times: [TimeInterval],
+        duration: TimeInterval,
+        progress: Double
+    ) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let dummy = values.map { _ in Coordinate(latitude: 0, longitude: 0) }
+        return interpolate(
+            points: dummy,
+            speeds: values,
+            times: times,
+            duration: duration,
+            progress: progress
+        ).speed
+    }
+
     static func interpolate(
         points: [Coordinate],
         speeds: [Double],

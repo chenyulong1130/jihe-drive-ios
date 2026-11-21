@@ -287,6 +287,7 @@ struct RideReplayView: View {
                     SpeedCurve(
                         speeds: speeds,
                         times: clock.times,
+                        duration: clock.duration,
                         progress: progress,
                         tint: Theme.brand
                     ) { value in
@@ -539,6 +540,7 @@ struct RideReplayView: View {
                     SpeedCurve(
                         speeds: speeds,
                         times: clock.times,
+                        duration: clock.duration,
                         progress: progress,
                         tint: Theme.brand,
                         height: 72
@@ -860,12 +862,14 @@ private struct ReplayTimeline: View {
 private struct SpeedCurve: View {
     let speeds: [Double]
     var times: [TimeInterval] = []
+    var duration: TimeInterval = 0
     let progress: Double
     var tint: Color = Theme.brand
     var height: CGFloat = 112
     let onScrub: (Double) -> Void
 
     private var maxValue: Double { max(1, speeds.max() ?? 1) }
+    private var span: TimeInterval { max(duration, times.last ?? 0, 1) }
 
     var body: some View {
         GeometryReader { geo in
@@ -892,7 +896,7 @@ private struct SpeedCurve: View {
                         )
 
                     peakTag(points, size: size)
-                    cursor(points, size: size)
+                    cursor(size: size)
                 }
             }
             .contentShape(Rectangle())
@@ -918,17 +922,16 @@ private struct SpeedCurve: View {
         .stroke(Theme.separator.opacity(0.6), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
     }
 
-    /// 顶部留 12pt 给峰值标签；x 按真实时间戳铺，停车段会挤在一起
+    /// 顶部留空给峰值标签；x 和回放 progress 共用同一段墙钟时长
     private func laid(out size: CGSize) -> [CGPoint] {
         guard speeds.count > 1 else { return [] }
         let top: CGFloat = 14
         let usable = max(1, size.height - top)
-        let duration = max(times.last ?? 0, 1)
-        let useTime = times.count == speeds.count && duration > 0
+        let useTime = times.count == speeds.count && span > 0
         return speeds.enumerated().map { index, speed in
             let x: CGFloat
             if useTime {
-                x = size.width * CGFloat(times[index] / duration)
+                x = size.width * CGFloat(min(max(times[index] / span, 0), 1))
             } else {
                 x = size.width * CGFloat(index) / CGFloat(speeds.count - 1)
             }
@@ -972,10 +975,13 @@ private struct SpeedCurve: View {
         }
     }
 
-    private func cursor(_ points: [CGPoint], size: CGSize) -> some View {
+    private func cursor(size: CGSize) -> some View {
         let clamped = min(max(progress, 0), 1)
         let x = size.width * CGFloat(clamped)
-        let y = value(at: clamped, in: points)
+        let speed = ReplayClock.sampleValue(speeds, times: times, duration: span, progress: clamped)
+        let top: CGFloat = 14
+        let usable = max(1, size.height - top)
+        let y = top + usable * (1 - CGFloat(min(max(speed / maxValue, 0), 1)))
         return ZStack {
             // 已播放区间淡色遮罩，和时间轴同 progress
             Rectangle()
@@ -1000,15 +1006,5 @@ private struct SpeedCurve: View {
                 )
                 .position(x: x, y: y)
         }
-    }
-
-    private func value(at ratio: Double, in points: [CGPoint]) -> CGFloat {
-        guard points.count > 1 else { return 0 }
-        let raw = ratio * Double(points.count - 1)
-        let index = min(points.count - 2, max(0, Int(raw)))
-        let fraction = CGFloat(raw - Double(index))
-        let a = points[index]
-        let b = points[index + 1]
-        return a.y + (b.y - a.y) * fraction
     }
 }

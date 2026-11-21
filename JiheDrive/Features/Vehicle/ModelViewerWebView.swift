@@ -111,7 +111,7 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "0.28deg 83.06deg 3.086m"
+        let orbit = "-6.5deg 83.06deg 3.086m"
         let target = "-0.02m auto auto"
         // 可拖拽时放宽方位角；仰角仍锁在约 83°，避免翻车底
         let minOrbit = interactive ? "auto 70deg 2.2m" : "auto 83.06deg 2.53m"
@@ -156,9 +156,16 @@ enum ModelViewerAsset {
           environment-image="neutral"
           reveal="auto"
           disable-pan
+          minimum-render-scale="0.5"
           \(controls)
           \(rotation)>
         </model-viewer>
+        <script>
+          const viewer = document.getElementById('viewer');
+          viewer.addEventListener('load', () => {
+            if (!viewer.hasAttribute('auto-rotate') && viewer.pause) viewer.pause();
+          });
+        </script>
         </body>
         </html>
         """

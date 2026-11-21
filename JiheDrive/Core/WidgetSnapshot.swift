@@ -193,6 +193,9 @@ enum WidgetSnapshot {
             snap.totalMile = vehicle.totalMileKm
             snap.monthMile = vehicle.monthMileage ?? snap.monthMile
             snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+            if snap.imageData == nil {
+                snap.imageData = loadImage(vehicle.vinNo)
+            }
         }
         if let ride {
             snap.todayKm = ride.todayKm ?? snap.todayKm
@@ -402,9 +405,8 @@ enum WidgetSnapshot {
 
     static func imageFileURL(_ vin: String? = nil) -> URL? {
         let name: String
-        if let vin, !vin.isEmpty {
-            let safe = vin.replacingOccurrences(of: "/", with: "_")
-            name = "widget_vehicle_\(safe).png"
+        if let key = imageKey(vin) {
+            name = "widget_vehicle_\(key).png"
         } else {
             name = imageName
         }
@@ -413,22 +415,26 @@ enum WidgetSnapshot {
             .appendingPathComponent(name)
     }
 
+    /// 文件名统一大写，避免切车后大小写不一致读到别的车图
+    private static func imageKey(_ vin: String?) -> String? {
+        let trimmed = vin?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.replacingOccurrences(of: "/", with: "_")
+    }
+
     static func saveImage(_ data: Data, vin: String? = nil) {
         let targetVin = vin ?? selectedVin()
-        if let url = imageFileURL(targetVin) {
-            try? data.write(to: url, options: [.atomic])
-        }
-        if let url = imageFileURL() {
-            try? data.write(to: url, options: [.atomic])
+        guard let url = imageFileURL(targetVin) else { return }
+        try? data.write(to: url, options: [.atomic])
+        // 当前选中车再写一份通用文件，给预览占位用，不拿它给别的 VIN
+        if sameVin(targetVin, selectedVin()) || selectedVin() == nil, let generic = imageFileURL() {
+            try? data.write(to: generic, options: [.atomic])
         }
     }
 
     static func loadImage(_ vin: String? = nil) -> Data? {
         let targetVin = vin ?? selectedVin()
         if let url = imageFileURL(targetVin), let data = try? Data(contentsOf: url), !data.isEmpty {
-            return data
-        }
-        if let url = imageFileURL(), let data = try? Data(contentsOf: url), !data.isEmpty {
             return data
         }
         return nil

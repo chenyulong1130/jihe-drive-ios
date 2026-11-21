@@ -12,6 +12,7 @@ struct VehicleView: View {
     @StateObject private var model3D = VehicleModelLoader()
     @State private var heroGLB: URL?
     @State private var loadedModelVin: String?
+    @State private var glbByVin: [String: URL] = [:]
 
     @State private var busy: String?
     @State private var toast: String?
@@ -97,12 +98,12 @@ struct VehicleView: View {
         .task(id: model.selectedVehicle?.vinNo) {
             guard let vin = model.selectedVehicle?.vinNo else { return }
             if loadedModelVin != vin {
-                heroGLB = nil
-                model3D.clear()
+                restoreCachedHero(vin: vin)
                 loadedModelVin = vin
             }
             rideExtra = nil
             resolvedAddress = nil
+            async let photo: Void = cacheSelectedPhoto()
             async let ride: Void = loadRideSummary(vin: vin)
             async let battery: Void = model.loadBattery(vin: vin)
             async let detail: Void = model.loadDetail(vin: vin)
@@ -110,7 +111,7 @@ struct VehicleView: View {
             async let sign: Void = signin.refresh()
             async let addr: Void = resolveAddressIfNeeded()
             async let inbox: Void = messages.refresh()
-            _ = await (ride, battery, detail, tire, sign, addr, inbox)
+            _ = await (photo, ride, battery, detail, tire, sign, addr, inbox)
             await loadHeroModel()
             await signin.syncWidget(model: model, ride: rideExtra)
             syncChargeIsland()
@@ -212,7 +213,25 @@ struct VehicleView: View {
         )
     }
 
-    /// glb 走 model-viewer，其余格式交给 SceneKit；切车必须强制重载
+    /// 切车时先用这份 VIN 缓存，避免 3D / 车图重新下载闪一下
+    private func restoreCachedHero(vin: String) {
+        if let file = glbByVin[vin] {
+            heroGLB = file
+            model3D.clear()
+            return
+        }
+        heroGLB = nil
+        if let vehicle = model.selectedVehicle,
+           vehicle.vinNo == vin,
+           let url = vehicle.model3DURL,
+           !vehicle.isGLBModel {
+            model3D.load(url)
+            return
+        }
+        model3D.clear()
+    }
+
+    /// glb 走 model-viewer，其余格式交给 SceneKit；同一 VIN 命中磁盘/内存缓存就不再请求
     private func loadHeroModel() async {
         guard let vehicle = model.selectedVehicle else {
             heroGLB = nil
@@ -220,6 +239,11 @@ struct VehicleView: View {
             return
         }
         let vin = vehicle.vinNo
+        await cacheSelectedPhoto()
+        if let cached = glbByVin[vin] {
+            heroGLB = cached
+            return
+        }
         guard let url = vehicle.model3DURL else {
             guard model.selectedVehicle?.vinNo == vin else { return }
             heroGLB = nil
@@ -227,14 +251,27 @@ struct VehicleView: View {
             return
         }
         if vehicle.isGLBModel {
-            if heroGLB == nil {
-                let file = try? await GLBModelStore.localFile(for: url)
-                guard model.selectedVehicle?.vinNo == vin else { return }
+            let file = try? await GLBModelStore.localFile(for: url)
+            guard model.selectedVehicle?.vinNo == vin else { return }
+            if let file {
+                glbByVin[vin] = file
                 heroGLB = file
             }
         } else {
             heroGLB = nil
             model3D.load(url)
+        }
+    }
+
+    private func cacheSelectedPhoto() async {
+        guard let vehicle = model.selectedVehicle, let url = vehicle.imageURL else { return }
+        let vin = vehicle.vinNo
+        _ = await ResourceCache.image(for: url)
+        guard model.selectedVehicle?.vinNo == vin else { return }
+        if WidgetSnapshot.loadImage(vin) == nil,
+           let image = ResourceCache.cachedImage(url),
+           let data = image.jpegData(compressionQuality: 0.84) {
+            WidgetSnapshot.saveImage(data, vin: vin)
         }
     }
 
@@ -650,7 +687,12 @@ struct VehicleView: View {
     @ViewBuilder
     private func mapBody(_ vehicle: Vehicle) -> some View {
         if let coordinate = vehicle.coordinate {
-            VehicleMapView(coordinate: coordinate, interactive: false)
+            VehicleMapView(
+                coordinate: coordinate,
+                interactive: false,
+                vehicleImage: ResourceCache.cachedImage(vehicle.imageURL),
+                vehicleImageURL: vehicle.imageURL
+            )
                 .id(vehicle.vinNo)
                 .allowsHitTesting(false)
         } else {

@@ -58,8 +58,10 @@ struct ReplayMap: UIViewRepresentable {
         private var lineWidths: [ObjectIdentifier: CGFloat] = [:]
         private var marker: ReplayCursorAnnotation?
         private var didFit = false
+        private var didZoomFollow = false
         private var followEnabled = false
         private var cameraTarget: CLLocationCoordinate2D?
+        private var lerpUntil: CFTimeInterval = 0
         private var displayLink: CADisplayLink?
         private let tickProxy = TickProxy()
         private weak var mapView: MKMapView?
@@ -182,19 +184,34 @@ struct ReplayMap: UIViewRepresentable {
             }
             cameraTarget = current
 
-            followEnabled = follow
             if !follow {
+                if progress < 0.01 || progress > 0.99 {
+                    didZoomFollow = false
+                }
+                followEnabled = false
                 stopLink()
                 return
             }
 
+            followEnabled = true
             startLink()
+            if !didZoomFollow {
+                didZoomFollow = true
+                lerpUntil = CACurrentMediaTime() + 0.42
+                let camera = MKMapCamera(
+                    lookingAtCenter: current,
+                    fromDistance: 520,
+                    pitch: 0,
+                    heading: 0
+                )
+                map.setCamera(camera, animated: true)
+            }
         }
 
         private func startLink() {
             guard displayLink == nil else { return }
             let link = CADisplayLink(target: tickProxy, selector: #selector(TickProxy.tick(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
             link.add(to: .main, forMode: .common)
             displayLink = link
         }
@@ -205,20 +222,27 @@ struct ReplayMap: UIViewRepresentable {
         }
 
         fileprivate func onTick(_ link: CADisplayLink) {
-            _ = link
             guard followEnabled, let map = mapView, let target = cameraTarget else { return }
             if isUserGesture(on: map) { return }
+            if CACurrentMediaTime() < lerpUntil { return }
 
-            let visible = map.visibleMapRect.insetBy(
-                dx: map.visibleMapRect.size.width * 0.18,
-                dy: map.visibleMapRect.size.height * 0.22
-            )
-            let point = MKMapPoint(target)
-            if visible.contains(point) { return }
-
+            let current = map.centerCoordinate
+            let far = abs(current.latitude - target.latitude) > 0.004
+                || abs(current.longitude - target.longitude) > 0.004
+            let next: CLLocationCoordinate2D
+            if far {
+                next = target
+            } else {
+                let dt = link.duration > 0 ? link.duration : 1.0 / 60.0
+                let k = 1 - exp(-dt / 0.12)
+                next = CLLocationCoordinate2D(
+                    latitude: current.latitude + (target.latitude - current.latitude) * k,
+                    longitude: current.longitude + (target.longitude - current.longitude) * k
+                )
+            }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            map.setCenter(target, animated: false)
+            map.centerCoordinate = next
             CATransaction.commit()
         }
 

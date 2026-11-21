@@ -41,7 +41,7 @@ struct RootView: View {
             _ = await ResourceCache.image(for: model.selectedVehicle?.imageURL)
         }
         .onAppear {
-            appearance.refreshResolved()
+            appearance.applyToWindows(setStyle: true)
             LocationPermissionRequester.shared.request()
             messages.requestPermission()
         }
@@ -64,7 +64,7 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                appearance.applyToWindows()
+                appearance.applyToWindows(setStyle: false)
             }
         }
         .animation(nil, value: scenePhase)

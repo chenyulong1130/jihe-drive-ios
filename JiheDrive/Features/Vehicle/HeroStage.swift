@@ -64,11 +64,11 @@ struct HeroStage: View {
                 .allowsHitTesting(false)
                 .overlay(alignment: .bottom) {
                     LinearGradient(
-                        colors: [Color.clear, Theme.groupedBackground],
+                        colors: [Color.clear, Theme.groupedBackground.opacity(0.55), Theme.groupedBackground],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: 36)
+                    .frame(height: hasTire ? 88 : 36)
                     .allowsHitTesting(false)
                 }
 
@@ -220,7 +220,8 @@ struct HeroStage: View {
     private var carTopPad: CGFloat { topInset + 96 }
     /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
-    private var carBottomPad: CGFloat { hasTire ? 36 : 0 }
+    /// 模型和胎压重叠一段，靠底部虚化过渡，不再硬切开
+    private var carBottomPad: CGFloat { hasTire ? 22 : 0 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -244,26 +245,33 @@ struct HeroStage: View {
                         }
                         .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
+                        .mask(carFadeMask)
                         .simultaneousGesture(heroDrag)
                         .onChange(of: modelGLBFile) { _, _ in glbRevealed = false }
                 } else if let modelScene {
-                    VehicleSceneView(
-                        scene: modelScene,
-                        interactive: true,
-                        autoSpin: false,
-                        spinSpeed: 0,
-                        onDrag: onInteract
-                    )
-                        .padding(.top, carTopPad)
-                        .padding(.bottom, carBottomPad)
-                        .simultaneousGesture(heroDrag)
+                    ZStack {
+                        twoDCar.opacity(0.001)
+                        VehicleSceneView(
+                            scene: modelScene,
+                            interactive: true,
+                            autoSpin: false,
+                            spinSpeed: 0,
+                            onDrag: onInteract
+                        )
+                    }
+                    .padding(.top, carTopPad)
+                    .padding(.bottom, carBottomPad)
+                    .mask(carFadeMask)
+                    .simultaneousGesture(heroDrag)
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
+                        .mask(carFadeMask)
                         .allowsHitTesting(false)
                 }
             }
+            .offset(x: -16)
 
             // 坐垫：叠在车图右上（对齐 Flutter / 小程序），不进顶栏
             Button(action: onOpenCushion) {
@@ -286,10 +294,10 @@ struct HeroStage: View {
 
     private var twoDCar: some View {
         ZStack {
-            Ellipse()
-                .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
-                .frame(width: 240, height: 12)
-                .blur(radius: 10)
+                Ellipse()
+                    .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
+                    .frame(width: 240, height: 12)
+                    .blur(radius: 6)
                 .offset(y: 16)
 
             if vehicle.isCharging {
@@ -493,6 +501,20 @@ struct HeroStage: View {
 
     // MARK: - 胎压
 
+    /// 车身底部虚化，和胎压条叠在一起
+    private var carFadeMask: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .black, location: 0),
+                .init(color: .black, location: hasTire ? 0.72 : 0.92),
+                .init(color: .black.opacity(0.35), location: hasTire ? 0.88 : 0.97),
+                .init(color: .clear, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     @ViewBuilder
     private var tireStrip: some View {
         let front = validBar(frontBar)
@@ -515,7 +537,13 @@ struct HeroStage: View {
                         tireUnbound(title: "后轮")
                     }
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .opacity(0.72)
+                }
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
@@ -600,9 +628,9 @@ private struct ChargingGlow: View {
 
     var body: some View {
         Ellipse()
-            .fill(Theme.green.opacity(pulse ? 0.42 : 0.14))
+            .fill(Theme.green.opacity(pulse ? 0.38 : 0.14))
             .frame(width: 268, height: 22)
-            .blur(radius: 16)
+            .blur(radius: 8)
             .onAppear {
                 withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true)) {
                     pulse = true

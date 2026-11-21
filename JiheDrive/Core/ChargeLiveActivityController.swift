@@ -28,6 +28,9 @@ enum ChargeLiveActivityController {
         let content = ActivityContent(state: state, staleDate: stale)
 
         let vin = vehicle.vinNo
+        for leftover in Activity<ChargeActivityAttributes>.activities where leftover.attributes.vin != vin {
+            Task { await leftover.end(nil, dismissalPolicy: .immediate) }
+        }
         let existing = Activity<ChargeActivityAttributes>.activities.filter { $0.attributes.vin == vin }
         if charging {
             if let activity = existing.first {

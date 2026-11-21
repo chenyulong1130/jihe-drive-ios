@@ -12,7 +12,7 @@ enum MapAppearance {
         map.showsTraffic = false
         map.pointOfInterestFilter = .includingAll
 
-        let config = MKStandardMapConfiguration(elevationStyle: .realistic, emphasisStyle: .default)
+        let config = MKStandardMapConfiguration(elevationStyle: .flat, emphasisStyle: .default)
         config.pointOfInterestFilter = .includingAll
         config.showsTraffic = false
         map.preferredConfiguration = config

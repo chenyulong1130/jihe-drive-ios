@@ -14,6 +14,9 @@ struct VehicleMapView: UIViewRepresentable {
     var showsUser: Bool = false
     /// 递增即重新聚焦到车辆 / 轨迹
     var recenterToken: Int = 0
+    /// 车辆官方图 / 3D 截图，当作定位点
+    var vehicleImage: UIImage? = nil
+    var vehicleImageURL: URL? = nil
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -45,6 +48,15 @@ struct VehicleMapView: UIViewRepresentable {
             coordinator.reloadTrack(on: map, track: track)
         }
 
+        if vehicleImage != nil, coordinator.markerImage !== vehicleImage {
+            coordinator.markerImage = vehicleImage
+            coordinator.applyMarker(on: map)
+        }
+        if coordinator.markerURL != vehicleImageURL {
+            coordinator.markerURL = vehicleImageURL
+            coordinator.loadMarker(on: map, url: vehicleImageURL, fallback: vehicleImage)
+        }
+
         if !coordinator.didFocus || coordinator.lastRecenter != recenterToken || sourceChanged {
             coordinator.lastRecenter = recenterToken
             coordinator.focus(
@@ -68,6 +80,9 @@ struct VehicleMapView: UIViewRepresentable {
         var lastTrack: [Coordinate] = []
         var lastRecenter = -1
         var didFocus = false
+        var markerImage: UIImage?
+        var markerURL: URL?
+        private var markerTask: Task<Void, Never>?
 
         func reloadVehicle(on map: MKMapView, coordinate: Coordinate?) {
             let existing = map.annotations.compactMap { $0 as? VehicleAnnotation }
@@ -115,6 +130,29 @@ struct VehicleMapView: UIViewRepresentable {
             map.setRegion(region, animated: animated)
         }
 
+        func applyMarker(on map: MKMapView) {
+            map.annotations.compactMap { map.view(for: $0) as? VehiclePinView }.forEach {
+                $0.apply(vehicleImage: markerImage)
+            }
+        }
+
+        func loadMarker(on map: MKMapView, url: URL?, fallback: UIImage?) {
+            markerTask?.cancel()
+            if let fallback {
+                markerImage = fallback
+                applyMarker(on: map)
+            }
+            guard let url else { return }
+            markerTask = Task { [weak self] in
+                let image = await ResourceCache.image(for: url)
+                await MainActor.run {
+                    guard let self, !Task.isCancelled else { return }
+                    self.markerImage = image ?? fallback
+                    self.applyMarker(on: map)
+                }
+            }
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             guard annotation is VehicleAnnotation else { return nil }
             let view = mapView.dequeueReusableAnnotationView(
@@ -122,6 +160,9 @@ struct VehicleMapView: UIViewRepresentable {
                 for: annotation
             )
             view.annotation = annotation
+            if let pin = view as? VehiclePinView {
+                pin.apply(vehicleImage: markerImage)
+            }
             return view
         }
 
@@ -158,20 +199,40 @@ final class VehiclePinView: MKAnnotationView {
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        image = Self.pinImage
-        centerOffset = CGPoint(x: 0, y: -25)
+        image = Self.fallbackPin
+        centerOffset = CGPoint(x: 0, y: -18)
         canShowCallout = false
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.2
-        layer.shadowRadius = 6
-        layer.shadowOffset = CGSize(width: 0, height: 3)
+        layer.shadowOpacity = 0.22
+        layer.shadowRadius = 5
+        layer.shadowOffset = CGSize(width: 0, height: 2)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private static let pinImage = makePinImage()
+    func apply(vehicleImage: UIImage?) {
+        if let vehicleImage {
+            image = Self.makeVehicleMarker(vehicleImage)
+            centerOffset = CGPoint(x: 0, y: -16)
+        } else {
+            image = Self.fallbackPin
+            centerOffset = CGPoint(x: 0, y: -25)
+        }
+    }
+
+    private static let fallbackPin = makePinImage()
+
+    private static func makeVehicleMarker(_ photo: UIImage) -> UIImage {
+        let size = CGSize(width: 72, height: 48)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 3
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            let rect = CGRect(x: 4, y: 2, width: 64, height: 40)
+            photo.draw(in: rect)
+        }
+    }
 
     private static func makePinImage() -> UIImage {
         let size = CGSize(width: 44, height: 54)

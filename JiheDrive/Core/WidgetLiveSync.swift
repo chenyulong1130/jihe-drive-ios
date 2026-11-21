@@ -178,15 +178,10 @@ enum WidgetLiveSync {
                 }
             }
         }
-        let vinChanged = !WidgetSnapshot.sameVin(cachedSnap?.vin, vehicle?.vinNo)
-        if (mode == .timeline || vinChanged), let url = vehicle?.imageURL {
-            snap.imageData = await downloadImage(url)
-            if let data = snap.imageData {
-                WidgetSnapshot.saveImage(data, vin: vehicle?.vinNo)
-            }
-        } else {
-            snap.imageData = WidgetSnapshot.loadImage(vehicle?.vinNo ?? snap.vin)
-        }
+        snap.imageData = await resolveImage(
+            vin: vehicle?.vinNo ?? snap.vin,
+            url: vehicle?.imageURL
+        )
 
         WidgetSnapshot.write(snap)
         reload()
@@ -239,22 +234,8 @@ enum WidgetLiveSync {
 
     private static func fetchVehicle(hint: Vehicle?, wanted: String?) async -> Vehicle? {
         let wanted = wanted ?? WidgetSnapshot.selectedVin() ?? hint?.vinNo
-        var list: [Vehicle] = []
-        if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicle/list") {
-            let code = ZeehoClient.codeString(res["code"])
-            if code.isEmpty || code == "10000" {
-                list = Vehicle.list(from: res)
-            }
-        }
-        var picked: Vehicle?
-        if let wanted, !wanted.isEmpty {
-            picked = list.first(where: { WidgetSnapshot.sameVin($0.vinNo, wanted) })
-                ?? (WidgetSnapshot.sameVin(hint?.vinNo, wanted) ? hint : nil)
-        } else {
-            picked = hint ?? list.first
-        }
-        let vin = picked?.vinNo ?? wanted
-        guard let vin, !vin.isEmpty else { return hint }
+        guard let vin = wanted, !vin.isEmpty else { return nil }
+        var picked: Vehicle? = WidgetSnapshot.sameVin(hint?.vinNo, vin) ? hint : nil
         if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)") {
             let code = ZeehoClient.codeString(res["code"])
             if code.isEmpty || code == "10000",
@@ -268,12 +249,8 @@ enum WidgetLiveSync {
                 }
             }
         }
-        if let wanted, !wanted.isEmpty {
-            if let picked, WidgetSnapshot.sameVin(picked.vinNo, wanted) { return picked }
-            if WidgetSnapshot.sameVin(hint?.vinNo, wanted) { return hint }
-            return nil
-        }
-        return picked ?? hint
+        if let picked, WidgetSnapshot.sameVin(picked.vinNo, vin) { return picked }
+        return WidgetSnapshot.sameVin(hint?.vinNo, vin) ? hint : nil
     }
 
     private static func fetchTire(vin: String?) async -> TireReading? {
@@ -521,15 +498,21 @@ enum WidgetLiveSync {
         return 0
     }
 
-    private static func downloadImage(_ url: URL) async -> Data? {
+    private static func resolveImage(vin: String?, url: URL?) async -> Data? {
+        if let cached = WidgetSnapshot.loadImage(vin), !cached.isEmpty {
+            return cached
+        }
+        guard let url else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
+        request.cachePolicy = .returnCacheDataElseLoad
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
               http.statusCode == 200,
               !data.isEmpty else {
-            return WidgetSnapshot.loadImage()
+            return WidgetSnapshot.loadImage(vin)
         }
+        WidgetSnapshot.saveImage(data, vin: vin)
         return data
     }
 }

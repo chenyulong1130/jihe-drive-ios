@@ -15,12 +15,14 @@ struct VehicleSceneView: UIViewRepresentable {
         let view = SCNView()
         view.scene = scene
         view.backgroundColor = .clear
-        view.antialiasingMode = .multisampling4X
-        view.preferredFramesPerSecond = 60
+        // 4x MSAA + 持续 60 帧会和录屏抢 GPU，空闲时 30 帧、关掉多重采样
+        view.antialiasingMode = .none
+        view.preferredFramesPerSecond = 30
         view.isUserInteractionEnabled = interactive
         view.allowsCameraControl = false
-        view.rendersContinuously = true
+        view.rendersContinuously = autoSpin
         view.isPlaying = true
+        view.isJitteringEnabled = false
 
         context.coordinator.onDrag = onDrag
         context.coordinator.attach(view: view, autoSpin: autoSpin, speed: spinSpeed)
@@ -65,9 +67,15 @@ struct VehicleSceneView: UIViewRepresentable {
             self.spinSpeed = speed
             orbit = view.scene?.rootNode.childNode(withName: "orbit", recursively: true)
             rig = orbit?.childNode(withName: "rig", recursively: false)
-            azimuth = orbit?.eulerAngles.y ?? 0
+            azimuth = (orbit?.eulerAngles.y ?? 0) + 0.18
             apply()
-            start()
+            if autoSpin {
+                start()
+            } else {
+                stop()
+                view.rendersContinuously = false
+                view.preferredFramesPerSecond = 30
+            }
         }
 
         func installGestures() {
@@ -110,6 +118,8 @@ struct VehicleSceneView: UIViewRepresentable {
 
             switch gesture.state {
             case .began:
+                view.rendersContinuously = true
+                view.preferredFramesPerSecond = 60
                 onDrag?(true)
             case .changed:
                 let move = gesture.translation(in: view)
@@ -120,17 +130,22 @@ struct VehicleSceneView: UIViewRepresentable {
                 apply()
             case .ended, .cancelled:
                 onDrag?(false)
-                // 轻甩的惯性
                 let velocity = Float(gesture.velocity(in: view).x) * 0.0012
-                guard abs(velocity) > 0.02 else { return }
+                guard abs(velocity) > 0.02 else {
+                    view.rendersContinuously = autoSpin
+                    view.preferredFramesPerSecond = 30
+                    return
+                }
                 var step = velocity
                 Task { @MainActor in
-                    for _ in 0..<24 {
-                        step *= 0.9
+                    for _ in 0..<18 {
+                        step *= 0.88
                         azimuth -= step
                         apply()
                         try? await Task.sleep(nanoseconds: 16_000_000)
                     }
+                    view.rendersContinuously = autoSpin
+                    view.preferredFramesPerSecond = 30
                 }
             default:
                 break

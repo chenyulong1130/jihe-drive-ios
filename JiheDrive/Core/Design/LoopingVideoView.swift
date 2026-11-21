@@ -66,6 +66,17 @@ final class LoopingPlayerView: UIView {
             self?.shouldPlay = true
             self?.resumeIfNeeded()
         })
+        appObservers.append(center.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                self?.player?.pause()
+            } else {
+                self?.resumeIfNeeded()
+            }
+        })
     }
 
     required init?(coder: NSCoder) {
@@ -104,9 +115,12 @@ final class LoopingPlayerView: UIView {
         Self.activateAudio()
 
         let item = AVPlayerItem(url: url)
-        item.preferredPeakBitRate = 0
-        if #available(iOS 15.0, *) {
-            item.preferredMaximumResolution = .zero
+        // 本地文件限分辨率不会转码，只影响 HLS；远程主题视频按 1080p 封顶
+        if !url.isFileURL {
+            item.preferredPeakBitRate = 6_000_000
+            if #available(iOS 15.0, *) {
+                item.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
+            }
         }
         let player = AVPlayer(playerItem: item)
         player.isMuted = muted
@@ -133,6 +147,10 @@ final class LoopingPlayerView: UIView {
 
     private func resumeIfNeeded() {
         guard shouldPlay, bounds.width > 1, bounds.height > 1 else { return }
+        if ProcessInfo.processInfo.isLowPowerModeEnabled {
+            player?.pause()
+            return
+        }
         player?.play()
     }
 

@@ -54,65 +54,127 @@ final class AppearanceStore: ObservableObject {
             saved = .system
         }
         mode = saved
-        resolvedScheme = Self.scheme(for: saved)
+        resolvedScheme = Self.scheme(for: saved, fallback: .light)
         observeSystem()
-        applyToWindows()
+        applyToWindows(setStyle: true)
     }
 
     func refreshResolved() {
-        let next = Self.scheme(for: mode)
+        let next = Self.scheme(for: mode, fallback: resolvedScheme)
         if resolvedScheme != next {
             resolvedScheme = next
         }
-        applyToWindows()
+        applyToWindows(setStyle: true)
     }
 
-    func applyToWindows() {
+    /// 回前台只涂窗口底色。再写 overrideUserInterfaceStyle 会触发整页重建，看起来就是白屏。
+    func applyToWindows(setStyle: Bool = false) {
         let dark = resolvedScheme == .dark
         let style: UIUserInterfaceStyle = dark ? .dark : .light
         let canvas = dark ? Self.darkCanvas : Self.lightCanvas
         UIView.performWithoutAnimation {
             for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
                 for window in scene.windows {
-                    window.overrideUserInterfaceStyle = style
-                    window.backgroundColor = canvas
-                    window.layer.backgroundColor = canvas.cgColor
+                    Self.paint(window, style: style, canvas: canvas, setStyle: setStyle)
                 }
             }
         }
     }
 
+    private static func paint(
+        _ window: UIWindow,
+        style: UIUserInterfaceStyle,
+        canvas: UIColor,
+        setStyle: Bool
+    ) {
+        if setStyle, window.overrideUserInterfaceStyle != style {
+            window.overrideUserInterfaceStyle = style
+        }
+        window.backgroundColor = canvas
+        window.layer.backgroundColor = canvas.cgColor
+    }
+
     private func observeSystem() {
         let center = NotificationCenter.default
-        let handler: (Notification) -> Void = { [weak self] _ in
-            Task { @MainActor in
-                self?.refreshResolved()
-            }
-        }
         observers.append(center.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                // 回前台只重涂窗口底色，不要重发 ColorScheme，否则整页会闪白
-                self?.applyToWindows()
+                self?.applyToWindows(setStyle: false)
             }
         })
         observers.append(center.addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
             object: nil,
-            queue: .main,
-            using: handler
-        ))
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                // 录屏 / 控制中心会把 trait 变成 unspecified，不能当成浅色
+                if self.mode == .system, Self.currentInterfaceStyle() == .unspecified {
+                    self.applyToWindows(setStyle: false)
+                    return
+                }
+                self.refreshResolved()
+            }
+        })
+        observers.append(center.addObserver(
+            forName: UIWindow.didBecomeVisibleNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            Task { @MainActor in
+                guard let window = note.object as? UIWindow else {
+                    self?.applyToWindows(setStyle: false)
+                    return
+                }
+                let dark = self?.resolvedScheme == .dark
+                Self.paint(
+                    window,
+                    style: dark ? .dark : .light,
+                    canvas: dark ? Self.darkCanvas : Self.lightCanvas,
+                    setStyle: false
+                )
+            }
+        })
+        observers.append(center.addObserver(
+            forName: UIScreen.capturedDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                // 开始/结束录屏不要切 ColorScheme，只保证窗口不是系统白
+                self?.applyToWindows(setStyle: false)
+            }
+        })
     }
 
-    private static func scheme(for mode: AppAppearance) -> ColorScheme {
+    private static func scheme(for mode: AppAppearance, fallback: ColorScheme) -> ColorScheme {
         switch mode {
         case .light: return .light
         case .dark: return .dark
         case .system:
-            return UIScreen.main.traitCollection.userInterfaceStyle == .dark ? .dark : .light
+            switch currentInterfaceStyle() {
+            case .dark: return .dark
+            case .light: return .light
+            default: return fallback
+            }
         }
+    }
+
+    /// 录屏、控制中心弹出时 UIScreen.main 经常是 unspecified，优先读前台 scene。
+    private static func currentInterfaceStyle() -> UIUserInterfaceStyle {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if let active = scenes.first(where: { $0.activationState == .foregroundActive }) {
+            let style = active.traitCollection.userInterfaceStyle
+            if style != .unspecified { return style }
+        }
+        for scene in scenes {
+            let style = scene.traitCollection.userInterfaceStyle
+            if style != .unspecified { return style }
+        }
+        return UIScreen.main.traitCollection.userInterfaceStyle
     }
 }

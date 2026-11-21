@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 import WidgetKit
 
 @MainActor
@@ -24,7 +25,12 @@ final class AppModel: ObservableObject {
             tire = nil
             detailVehicle = nil
             WidgetCenter.shared.reloadAllTimelines()
-            Task { await WidgetLiveSync.refresh() }
+            Task {
+                await WidgetLiveSync.refresh(
+                    existing: .init(vehicle: self.selectedVehicle),
+                    mode: .timeline
+                )
+            }
         }
     }
     @Published var errorMessage: String?
@@ -359,8 +365,26 @@ final class AppModel: ObservableObject {
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline
         snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+        if snap.imageData == nil {
+            snap.imageData = WidgetSnapshot.loadImage(vehicle.vinNo) ?? cachedVehicleImage(vehicle)
+        }
         snap.updatedAt = Date().timeIntervalSince1970
         WidgetSnapshot.write(snap)
+    }
+
+    private func cachedVehicleImage(_ vehicle: Vehicle) -> Data? {
+        guard let url = vehicle.imageURL else { return nil }
+        if let image = ResourceCache.cachedImage(url),
+           let data = image.jpegData(compressionQuality: 0.84) {
+            WidgetSnapshot.saveImage(data, vin: vehicle.vinNo)
+            return data
+        }
+        if let file = ResourceCache.existingFile(for: url, folder: "images"),
+           let data = try? Data(contentsOf: file), !data.isEmpty {
+            WidgetSnapshot.saveImage(data, vin: vehicle.vinNo)
+            return data
+        }
+        return nil
     }
 
     // MARK: - Response helpers

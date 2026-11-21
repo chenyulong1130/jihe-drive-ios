@@ -15,7 +15,13 @@ struct TrackMapView: View {
 
     var body: some View {
         ZStack {
-            VehicleMapView(coordinate: coordinate, showsUser: true, recenterToken: recenterToken)
+            VehicleMapView(
+                coordinate: coordinate,
+                showsUser: true,
+                recenterToken: recenterToken,
+                vehicleImage: ResourceCache.cachedImage(vehicle.imageURL),
+                vehicleImageURL: vehicle.imageURL
+            )
                 .ignoresSafeArea()
 
             if coordinate == nil {
