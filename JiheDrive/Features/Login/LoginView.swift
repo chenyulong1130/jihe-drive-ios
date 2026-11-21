@@ -1,7 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// 页面用 SwiftUI 保证能看见；输入框用 UIKit，避免系统把整页顶走。
+/// 弹窗式登录：轻遮罩 + 居中偏上的浮动卡片，卡片整体在键盘上方，
+/// 键盘弹出时页面不动；输入框仍用 UIKit，配合 KeyboardAvoidance 关掉整页避让。
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -32,72 +33,93 @@ struct LoginView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             Theme.groupedBackground
                 .ignoresSafeArea()
                 .onTapGesture { hideKeyboard() }
 
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.top, 24)
+            // 遮罩：压暗背景，衬出弹窗
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+                .onTapGesture { hideKeyboard() }
 
-                modeSwitch
-                    .padding(.top, 22)
-
-                Group {
-                    if mode == .phone {
-                        phoneCard
-                    } else {
-                        tokenCard
-                    }
-                }
-                .padding(.top, 16)
-
-                if let message {
-                    Text(message)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.red)
-                        .padding(.top, 12)
-                }
-
-                PrimaryButton(
-                    label: submitting ? "登录中" : (mode == .phone ? "登录" : "用 Token 进入"),
-                    icon: submitting ? nil : "arrow.right",
-                    enabled: canSubmit,
-                    loading: submitting
-                ) {
-                    submit()
-                }
-                .padding(.top, 16)
-            }
-            .padding(.horizontal, 22)
+            dialog
+                .padding(.horizontal, 26)
+                .padding(.bottom, 200)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .ignoresSafeArea(.keyboard)
         .onAppear { KeyboardAvoidance.setKeyboardRegion(false) }
         .onDisappear { KeyboardAvoidance.setKeyboardRegion(true) }
     }
 
+    // MARK: - 弹窗卡片
+
+    private var dialog: some View {
+        VStack(spacing: 0) {
+            header
+
+            modeSwitch
+                .padding(.top, 18)
+
+            Group {
+                if mode == .phone {
+                    phoneRows
+                } else {
+                    tokenRow
+                }
+            }
+            .padding(.top, 14)
+
+            if let message {
+                Text(message)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
+            }
+
+            PrimaryButton(
+                label: submitting ? "登录中" : (mode == .phone ? "登录" : "用 Token 进入"),
+                icon: submitting ? nil : "arrow.right",
+                enabled: canSubmit,
+                loading: submitting
+            ) {
+                submit()
+            }
+            .padding(.top, 16)
+        }
+        .padding(18)
+        .frame(maxWidth: 380)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.surface)
+                .shadow(color: Theme.softShadow, radius: 28, x: 0, y: 10)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.separator.opacity(0.7), lineWidth: 0.5)
+        )
+    }
+
     private var header: some View {
-        HStack(spacing: 14) {
+        VStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Theme.brand.opacity(0.12))
-                    .frame(width: 52, height: 52)
+                    .frame(width: 48, height: 48)
                 Image(systemName: "bolt.car.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(Theme.brand)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("极核智行")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Theme.label)
-                Text("验证手机号，或粘贴 Token 进入")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
-            }
-            Spacer(minLength: 0)
+            Text("极核智行")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Theme.label)
+            Text("验证手机号，或粘贴 Token 进入")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Theme.secondary)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private var modeSwitch: some View {
@@ -113,12 +135,11 @@ struct LoginView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(mode == item ? Theme.label : Theme.secondary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 38)
+                        .frame(height: 36)
                         .background {
                             if mode == item {
                                 Capsule(style: .continuous)
-                                    .fill(Theme.surface)
-                                    .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+                                    .fill(Theme.surfaceAlt)
                                     .matchedGeometryEffect(id: "login-mode", in: modePill)
                             }
                         }
@@ -128,10 +149,12 @@ struct LoginView: View {
             }
         }
         .padding(4)
-        .background(Capsule(style: .continuous).fill(Theme.surfaceAlt.opacity(0.7)))
+        .background(Capsule(style: .continuous).fill(Theme.surfaceAlt.opacity(0.6)))
     }
 
-    private var phoneCard: some View {
+    // MARK: - 表单行
+
+    private var phoneRows: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "iphone")
@@ -141,10 +164,10 @@ struct LoginView: View {
                 LoginKitField(text: $phone, placeholder: "手机号", keyboard: .numberPad)
                     .frame(height: 22)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 56)
+            .padding(.horizontal, 4)
+            .frame(height: 48)
 
-            HairLine(inset: 44)
+            HairLine(inset: 4)
 
             HStack(spacing: 8) {
                 Image(systemName: "lock.rotation")
@@ -167,33 +190,24 @@ struct LoginView: View {
                 .buttonStyle(PressableStyle(scale: 0.93))
                 .disabled(!canSendCode)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 56)
+            .padding(.horizontal, 4)
+            .frame(height: 48)
         }
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Theme.surface)
-        )
-        .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
     }
 
-    private var tokenCard: some View {
+    private var tokenRow: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "key.horizontal.fill")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.tertiary)
                 .frame(width: 20)
-                .padding(.top, 16)
+                .padding(.top, 14)
             LoginKitArea(text: $token, placeholder: "粘贴 access token")
-                .frame(height: 88)
+                .frame(height: 84)
         }
-        .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Theme.surface)
-        )
-        .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
     }
+
+    // MARK: - 动作
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
