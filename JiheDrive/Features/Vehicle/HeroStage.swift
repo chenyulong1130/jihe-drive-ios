@@ -221,9 +221,9 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图铺满英雄区，顶栏/底栏透明叠在上面，不再裁掉车头车轮
-    private var carTopPad: CGFloat { 8 }
-    private var modelTopPad: CGFloat { 4 }
+    /// 车头让开顶栏，左右留白，模型整体下移、缩小
+    private var carTopPad: CGFloat { topInset + 108 }
+    private var modelTopPad: CGFloat { topInset + 112 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -257,7 +257,7 @@ struct HeroStage: View {
                             }
                         }
                         .padding(.top, modelTopPad)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 36)
                         .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
@@ -281,13 +281,14 @@ struct HeroStage: View {
                         )
                     }
                     .padding(.top, modelTopPad)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 36)
                     .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
+                        .padding(.horizontal, 28)
                         .overlay { tireMarks }
                         .allowsHitTesting(false)
                 }
@@ -539,7 +540,7 @@ struct HeroStage: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.78, y: geo.size.height * 0.72)
+                        .position(x: geo.size.width * 0.76, y: geo.size.height * 0.70)
                     }
                     if let rear = validBar(rearBar) {
                         Button {
@@ -552,7 +553,7 @@ struct HeroStage: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.24, y: geo.size.height * 0.74)
+                        .position(x: geo.size.width * 0.26, y: geo.size.height * 0.72)
                     }
                 }
             }

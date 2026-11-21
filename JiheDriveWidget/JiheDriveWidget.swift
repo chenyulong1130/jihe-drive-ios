@@ -8,8 +8,7 @@ struct WidgetEntry: TimelineEntry {
     let snap: WidgetSnap
 
     static func from(_ snap: WidgetSnap) -> WidgetEntry {
-        let stamp = snap.updatedAt > 0 ? Date(timeIntervalSince1970: snap.updatedAt) : Date()
-        return WidgetEntry(date: stamp, snap: snap)
+        WidgetEntry(date: Date(), snap: snap)
     }
 }
 
@@ -27,11 +26,18 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
-        let disk = matchingSelected(WidgetSnapshot.read() ?? WidgetSnap())
-        let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
-        completion(Timeline(entries: [.from(disk)], policy: .after(next)))
         Task {
-            _ = await WidgetLiveSync.refresh()
+            let disk = WidgetSnapshot.read() ?? WidgetSnap()
+            let live = await WidgetLiveSync.refresh()
+            var snap = live
+            if snap.soc <= 0, disk.soc > 0 { snap.soc = disk.soc }
+            if snap.rangeKm <= 0, disk.rangeKm > 0 { snap.rangeKm = disk.rangeKm }
+            if snap.vin.isEmpty { snap.vin = disk.vin }
+            if snap.name.isEmpty { snap.name = disk.name }
+            if snap.todayKm == 0, disk.todayKm > 0 { snap.todayKm = disk.todayKm }
+            if snap.todayMin == 0, disk.todayMin > 0 { snap.todayMin = disk.todayMin }
+            let next = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
+            completion(Timeline(entries: [.from(matchingSelected(snap))], policy: .after(next)))
         }
     }
 
@@ -465,8 +471,7 @@ struct JiheDriveWidgetEntryView: View {
     private var timeText: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        let stamp = entry.date.timeIntervalSince1970 > 0 ? entry.date : Date()
-        return formatter.string(from: stamp)
+        return formatter.string(from: Date())
     }
 
     private var widgetBackground: some View {

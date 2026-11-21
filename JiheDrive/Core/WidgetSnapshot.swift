@@ -249,8 +249,7 @@ enum WidgetSnapshot {
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
         let wanted = selectedVin()
         payload["selectedVin"] = wanted ?? snap.vin
-        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted) {
-            // 过期刷新还在写上一台车，不能覆盖当前选中车辆
+        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted), snap.soc <= 0 {
             return
         }
 
@@ -276,6 +275,7 @@ enum WidgetSnapshot {
     }
 
     static func read() -> WidgetSnap? {
+        var fromDefaults: WidgetSnap?
         if let defaults = suiteDefaults(),
            defaults.object(forKey: "updatedAt") != nil {
             var map: [String: Any] = [:]
@@ -284,14 +284,22 @@ enum WidgetSnapshot {
                     map[key] = value
                 }
             }
-            return WidgetSnap.from(map)
+            fromDefaults = WidgetSnap.from(map)
         }
+        var fromFile: WidgetSnap?
         if let url = snapshotURL(),
            let data = try? Data(contentsOf: url),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            return WidgetSnap.from(json)
+            fromFile = WidgetSnap.from(json)
         }
-        return nil
+        switch (fromDefaults, fromFile) {
+        case let (a?, b?):
+            if a.soc != b.soc { return a.soc > b.soc ? a : b }
+            return a.updatedAt >= b.updatedAt ? a : b
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        default: return nil
+        }
     }
 
     static func sessionToken() -> String? {
