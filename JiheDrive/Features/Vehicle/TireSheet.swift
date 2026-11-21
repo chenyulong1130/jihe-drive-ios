@@ -553,79 +553,83 @@ private struct WheelReading: Identifiable {
     }
 }
 
+private struct TirePlotPoint: Identifiable {
+    let id: String
+    let name: String
+    let date: Date
+    let value: Double
+}
+
 private struct TireHistoryChart: View {
-    let wheels: [TireHistoryWheel]
-    let period: String
+    let plot: [TirePlotPoint]
+    let lastPoints: [TirePlotPoint]
+    let xStart: Date
+    let xEnd: Date
+    let yLo: Double
+    let yHi: Double
     let lowBar: Double
     let highBar: Double
+    let period: String
 
-    private var series: [(name: String, points: [TireHistoryPoint])] {
-        wheels.map { wheel in
-            (wheel.pos == "front" ? "前轮" : "后轮", downsample(wheel.points))
+    init(wheels: [TireHistoryWheel], period: String, lowBar: Double, highBar: Double) {
+        var points: [TirePlotPoint] = []
+        var lasts: [TirePlotPoint] = []
+        for wheel in wheels {
+            let name = wheel.pos == "front" ? "前轮" : "后轮"
+            let sampled = Self.downsample(wheel.points)
+            let mapped: [TirePlotPoint] = sampled.enumerated().map { index, item in
+                TirePlotPoint(
+                    id: "\(name)-\(index)",
+                    name: name,
+                    date: Date(timeIntervalSince1970: item.time / 1000),
+                    value: item.value
+                )
+            }
+            points.append(contentsOf: mapped)
+            if let last = mapped.last {
+                lasts.append(last)
+            }
         }
+        let values = points.map(\.value)
+        let dates = points.map(\.date)
+        self.plot = points
+        self.lastPoints = lasts
+        self.xStart = dates.min() ?? Date().addingTimeInterval(-3600)
+        self.xEnd = dates.max() ?? Date()
+        self.yLo = min(1.5, (values.min() ?? 1.8) - 0.2)
+        self.yHi = max(3.5, (values.max() ?? 2.6) + 0.2)
+        self.lowBar = lowBar
+        self.highBar = highBar
+        self.period = period
     }
 
     var body: some View {
-        let values = wheels.flatMap(\.points).map(\.value)
-        let yLo = min(1.5, (values.min() ?? 1.8) - 0.2)
-        let yHi = max(3.5, (values.max() ?? 2.6) + 0.2)
-        let dates = series.flatMap { $0.points.map { Date(timeIntervalSince1970: $0.time / 1000) } }
-        let xStart = dates.min() ?? Date().addingTimeInterval(-3600)
-        let xEnd = dates.max() ?? Date()
-
         Chart {
-            RectangleMark(
-                xStart: .value("起", xStart),
-                xEnd: .value("止", xEnd),
-                yStart: .value("低", lowBar),
-                yEnd: .value("高", highBar)
-            )
-            .foregroundStyle(Theme.green.opacity(0.14))
-
+            safeBand
             RuleMark(y: .value("偏低线", lowBar))
                 .foregroundStyle(Theme.orange.opacity(0.7))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .annotation(position: .trailing, alignment: .leading) {
-                    Text("1.9 偏低")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.orange)
-                }
-
             RuleMark(y: .value("偏高线", highBar))
                 .foregroundStyle(Theme.red.opacity(0.55))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .annotation(position: .trailing, alignment: .leading) {
-                    Text("3.2 偏高")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.red)
-                }
-
-            ForEach(series, id: \.name) { item in
-                ForEach(item.points) { point in
-                    LineMark(
-                        x: .value("时间", Date(timeIntervalSince1970: point.time / 1000)),
-                        y: .value("胎压", point.value),
-                        series: .value("轮", item.name)
-                    )
-                    .foregroundStyle(by: .value("轮", item.name))
-                    .interpolationMethod(.catmullRom)
-                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
-                }
-
-                if let last = item.points.last {
-                    PointMark(
-                        x: .value("时间", Date(timeIntervalSince1970: last.time / 1000)),
-                        y: .value("胎压", last.value),
-                        series: .value("轮", item.name)
-                    )
-                    .foregroundStyle(by: .value("轮", item.name))
-                    .symbolSize(46)
-                    .annotation(position: .top, spacing: 3) {
-                        Text(String(format: "%.1f", last.value))
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(Theme.label)
-                    }
-                }
+            ForEach(plot) { point in
+                LineMark(
+                    x: .value("时间", point.date),
+                    y: .value("胎压", point.value),
+                    series: .value("轮", point.name)
+                )
+                .foregroundStyle(by: .value("轮", point.name))
+                .interpolationMethod(.catmullRom)
+                .lineStyle(StrokeStyle(lineWidth: 2.2))
+            }
+            ForEach(lastPoints) { point in
+                PointMark(
+                    x: .value("时间", point.date),
+                    y: .value("胎压", point.value),
+                    series: .value("轮", point.name)
+                )
+                .foregroundStyle(by: .value("轮", point.name))
+                .symbolSize(46)
             }
         }
         .chartForegroundStyleScale([
@@ -635,32 +639,33 @@ private struct TireHistoryChart: View {
         .chartYScale(domain: yLo...yHi)
         .chartLegend(position: .top, alignment: .trailing)
         .chartYAxis {
-            AxisMarks(position: .leading, values: [lowBar, 2.4, highBar]) { value in
-                AxisGridLine().foregroundStyle(Theme.separator.opacity(0.45))
-                AxisValueLabel {
-                    if let number = value.as(Double.self) {
-                        Text(String(format: "%.1f", number))
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Theme.tertiary)
-                    }
-                }
-            }
+            AxisMarks(position: .leading, values: [lowBar, 2.4, highBar])
         }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: period == "1" ? 4 : 5)) { value in
-                AxisGridLine().foregroundStyle(Theme.separator.opacity(0.3))
+                AxisGridLine()
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
                         Text(Self.format(date, period: period))
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Theme.tertiary)
+                            .font(.system(size: 9))
                     }
                 }
             }
         }
     }
 
-    private func downsample(_ points: [TireHistoryPoint]) -> [TireHistoryPoint] {
+    @ChartContentBuilder
+    private var safeBand: some ChartContent {
+        RectangleMark(
+            xStart: .value("起", xStart),
+            xEnd: .value("止", xEnd),
+            yStart: .value("低", lowBar),
+            yEnd: .value("高", highBar)
+        )
+        .foregroundStyle(Theme.green.opacity(0.14))
+    }
+
+    private static func downsample(_ points: [TireHistoryPoint]) -> [TireHistoryPoint] {
         guard points.count > 72 else { return points }
         let step = Double(points.count - 1) / 71
         return (0..<72).map { index in
