@@ -196,9 +196,9 @@ enum WidgetSnapshot {
             snap.monthMile = vehicle.monthMileage ?? snap.monthMile
             snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
             snap.imageData = nil
-            if loadImage(vehicle.vinNo) == nil, let url = vehicle.imageURL,
+            if let url = vehicle.imageURL,
                let image = ResourceCache.cachedImage(url),
-               let data = image.jpegData(compressionQuality: 0.86) {
+               let data = image.pngData() {
                 saveImage(data, vin: vehicle.vinNo)
             }
         }
@@ -497,9 +497,82 @@ enum WidgetSnapshot {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 2
         format.opaque = false
-        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor.clear.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
             image.draw(in: CGRect(origin: .zero, size: size))
         }
-        return rendered.jpegData(compressionQuality: 0.86)
+        return knockOutBackdrop(rendered).pngData()
+    }
+
+    /// 去掉四周白底，保留车身（包括白车）
+    private static func knockOutBackdrop(_ image: UIImage) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let width = cg.width
+        let height = cg.height
+        guard width > 2, height > 2 else { return image }
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let mid = ((height / 2) * width + (width / 2)) * 4
+        let centerBright = Int(pixels[mid]) > 188
+            && Int(pixels[mid + 1]) > 188
+            && Int(pixels[mid + 2]) > 188
+        if centerBright { return image }
+
+        func isBackdrop(_ i: Int) -> Bool {
+            let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2]), a = Int(pixels[i + 3])
+            if a < 16 { return true }
+            let maxc = max(r, g, b)
+            let minc = min(r, g, b)
+            return maxc >= 236 && (maxc - minc) <= 18
+        }
+
+        var visited = [Bool](repeating: false, count: width * height)
+        var queue: [Int] = []
+        func enqueue(_ x: Int, _ y: Int) {
+            guard x >= 0, y >= 0, x < width, y < height else { return }
+            let idx = y * width + x
+            if visited[idx] { return }
+            visited[idx] = true
+            if isBackdrop(idx * 4) { queue.append(idx) }
+        }
+        for x in 0..<width {
+            enqueue(x, 0)
+            enqueue(x, height - 1)
+        }
+        for y in 0..<height {
+            enqueue(0, y)
+            enqueue(width - 1, y)
+        }
+        var head = 0
+        while head < queue.count {
+            let idx = queue[head]
+            head += 1
+            let i = idx * 4
+            pixels[i] = 0
+            pixels[i + 1] = 0
+            pixels[i + 2] = 0
+            pixels[i + 3] = 0
+            let x = idx % width
+            let y = idx / width
+            enqueue(x - 1, y)
+            enqueue(x + 1, y)
+            enqueue(x, y - 1)
+            enqueue(x, y + 1)
+        }
+        guard let out = ctx.makeImage() else { return image }
+        return UIImage(cgImage: out, scale: image.scale, orientation: image.imageOrientation)
     }
 }

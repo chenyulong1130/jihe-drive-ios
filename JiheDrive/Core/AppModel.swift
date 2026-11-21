@@ -398,9 +398,8 @@ final class AppModel: ObservableObject {
 
     private func persistVehicleImage(_ vehicle: Vehicle) {
         guard let url = vehicle.imageURL else { return }
-        if WidgetSnapshot.loadImage(vehicle.vinNo) != nil { return }
         if let image = ResourceCache.cachedImage(url),
-           let data = image.jpegData(compressionQuality: 0.86) {
+           let data = image.pngData() {
             WidgetSnapshot.saveImage(data, vin: vehicle.vinNo)
             return
         }

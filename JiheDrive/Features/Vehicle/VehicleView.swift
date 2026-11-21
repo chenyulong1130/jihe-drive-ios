@@ -321,7 +321,7 @@ struct VehicleView: View {
         guard model.selectedVehicle?.vinNo == vin else { return }
         if let image {
             HeroAssetCache.rememberPhoto(image, vin: vin)
-            if let data = image.jpegData(compressionQuality: 0.86) {
+            if let data = image.pngData() {
                 WidgetSnapshot.saveImage(data, vin: vin)
             }
         }

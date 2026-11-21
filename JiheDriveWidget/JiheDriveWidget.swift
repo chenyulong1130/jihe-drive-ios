@@ -29,7 +29,7 @@ struct SnapshotProvider: TimelineProvider {
         Task {
             let disk = WidgetSnapshot.read() ?? WidgetSnap()
             let live = await WidgetLiveSync.refresh()
-            let wanted = WidgetSnapshot.selectedVin()
+            let wanted = WidgetSnapshot.selectedVin() ?? (disk.vin.isEmpty ? nil : disk.vin)
             var snap = live
             let liveMatches = wanted == nil || wanted?.isEmpty == true || WidgetSnapshot.sameVin(live.vin, wanted)
             let diskMatches = WidgetSnapshot.sameVin(disk.vin, wanted)

@@ -23,21 +23,24 @@ final class MessageStore: ObservableObject {
         error = nil
         defer { loading = false }
 
-        guard let uid = ZeehoClient.shared.userId, !uid.isEmpty else {
-            error = "缺少用户 ID，无法拉消息"
-            return
-        }
+        await hydrateUserId()
 
         var collected: [InboxMessage] = []
         var lastFail: String?
-        // 文档明确 kind=3 系统消息；1/2 一并拉，空结果忽略
-        for kind in [3, 2, 1] {
-            let page = await fetchPage(kind: kind, userId: uid)
-            switch page {
-            case .success(let list):
-                collected.append(contentsOf: list)
-            case .failure(let message):
-                if kind == 3 { lastFail = message }
+        // 官方 list_v2 用 messageVOList；不带 messageKind 一次拉全部分类
+        let uid = ZeehoClient.shared.userId
+        let page = await fetchPage(kind: nil, userId: uid)
+        switch page {
+        case .success(let list):
+            collected = list
+        case .failure(let message):
+            lastFail = message
+            if collected.isEmpty, let uid, !uid.isEmpty {
+                for kind in [3, 2, 1] {
+                    if case .success(let list) = await fetchPage(kind: kind, userId: uid) {
+                        collected.append(contentsOf: list)
+                    }
+                }
             }
         }
         var unique: [String: InboxMessage] = [:]
@@ -84,13 +87,27 @@ final class MessageStore: ObservableObject {
         case failure(String)
     }
 
-    private func fetchPage(kind: Int, userId: String) async -> FetchResult {
-        let query = [
-            "userId": userId,
-            "messageKind": "\(kind)",
+    private func hydrateUserId() async {
+        if let uid = ZeehoClient.shared.userId, !uid.isEmpty { return }
+        guard let res = try? await ZeehoClient.shared.get(
+            "/v1.0/mine/cfmotoservermine/baseInfo",
+            query: ["server_name": "SMART"]
+        ) else { return }
+        let data = res["data"] as? [String: Any]
+        let uid = "\(data?["id"] ?? data?["userId"] ?? "")"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !uid.isEmpty, uid != "<null>" {
+            ZeehoClient.shared.userId = uid
+        }
+    }
+
+    private func fetchPage(kind: Int?, userId: String?) async -> FetchResult {
+        var query = [
             "page": "1",
             "pageSize": "20"
         ]
+        if let userId, !userId.isEmpty { query["userId"] = userId }
+        if let kind { query["messageKind"] = "\(kind)" }
         do {
             let res = try await ZeehoClient.shared.get(
                 "/v1.0/mine/cfmotoservermine/app/Message/list_v2",

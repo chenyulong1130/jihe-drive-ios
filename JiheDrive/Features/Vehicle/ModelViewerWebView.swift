@@ -41,7 +41,9 @@ struct ModelViewerWebView: UIViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.isOpaque = false
         view.backgroundColor = .clear
+        view.clipsToBounds = false
         view.scrollView.backgroundColor = .clear
+        view.scrollView.clipsToBounds = false
         view.scrollView.isScrollEnabled = false
         view.scrollView.bounces = false
         view.scrollView.delaysContentTouches = false
@@ -211,10 +213,10 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "-6.5deg 81deg 4.28m"
-        let target = "0.02m 0.16m auto"
-        let minOrbit = interactive ? "auto 72deg 3.6m" : "auto 82deg 4.3m"
-        let maxOrbit = interactive ? "auto 92deg 5.6m" : "auto 82deg 5.0m"
+        let orbit = "-6.5deg 80deg 5.15m"
+        let target = "0.02m 0.52m auto"
+        let minOrbit = interactive ? "auto 70deg 2.8m" : "auto 80deg 4.8m"
+        let maxOrbit = interactive ? "auto 95deg 7.2m" : "auto 80deg 5.4m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
         let controls = interactive ? "camera-controls touch-action=\"none\"" : "interaction-prompt=\"none\""
 
@@ -248,7 +250,7 @@ enum ModelViewerAsset {
           loading="eager"
           camera-orbit="\(orbit)"
           camera-target="\(target)"
-          field-of-view="27.5deg"
+          field-of-view="26deg"
           min-camera-orbit="\(minOrbit)"
           max-camera-orbit="\(maxOrbit)"
           shadow-intensity="0"
