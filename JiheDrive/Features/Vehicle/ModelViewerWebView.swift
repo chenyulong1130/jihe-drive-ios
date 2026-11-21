@@ -67,9 +67,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         }
         if context.coordinator.resetToken != resetToken {
             context.coordinator.resetToken = resetToken
-            view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()") { _, _ in
-                DispatchQueue.main.async { context.coordinator.onOrbitChanged?(false) }
-            }
+            view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()", completionHandler: nil)
         }
     }
 
@@ -135,9 +133,7 @@ struct ModelViewerWebView: UIViewRepresentable {
 
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended, let view = gesture.view as? WKWebView else { return }
-            view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()") { [weak self] _, _ in
-                DispatchQueue.main.async { self?.onOrbitChanged?(false) }
-            }
+            view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()", completionHandler: nil)
         }
 
         func gestureRecognizer(
@@ -261,6 +257,7 @@ enum ModelViewerAsset {
           reveal="auto"
           disable-pan
           minimum-render-scale="0.5"
+          interpolation-decay="40"
           \(controls)
           \(rotation)>
         </model-viewer>
@@ -268,25 +265,72 @@ enum ModelViewerAsset {
           const viewer = document.getElementById('viewer');
           const DEFAULT_ORBIT = '\(orbit)';
           const DEFAULT_TARGET = '\(target)';
+          let resetFrame = 0;
           viewer.addEventListener('load', () => {
             if (!viewer.hasAttribute('auto-rotate') && viewer.pause) viewer.pause();
           });
           viewer.addEventListener('camera-change', (ev) => {
             const source = ev && ev.detail && ev.detail.source;
-            if (source === 'user-interaction' && window.webkit && window.webkit.messageHandlers.orbit) {
-              window.webkit.messageHandlers.orbit.postMessage({ rotated: true });
+            if (source === 'user-interaction') {
+              if (resetFrame) { cancelAnimationFrame(resetFrame); resetFrame = 0; }
+              if (window.webkit && window.webkit.messageHandlers.orbit) {
+                window.webkit.messageHandlers.orbit.postMessage({ rotated: true });
+              }
             }
           });
           viewer.addEventListener('dblclick', () => {
             if (window.jhResetOrbit) window.jhResetOrbit();
           });
+          function parseOrbit(text) {
+            const p = String(text).trim().split(' ').filter(Boolean);
+            const toRad = (v) => {
+              const x = parseFloat(v);
+              if (!isFinite(x)) return 0;
+              return String(v).indexOf('rad') >= 0 ? x : x * Math.PI / 180;
+            };
+            const toM = (v) => {
+              const x = parseFloat(v);
+              return isFinite(x) ? x : 0;
+            };
+            return { theta: toRad(p[0]), phi: toRad(p[1]), radius: toM(p[2]) };
+          }
+          function shortest(from, to) {
+            let d = to - from;
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            return d;
+          }
           window.jhResetOrbit = () => {
-            viewer.cameraOrbit = DEFAULT_ORBIT;
-            viewer.cameraTarget = DEFAULT_TARGET;
-            if (viewer.jumpCameraToGoal) viewer.jumpCameraToGoal();
-            if (window.webkit && window.webkit.messageHandlers.orbit) {
-              window.webkit.messageHandlers.orbit.postMessage({ rotated: false });
-            }
+            if (resetFrame) cancelAnimationFrame(resetFrame);
+            const live = viewer.getCameraOrbit && viewer.getCameraOrbit();
+            const start = (live && isFinite(live.theta) && isFinite(live.phi) && isFinite(live.radius))
+              ? { theta: live.theta, phi: live.phi, radius: live.radius }
+              : parseOrbit(DEFAULT_ORBIT);
+            const goal = parseOrbit(DEFAULT_ORBIT);
+            const dTheta = shortest(start.theta, goal.theta);
+            const dPhi = goal.phi - start.phi;
+            const dRadius = goal.radius - start.radius;
+            const dur = 680;
+            const t0 = performance.now();
+            const tick = (now) => {
+              const t = Math.min(1, (now - t0) / dur);
+              const e = 1 - Math.pow(1 - t, 3);
+              viewer.cameraOrbit = (start.theta + dTheta * e) + 'rad ' + (start.phi + dPhi * e) + 'rad ' + (start.radius + dRadius * e) + 'm';
+              viewer.cameraTarget = DEFAULT_TARGET;
+              if (viewer.jumpCameraToGoal) viewer.jumpCameraToGoal();
+              if (t < 1) {
+                resetFrame = requestAnimationFrame(tick);
+                return;
+              }
+              resetFrame = 0;
+              viewer.cameraOrbit = DEFAULT_ORBIT;
+              viewer.cameraTarget = DEFAULT_TARGET;
+              if (viewer.jumpCameraToGoal) viewer.jumpCameraToGoal();
+              if (window.webkit && window.webkit.messageHandlers.orbit) {
+                window.webkit.messageHandlers.orbit.postMessage({ rotated: false });
+              }
+            };
+            resetFrame = requestAnimationFrame(tick);
           };
         </script>
         </body>

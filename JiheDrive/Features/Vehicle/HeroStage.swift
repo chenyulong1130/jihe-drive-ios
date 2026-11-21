@@ -88,14 +88,15 @@ struct HeroStage: View {
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
-        .onChange(of: cameraReset) { _, _ in
-            modelRotated = false
-        }
     }
 
     private func resetCamera() {
-        modelRotated = false
         localReset += 1
+        if modelGLBFile == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.68) {
+                modelRotated = false
+            }
+        }
     }
 
     // MARK: - 背景

@@ -70,6 +70,7 @@ struct VehicleSceneView: UIViewRepresentable {
         private var autoSpin = false
         private var spinSpeed: Float = 0.22
         private var idleUntil: CFTimeInterval = 0
+        private var resetTask: Task<Void, Never>?
 
         func attach(view: SCNView, autoSpin: Bool, speed: Float) {
             self.view = view
@@ -92,10 +93,40 @@ struct VehicleSceneView: UIViewRepresentable {
         }
 
         func resetHome() {
-            azimuth = homeAzimuth
-            elevation = homeElevation
-            distance = homeDistance
-            apply()
+            resetTask?.cancel()
+            idleUntil = CACurrentMediaTime() + 4
+            let fromA = azimuth
+            let fromE = elevation
+            let fromD = distance
+            var dA = homeAzimuth - fromA
+            while dA > .pi { dA -= 2 * .pi }
+            while dA < -.pi { dA += 2 * .pi }
+            let dE = homeElevation - fromE
+            let dD = homeDistance - fromD
+            view?.rendersContinuously = true
+            view?.preferredFramesPerSecond = 60
+            resetTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let frames = 40
+                for i in 1...frames {
+                    if Task.isCancelled { return }
+                    let t = Float(i) / Float(frames)
+                    let e: Float = 1 - pow(1 - t, 3)
+                    self.azimuth = fromA + dA * e
+                    self.elevation = fromE + dE * e
+                    self.distance = fromD + dD * e
+                    self.apply()
+                    try? await Task.sleep(nanoseconds: 16_000_000)
+                }
+                guard !Task.isCancelled else { return }
+                self.azimuth = self.homeAzimuth
+                self.elevation = self.homeElevation
+                self.distance = self.homeDistance
+                self.apply()
+                self.view?.rendersContinuously = self.autoSpin
+                self.view?.preferredFramesPerSecond = 30
+                self.onDrag?(false)
+            }
         }
 
         func installGestures() {
@@ -114,6 +145,8 @@ struct VehicleSceneView: UIViewRepresentable {
         }
 
         func stop() {
+            resetTask?.cancel()
+            resetTask = nil
             display?.invalidate()
             display = nil
         }
@@ -141,6 +174,7 @@ struct VehicleSceneView: UIViewRepresentable {
 
             switch gesture.state {
             case .began:
+                resetTask?.cancel()
                 view.rendersContinuously = true
                 view.preferredFramesPerSecond = 60
                 onDrag?(true)
@@ -178,11 +212,11 @@ struct VehicleSceneView: UIViewRepresentable {
         @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended else { return }
             resetHome()
-            onDrag?(false)
         }
 
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             idleUntil = CACurrentMediaTime() + 4
+            if gesture.state == .began { resetTask?.cancel() }
             guard gesture.state == .changed else { return }
             distance /= Float(gesture.scale)
             distance = min(max(distance, 1.5), 4.6)
