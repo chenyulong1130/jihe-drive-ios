@@ -35,6 +35,9 @@ final class AppModel: ObservableObject {
     }
     @Published var errorMessage: String?
 
+    /// 开关机刚发出时云端锁态会滞后，这段时间内别用列表/详情把乐观状态盖回去
+    private var lockHold: (vin: String, locked: Bool, until: Date)?
+
     private static let vinKey = "jihe.selected.vin"
 
     private let client: ZeehoClient
@@ -80,6 +83,7 @@ final class AppModel: ObservableObject {
             if (client.userId ?? "").isEmpty, let id = Self.userId(from: response["data"]) {
                 client.userId = id
             }
+            applyLockHold()
             errorMessage = nil
         } catch let error as ZeehoError {
             if case .unauthorized = error {
@@ -209,6 +213,7 @@ final class AppModel: ObservableObject {
             guard let parsed = Vehicle(json: json) else { return }
             guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
             detailVehicle = parsed
+            applyLockHold()
         } catch is CancellationError {
             // 切车打断，忽略
         } catch let error as URLError where error.code == .cancelled {
@@ -296,19 +301,35 @@ final class AppModel: ObservableObject {
             "/v1.0/app/cfmotoserverapp/vehicleSet/network/unlock",
             body: ["vinNo": vehicle.vinNo, "lockFlag": unlocking ? 1 : 0]
         )
-        try ZeehoClient.requireOK(res, fallback: unlocking ? "开锁失败" : "关锁失败")
+        try ZeehoClient.requireOK(res, fallback: unlocking ? "开机失败" : "关机失败")
         applyOptimisticLock(vin: vehicle.vinNo, locked: !unlocking)
-        await loadVehicles()
-        if let vin = selectedVin {
+        let vin = vehicle.vinNo
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
             await loadDetail(vin: vin)
         }
     }
 
     private func applyOptimisticLock(vin: String, locked: Bool) {
-        if let index = vehicles.firstIndex(where: { $0.vinNo == vin }) {
+        lockHold = (vin, locked, Date().addingTimeInterval(12))
+        applyLock(vin: vin, locked: locked)
+    }
+
+    private func applyLockHold() {
+        guard let hold = lockHold else { return }
+        if hold.until < Date() {
+            lockHold = nil
+            return
+        }
+        applyLock(vin: hold.vin, locked: hold.locked)
+    }
+
+    private func applyLock(vin: String, locked: Bool) {
+        if let index = vehicles.firstIndex(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) {
             vehicles[index] = vehicles[index].withLocked(locked)
         }
-        if let detail = detailVehicle, detail.vinNo == vin {
+        if let detail = detailVehicle, WidgetSnapshot.sameVin(detail.vinNo, vin) {
             detailVehicle = detail.withLocked(locked)
         }
     }
@@ -355,7 +376,6 @@ final class AppModel: ObservableObject {
             snap.maxSpeed = 0
             snap.tireText = ""
             snap.tireBound = false
-            snap.imageData = WidgetSnapshot.loadImage(vehicle.vinNo)
         }
         snap.vin = vehicle.vinNo
         snap.name = vehicle.name
@@ -365,26 +385,24 @@ final class AppModel: ObservableObject {
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline
         snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
-        if snap.imageData == nil {
-            snap.imageData = WidgetSnapshot.loadImage(vehicle.vinNo) ?? cachedVehicleImage(vehicle)
-        }
+        snap.imageData = nil
+        persistVehicleImage(vehicle)
         snap.updatedAt = Date().timeIntervalSince1970
         WidgetSnapshot.write(snap)
     }
 
-    private func cachedVehicleImage(_ vehicle: Vehicle) -> Data? {
-        guard let url = vehicle.imageURL else { return nil }
+    private func persistVehicleImage(_ vehicle: Vehicle) {
+        if WidgetSnapshot.loadImage(vehicle.vinNo) != nil { return }
+        guard let url = vehicle.imageURL else { return }
         if let image = ResourceCache.cachedImage(url),
-           let data = image.jpegData(compressionQuality: 0.84) {
+           let data = image.jpegData(compressionQuality: 0.86) {
             WidgetSnapshot.saveImage(data, vin: vehicle.vinNo)
-            return data
+            return
         }
         if let file = ResourceCache.existingFile(for: url, folder: "images"),
            let data = try? Data(contentsOf: file), !data.isEmpty {
             WidgetSnapshot.saveImage(data, vin: vehicle.vinNo)
-            return data
         }
-        return nil
     }
 
     // MARK: - Response helpers

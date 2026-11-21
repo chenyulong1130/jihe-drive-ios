@@ -17,6 +17,8 @@ struct VehicleMapView: UIViewRepresentable {
     /// 车辆官方图 / 3D 截图，当作定位点
     var vehicleImage: UIImage? = nil
     var vehicleImageURL: URL? = nil
+    /// 全屏位置页里，「我的位置」也用车辆 3D / 车图，不要系统蓝点
+    var userUsesVehicleModel: Bool = false
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -28,6 +30,10 @@ struct VehicleMapView: UIViewRepresentable {
         map.register(
             VehiclePinView.self,
             forAnnotationViewWithReuseIdentifier: VehiclePinView.reuseID
+        )
+        map.register(
+            VehiclePinView.self,
+            forAnnotationViewWithReuseIdentifier: VehiclePinView.userReuseID
         )
         return map
     }
@@ -48,6 +54,7 @@ struct VehicleMapView: UIViewRepresentable {
             coordinator.reloadTrack(on: map, track: track)
         }
 
+        coordinator.userUsesVehicleModel = userUsesVehicleModel
         if vehicleImage != nil, coordinator.markerImage !== vehicleImage {
             coordinator.markerImage = vehicleImage
             coordinator.applyMarker(on: map)
@@ -82,6 +89,7 @@ struct VehicleMapView: UIViewRepresentable {
         var didFocus = false
         var markerImage: UIImage?
         var markerURL: URL?
+        var userUsesVehicleModel = false
         private var markerTask: Task<Void, Never>?
 
         func reloadVehicle(on map: MKMapView, coordinate: Coordinate?) {
@@ -134,6 +142,12 @@ struct VehicleMapView: UIViewRepresentable {
             map.annotations.compactMap { map.view(for: $0) as? VehiclePinView }.forEach {
                 $0.apply(vehicleImage: markerImage)
             }
+            if userUsesVehicleModel, markerImage != nil,
+               map.showsUserLocation,
+               !(map.view(for: map.userLocation) is VehiclePinView) {
+                map.showsUserLocation = false
+                map.showsUserLocation = true
+            }
         }
 
         func loadMarker(on map: MKMapView, url: URL?, fallback: UIImage?) {
@@ -154,6 +168,18 @@ struct VehicleMapView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if annotation is MKUserLocation {
+                guard userUsesVehicleModel, markerImage != nil else { return nil }
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: VehiclePinView.userReuseID,
+                    for: annotation
+                )
+                view.annotation = annotation
+                if let pin = view as? VehiclePinView {
+                    pin.apply(vehicleImage: markerImage)
+                }
+                return view
+            }
             guard annotation is VehicleAnnotation else { return nil }
             let view = mapView.dequeueReusableAnnotationView(
                 withIdentifier: VehiclePinView.reuseID,
@@ -196,6 +222,7 @@ final class VehicleAnnotation: NSObject, MKAnnotation {
 
 final class VehiclePinView: MKAnnotationView {
     static let reuseID = "jihe-vehicle-pin"
+    static let userReuseID = "jihe-user-vehicle-pin"
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
@@ -215,7 +242,7 @@ final class VehiclePinView: MKAnnotationView {
     func apply(vehicleImage: UIImage?) {
         if let vehicleImage {
             image = Self.makeVehicleMarker(vehicleImage)
-            centerOffset = CGPoint(x: 0, y: -16)
+            centerOffset = CGPoint(x: 0, y: -10)
         } else {
             image = Self.fallbackPin
             centerOffset = CGPoint(x: 0, y: -25)
@@ -225,11 +252,17 @@ final class VehiclePinView: MKAnnotationView {
     private static let fallbackPin = makePinImage()
 
     private static func makeVehicleMarker(_ photo: UIImage) -> UIImage {
-        let size = CGSize(width: 72, height: 48)
+        let size = CGSize(width: 92, height: 62)
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 3
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            let rect = CGRect(x: 4, y: 2, width: 64, height: 40)
+        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            let cg = ctx.cgContext
+            let shadow = CGRect(x: 18, y: 50, width: 56, height: 8)
+            cg.setShadow(offset: .zero, blur: 6, color: UIColor.black.withAlphaComponent(0.28).cgColor)
+            UIColor.black.withAlphaComponent(0.18).setFill()
+            cg.fillEllipse(in: shadow)
+            cg.setShadow(offset: .zero, blur: 0, color: nil)
+            let rect = CGRect(x: 4, y: 2, width: 84, height: 50)
             photo.draw(in: rect)
         }
     }

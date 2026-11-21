@@ -23,10 +23,6 @@ struct SnapshotProvider: TimelineProvider {
             completion(.from(sample))
             return
         }
-        if let snap = WidgetSnapshot.read(), snap.loggedIn || snap.soc > 0 || !snap.name.isEmpty {
-            completion(.from(matchingSelected(snap)))
-            return
-        }
         completion(.from(matchingSelected(WidgetSnapshot.read() ?? WidgetSnap())))
     }
 
@@ -39,16 +35,16 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     private func matchingSelected(_ snap: WidgetSnap) -> WidgetSnap {
-        guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return snap }
-        guard !WidgetSnapshot.sameVin(snap.vin, wanted) else { return snap }
         var copy = snap
+        copy.imageData = nil
+        guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return copy }
+        guard !WidgetSnapshot.sameVin(copy.vin, wanted) else { return copy }
         copy.vin = wanted
         copy.soc = 0
         copy.rangeKm = 0
         copy.charging = false
         copy.todayKm = 0
         copy.todayMin = 0
-        copy.imageData = WidgetSnapshot.loadImage(wanted)
         return copy
     }
 
@@ -408,7 +404,7 @@ struct JiheDriveWidgetEntryView: View {
                 intent: WidgetLockIntent(),
                 symbol: snap.locked ? "lock.open.fill" : "lock.fill",
                 tint: snap.locked ? Color(hex: 0x16A34A) : Color(hex: 0xEA580C),
-                label: snap.locked ? "开机" : "关锁"
+                label: snap.locked ? "开机" : "关机"
             )
             controlButton(
                 intent: WidgetCushionIntent(),
@@ -446,7 +442,7 @@ struct JiheDriveWidgetEntryView: View {
 
     private var vehicleImage: some View {
         Group {
-            if let data = snap.imageData, let image = UIImage(data: data) {
+            if let image = WidgetSnapshot.displayImage(vin: snap.vin) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()

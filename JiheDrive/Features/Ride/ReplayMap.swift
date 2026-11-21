@@ -12,6 +12,10 @@ struct ReplayMap: UIViewRepresentable {
     var duration: TimeInterval = 0
     let progress: Double
     let follow: Bool
+    /// 回放时切 3D 地形 + 追车相机
+    var cinematic: Bool = false
+    /// 当前车 3D/官方图，追车时当车模
+    var vehicleImage: UIImage? = nil
     /// 全览边距。卡片/全屏都不跟车时用均匀边距，露出整段轨迹。
     var edgePadding: UIEdgeInsets = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
 
@@ -27,6 +31,7 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.edgePadding = edgePadding
         context.coordinator.times = times
         context.coordinator.duration = duration
+        context.coordinator.vehicleImage = vehicleImage
         context.coordinator.configure(map: map, points: points, speeds: speeds)
         return map
     }
@@ -35,7 +40,8 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.edgePadding = edgePadding
         context.coordinator.times = times
         context.coordinator.duration = duration
-        context.coordinator.update(map: map, progress: progress, follow: follow)
+        context.coordinator.vehicleImage = vehicleImage
+        context.coordinator.update(map: map, progress: progress, follow: follow, cinematic: cinematic)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -60,7 +66,6 @@ struct ReplayMap: UIViewRepresentable {
         private var didFit = false
         private var didZoomFollow = false
         private var followEnabled = false
-        private var cameraTarget: CLLocationCoordinate2D?
         private var lerpUntil: CFTimeInterval = 0
         private var displayLink: CADisplayLink?
         private let tickProxy = TickProxy()
@@ -68,7 +73,14 @@ struct ReplayMap: UIViewRepresentable {
         var edgePadding = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
         var times: [TimeInterval] = []
         var duration: TimeInterval = 0
+        var vehicleImage: UIImage?
         private var modelPoints: [Coordinate] = []
+        private var progress: Double = 0
+        private var progressVelocity: Double = 0
+        private var lastProgressStamp: CFTimeInterval = 0
+        private var cinematicEnabled = false
+        private var displayHeading: CLLocationDirection = 0
+        private var lastCourse: CLLocationDirection = 0
 
         deinit {
             displayLink?.invalidate()
@@ -160,12 +172,76 @@ struct ReplayMap: UIViewRepresentable {
             )
         }
 
-        func update(map: MKMapView, progress: Double, follow: Bool) {
+        func update(map: MKMapView, progress: Double, follow: Bool, cinematic: Bool) {
             mapView = map
             map.isZoomEnabled = true
             map.isScrollEnabled = true
-            map.isRotateEnabled = false
+            applyStyle(map: map, cinematic: cinematic)
             guard allPoints.count > 1 else { return }
+
+            let now = CACurrentMediaTime()
+            if lastProgressStamp > 0 {
+                let dt = now - lastProgressStamp
+                if dt > 0.002, dt < 0.25 {
+                    progressVelocity = (progress - self.progress) / dt
+                }
+            } else {
+                progressVelocity = 0
+            }
+            self.progress = progress
+            lastProgressStamp = now
+
+            let pose = applyPose(progress: progress, on: map)
+
+            if !follow {
+                if progress < 0.01 {
+                    didZoomFollow = false
+                }
+                followEnabled = false
+                progressVelocity = 0
+                stopLink()
+                return
+            }
+
+            followEnabled = true
+            startLink()
+            if !didZoomFollow {
+                didZoomFollow = true
+                lerpUntil = now + (cinematic ? 0.55 : 0.16)
+                let heading = cinematicEnabled ? displayHeading : 0
+                let camera = MKMapCamera(
+                    lookingAtCenter: pose,
+                    fromDistance: cinematicEnabled ? 240 : 480,
+                    pitch: cinematicEnabled ? 58 : 0,
+                    heading: heading
+                )
+                map.setCamera(camera, animated: true)
+            }
+        }
+
+        private func applyStyle(map: MKMapView, cinematic: Bool) {
+            if cinematic == cinematicEnabled { return }
+            cinematicEnabled = cinematic
+            didZoomFollow = false
+            if cinematic {
+                displayHeading = lastCourse
+                MapAppearance.applyCinematic(to: map)
+            } else {
+                MapAppearance.apply(to: map)
+                didFit = false
+                fit(map: map, points: allPoints)
+            }
+            if let marker, let view = map.view(for: marker) as? ReplayCursorView {
+                view.apply(
+                    speed: marker.speed,
+                    vehicleImage: cinematic ? vehicleImage : nil,
+                    cinematic: cinematic
+                )
+            }
+        }
+
+        @discardableResult
+        private func applyPose(progress: Double, on map: MKMapView) -> CLLocationCoordinate2D {
             let sample = ReplayClock.interpolate(
                 points: modelPoints,
                 speeds: speeds,
@@ -177,41 +253,66 @@ struct ReplayMap: UIViewRepresentable {
                 latitude: sample.point.latitude,
                 longitude: sample.point.longitude
             )
+            let heading = course(at: progress, from: current)
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             marker?.coordinate = current
+            CATransaction.commit()
             marker?.speed = sample.speed
+            marker?.heading = heading
             if let marker, let view = map.view(for: marker) as? ReplayCursorView {
-                view.apply(speed: sample.speed)
-            }
-            cameraTarget = current
-
-            if !follow {
-                if progress < 0.01 || progress > 0.99 {
-                    didZoomFollow = false
-                }
-                followEnabled = false
-                stopLink()
-                return
-            }
-
-            followEnabled = true
-            startLink()
-            if !didZoomFollow {
-                didZoomFollow = true
-                lerpUntil = CACurrentMediaTime() + 0.42
-                let camera = MKMapCamera(
-                    lookingAtCenter: current,
-                    fromDistance: 520,
-                    pitch: 0,
-                    heading: 0
+                view.apply(
+                    speed: sample.speed,
+                    vehicleImage: cinematicEnabled ? vehicleImage : nil,
+                    cinematic: cinematicEnabled
                 )
-                map.setCamera(camera, animated: true)
             }
+            return current
+        }
+
+        private func course(at progress: Double, from current: CLLocationCoordinate2D) -> CLLocationDirection {
+            let look = min(1, progress + 0.014)
+            let ahead = ReplayClock.interpolate(
+                points: modelPoints,
+                speeds: speeds,
+                times: times,
+                duration: duration,
+                progress: look
+            ).point
+            let dest = CLLocationCoordinate2D(latitude: ahead.latitude, longitude: ahead.longitude)
+            let dLat = abs(dest.latitude - current.latitude)
+            let dLng = abs(dest.longitude - current.longitude)
+            if dLat < 0.00002, dLng < 0.00002 {
+                return lastCourse
+            }
+            lastCourse = bearing(from: current, to: dest)
+            return lastCourse
+        }
+
+        private func bearing(from a: CLLocationCoordinate2D, to b: CLLocationCoordinate2D) -> CLLocationDirection {
+            let lat1 = a.latitude * .pi / 180
+            let lat2 = b.latitude * .pi / 180
+            let dLon = (b.longitude - a.longitude) * .pi / 180
+            let y = sin(dLon) * cos(lat2)
+            let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+            let deg = atan2(y, x) * 180 / .pi
+            return (deg + 360).truncatingRemainder(dividingBy: 360)
+        }
+
+        private func blendHeading(to next: CLLocationDirection, k: Double) -> CLLocationDirection {
+            var delta = next - displayHeading
+            while delta > 180 { delta -= 360 }
+            while delta < -180 { delta += 360 }
+            displayHeading += delta * k
+            if displayHeading < 0 { displayHeading += 360 }
+            if displayHeading >= 360 { displayHeading -= 360 }
+            return displayHeading
         }
 
         private func startLink() {
             guard displayLink == nil else { return }
             let link = CADisplayLink(target: tickProxy, selector: #selector(TickProxy.tick(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 55, maximum: 120, preferred: 60)
             link.add(to: .main, forMode: .common)
             displayLink = link
         }
@@ -222,19 +323,39 @@ struct ReplayMap: UIViewRepresentable {
         }
 
         fileprivate func onTick(_ link: CADisplayLink) {
-            guard followEnabled, let map = mapView, let target = cameraTarget else { return }
+            guard followEnabled, let map = mapView else { return }
             if isUserGesture(on: map) { return }
-            if CACurrentMediaTime() < lerpUntil { return }
+
+            let now = CACurrentMediaTime()
+            let dt = max(0, now - lastProgressStamp)
+            let predicted = min(1, max(0, progress + progressVelocity * dt))
+            let target = applyPose(progress: predicted, on: map)
+            if now < lerpUntil { return }
+
+            let frame = link.duration > 0 ? link.duration : 1.0 / 60.0
+            if cinematicEnabled {
+                let heading = blendHeading(to: lastCourse, k: min(1, 1 - exp(-frame / 0.18)))
+                let camera = MKMapCamera(
+                    lookingAtCenter: target,
+                    fromDistance: 230,
+                    pitch: 58,
+                    heading: heading
+                )
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                map.camera = camera
+                CATransaction.commit()
+                return
+            }
 
             let current = map.centerCoordinate
-            let far = abs(current.latitude - target.latitude) > 0.004
-                || abs(current.longitude - target.longitude) > 0.004
+            let dLat = abs(current.latitude - target.latitude)
+            let dLng = abs(current.longitude - target.longitude)
             let next: CLLocationCoordinate2D
-            if far {
+            if dLat > 0.012 || dLng > 0.012 {
                 next = target
             } else {
-                let dt = link.duration > 0 ? link.duration : 1.0 / 60.0
-                let k = 1 - exp(-dt / 0.12)
+                let k = 1 - exp(-frame / 0.065)
                 next = CLLocationCoordinate2D(
                     latitude: current.latitude + (target.latitude - current.latitude) * k,
                     longitude: current.longitude + (target.longitude - current.longitude) * k
@@ -285,7 +406,11 @@ struct ReplayMap: UIViewRepresentable {
                 ) as? ReplayCursorView
                     ?? ReplayCursorView(annotation: cursor, reuseIdentifier: ReplayCursorView.reuseID)
                 view.annotation = cursor
-                view.apply(speed: cursor.speed)
+                view.apply(
+                    speed: cursor.speed,
+                    vehicleImage: cinematicEnabled ? vehicleImage : nil,
+                    cinematic: cinematicEnabled
+                )
                 return view
             }
             guard let point = annotation as? MKPointAnnotation else { return nil }
@@ -398,21 +523,23 @@ struct ReplayMap: UIViewRepresentable {
 
 final class ReplayCursorAnnotation: MKPointAnnotation {
     var speed: Double = 0
+    var heading: CLLocationDirection = 0
 }
 
 final class ReplayCursorView: MKAnnotationView {
     static let reuseID = "replay-cursor"
     private static let dotSize: CGFloat = 14
+    private static let modelSize = CGSize(width: 92, height: 62)
 
     private let bubble = UILabel()
     private let dot = UIView()
+    private let model = UIImageView()
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         canShowCallout = false
         clipsToBounds = false
         zPriority = .max
-        // 锚点就是圆点中心，气泡画在 bounds 外面，避免偏出轨迹
         frame = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
         centerOffset = .zero
 
@@ -428,16 +555,24 @@ final class ReplayCursorView: MKAnnotationView {
         dot.layer.borderColor = UIColor.white.cgColor
         dot.frame = bounds
 
+        model.contentMode = .scaleAspectFit
+        model.layer.shadowColor = UIColor.black.cgColor
+        model.layer.shadowOpacity = 0.35
+        model.layer.shadowRadius = 6
+        model.layer.shadowOffset = CGSize(width: 0, height: 3)
+        model.isHidden = true
+
         addSubview(bubble)
         addSubview(dot)
-        apply(speed: 0)
+        addSubview(model)
+        apply(speed: 0, vehicleImage: nil, cinematic: false)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func apply(speed: Double) {
+    func apply(speed: Double, vehicleImage: UIImage? = nil, cinematic: Bool = false) {
         let idle = speed < 0.5
         bubble.text = idle ? "静止" : String(format: "%.0f km/h", speed)
         bubble.backgroundColor = idle
@@ -445,13 +580,32 @@ final class ReplayCursorView: MKAnnotationView {
             : UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 0.94)
         let textSize = bubble.sizeThatFits(CGSize(width: 120, height: 20))
         let width = max(44, textSize.width + 14)
-        bubble.frame = CGRect(
-            x: (Self.dotSize - width) / 2,
-            y: -24,
-            width: width,
-            height: 20
-        )
-        dot.frame = bounds
-        centerOffset = .zero
+
+        let useModel = cinematic && vehicleImage != nil
+        model.image = vehicleImage
+        model.isHidden = !useModel
+        dot.isHidden = useModel
+
+        if useModel {
+            bounds = CGRect(origin: .zero, size: Self.modelSize)
+            model.frame = bounds
+            bubble.frame = CGRect(
+                x: (Self.modelSize.width - width) / 2,
+                y: -26,
+                width: width,
+                height: 20
+            )
+            centerOffset = CGPoint(x: 0, y: -10)
+        } else {
+            bounds = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
+            dot.frame = bounds
+            bubble.frame = CGRect(
+                x: (Self.dotSize - width) / 2,
+                y: -24,
+                width: width,
+                height: 20
+            )
+            centerOffset = .zero
+        }
     }
 }

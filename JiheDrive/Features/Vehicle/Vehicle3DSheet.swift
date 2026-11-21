@@ -27,7 +27,7 @@ struct Vehicle3DSheet: View {
             if vehicle.isGLBModel {
                 await loadGLB()
             } else {
-                loader.load(modelURL)
+                loader.restore(vin: vehicle.vinNo, url: modelURL)
             }
         }
     }
@@ -146,9 +146,14 @@ struct Vehicle3DSheet: View {
 
     private func loadGLB() async {
         guard let url = modelURL, vehicle.isGLBModel else { return }
-        if glbFile != nil { return }
+        if let cached = HeroAssetCache.glb(for: vehicle.vinNo) ?? GLBModelStore.existing(for: url) {
+            glbFile = cached
+            return
+        }
         do {
-            glbFile = try await GLBModelStore.localFile(for: url)
+            let file = try await GLBModelStore.localFile(for: url)
+            HeroAssetCache.rememberGLB(file, vin: vehicle.vinNo)
+            glbFile = file
         } catch {
             glbFailed = true
         }

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import WidgetKit
 
 struct WidgetSnap: Equatable {
@@ -110,7 +111,8 @@ struct WidgetSnap: Equatable {
             return text.isEmpty ? "--" : text
         }()
         snap.updatedAt = double(raw["updatedAt"])
-        snap.imageData = WidgetSnapshot.loadImage(snap.vin)
+        // 车图走 App Group 文件，不塞进时间线，避免 WidgetKit 丢掉整份快照后只剩占位车标
+        snap.imageData = nil
         return snap
     }
 
@@ -193,9 +195,7 @@ enum WidgetSnapshot {
             snap.totalMile = vehicle.totalMileKm
             snap.monthMile = vehicle.monthMileage ?? snap.monthMile
             snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
-            if snap.imageData == nil {
-                snap.imageData = loadImage(vehicle.vinNo)
-            }
+            snap.imageData = nil
         }
         if let ride {
             snap.todayKm = ride.todayKm ?? snap.todayKm
@@ -271,16 +271,12 @@ enum WidgetSnapshot {
                     map[key] = value
                 }
             }
-            var snap = WidgetSnap.from(map)
-            snap.imageData = loadImage(snap.vin)
-            return snap
+            return WidgetSnap.from(map)
         }
         if let url = snapshotURL(),
            let data = try? Data(contentsOf: url),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            var snap = WidgetSnap.from(json)
-            snap.imageData = loadImage(snap.vin)
-            return snap
+            return WidgetSnap.from(json)
         }
         return nil
     }
@@ -424,19 +420,46 @@ enum WidgetSnapshot {
 
     static func saveImage(_ data: Data, vin: String? = nil) {
         let targetVin = vin ?? selectedVin()
-        guard let url = imageFileURL(targetVin) else { return }
-        try? data.write(to: url, options: [.atomic])
-        // 当前选中车再写一份通用文件，给预览占位用，不拿它给别的 VIN
-        if sameVin(targetVin, selectedVin()) || selectedVin() == nil, let generic = imageFileURL() {
-            try? data.write(to: generic, options: [.atomic])
+        guard imageKey(targetVin) != nil, let url = imageFileURL(targetVin) else { return }
+        let payload = prepareImage(data) ?? data
+        try? payload.write(to: url, options: [.atomic])
+        // 当前选中车再写一份通用文件，只给预览占位，读图必须带 VIN
+        if sameVin(targetVin, selectedVin()), let generic = imageFileURL() {
+            try? payload.write(to: generic, options: [.atomic])
         }
     }
 
     static func loadImage(_ vin: String? = nil) -> Data? {
         let targetVin = vin ?? selectedVin()
-        if let url = imageFileURL(targetVin), let data = try? Data(contentsOf: url), !data.isEmpty {
+        guard imageKey(targetVin) != nil, let url = imageFileURL(targetVin) else { return nil }
+        if let data = try? Data(contentsOf: url), !data.isEmpty {
             return data
         }
         return nil
+    }
+
+    static func displayImage(vin: String? = nil) -> UIImage? {
+        let target = vin.flatMap { $0.isEmpty ? nil : $0 } ?? selectedVin()
+        guard let data = loadImage(target) else { return nil }
+        return UIImage(data: data)
+    }
+
+    /// 压到小组件够用的尺寸，避免把原图塞进时间线后被系统丢掉
+    private static func prepareImage(_ data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let maxPixel: CGFloat = 420
+        let longest = max(image.size.width, image.size.height)
+        let scale = longest > maxPixel ? maxPixel / longest : 1
+        let size = CGSize(
+            width: max(1, (image.size.width * scale).rounded()),
+            height: max(1, (image.size.height * scale).rounded())
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 2
+        format.opaque = false
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return rendered.jpegData(compressionQuality: 0.86)
     }
 }

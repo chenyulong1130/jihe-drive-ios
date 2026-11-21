@@ -16,6 +16,7 @@ final class VehicleModelLoader: ObservableObject {
 
     private var currentURL: URL?
     private static var cache: [String: SCNScene] = [:]
+    private static var vinCache: [String: SCNScene] = [:]
 
     var scene: SCNScene? {
         if case .ready(let scene) = state { return scene }
@@ -27,7 +28,25 @@ final class VehicleModelLoader: ObservableObject {
         currentURL = nil
     }
 
-    func load(_ url: URL?) {
+    static func cachedScene(for url: URL?) -> SCNScene? {
+        guard let url else { return nil }
+        return cache[url.absoluteString]
+    }
+
+    static func cachedScene(vin: String) -> SCNScene? {
+        vinCache[vin]
+    }
+
+    func restore(vin: String, url: URL?) {
+        if let scene = Self.vinCache[vin] ?? Self.cachedScene(for: url) {
+            currentURL = url
+            state = .ready(scene)
+            return
+        }
+        load(url, vin: vin)
+    }
+
+    func load(_ url: URL?, vin: String? = nil) {
         guard let url else {
             clear()
             return
@@ -36,6 +55,7 @@ final class VehicleModelLoader: ObservableObject {
         currentURL = url
 
         if let cached = Self.cache[url.absoluteString] {
+            if let vin { Self.vinCache[vin] = cached }
             state = .ready(cached)
             return
         }
@@ -57,6 +77,7 @@ final class VehicleModelLoader: ObservableObject {
                 )
                 let ready = Self.normalized(scene)
                 Self.cache[requested.absoluteString] = ready
+                if let vin { Self.vinCache[vin] = ready }
                 guard currentURL == requested else { return }
                 state = .ready(ready)
             } catch {
@@ -144,9 +165,9 @@ final class VehicleModelLoader: ObservableObject {
             container.addChildNode(child)
         }
         container.scale = SCNVector3(scale, scale, scale)
-        // 底部贴地，水平居中
+        // 底部贴地，略向左偏，给右侧坐垫按钮让位
         container.position = SCNVector3(
-            -centerX * scale,
+            -centerX * scale - 0.12,
             -minY * scale,
             -centerZ * scale
         )

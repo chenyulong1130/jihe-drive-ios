@@ -112,7 +112,8 @@ enum ModelViewerAsset {
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
         let orbit = "-6.5deg 83.06deg 3.086m"
-        let target = "-0.02m auto auto"
+        // 相机看向车身偏右一点，模型在画面里略靠左
+        let target = "0.08m auto auto"
         // 可拖拽时放宽方位角；仰角仍锁在约 83°，避免翻车底
         let minOrbit = interactive ? "auto 70deg 2.2m" : "auto 83.06deg 2.53m"
         let maxOrbit = interactive ? "auto 95deg 4.2m" : "auto 83.06deg 3.86m"
@@ -233,12 +234,24 @@ enum GLBModelStore {
     /// 缓存名带 strip 版本号，节点清洗规则变更时自动换文件
     private static let stripTag = "s2"
 
-    static func localFile(for remote: URL) async throws -> URL {
+    static func existing(for remote: URL) -> URL? {
+        let target = destination(for: remote)
+        if let size = try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int,
+           size > 1024 {
+            return target
+        }
+        return nil
+    }
+
+    private static func destination(for remote: URL) -> URL {
         let dir = ResourceCache.directory.appendingPathComponent("models", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let key = ResourceCache.hash(remote.absoluteString)
-        let target = dir.appendingPathComponent("\(key)-\(stripTag).glb")
+        return dir.appendingPathComponent("\(key)-\(stripTag).glb")
+    }
 
+    static func localFile(for remote: URL) async throws -> URL {
+        let target = destination(for: remote)
         if let size = try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int,
            size > 1024 {
             return target

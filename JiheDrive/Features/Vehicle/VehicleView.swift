@@ -12,7 +12,7 @@ struct VehicleView: View {
     @StateObject private var model3D = VehicleModelLoader()
     @State private var heroGLB: URL?
     @State private var loadedModelVin: String?
-    @State private var glbByVin: [String: URL] = [:]
+    @State private var readyGLBVins: Set<String> = []
 
     @State private var busy: String?
     @State private var toast: String?
@@ -37,24 +37,25 @@ struct VehicleView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    if let vehicle = model.selectedVehicle {
-                        hero(vehicle, proxy: proxy)
+            VStack(spacing: 0) {
+                if let vehicle = model.selectedVehicle {
+                    hero(vehicle, proxy: proxy)
+                        .id(vehicle.vinNo)
+                    ScrollView(showsIndicators: false) {
                         content(vehicle)
-                    } else if model.loading {
-                        loadingState
-                    } else {
-                        emptyState
+                            .padding(.bottom, 128)
                     }
+                    .scrollDisabled(pinningHero)
+                    .refreshable { await reloadPage() }
+                } else if model.loading {
+                    loadingState
+                } else {
+                    emptyState
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 128)
             }
-            .ignoresSafeArea(edges: .top)
-            .scrollDisabled(pinningHero)
-            .refreshable { await reloadPage() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .ignoresSafeArea(edges: .top)
         .background(Theme.groupedBackground.ignoresSafeArea())
         .overlay(alignment: .bottom) {
             if let message = toast {
@@ -80,7 +81,11 @@ struct VehicleView: View {
         }
         .sheet(isPresented: $showMap) {
             if let vehicle = model.selectedVehicle {
-                TrackMapView(vehicle: vehicle, address: locationLabel(vehicle))
+                TrackMapView(
+                    vehicle: vehicle,
+                    address: locationLabel(vehicle),
+                    vehicleImage: mapMarkerImage(vehicle)
+                )
             }
         }
         .sheet(isPresented: $show3D) {
@@ -137,6 +142,11 @@ struct VehicleView: View {
         .onChange(of: model.selectedVehicle?.isCharging) { _, _ in
             syncChargeIsland()
         }
+        .onReceive(model3D.$state) { state in
+            if case .ready = state, let vin = model.selectedVehicle?.vinNo {
+                snapshotMarkerIfNeeded(vin: vin)
+            }
+        }
         .onChange(of: model.selectedVehicle?.latitude) { _, _ in
             Task { await resolveAddressIfNeeded() }
         }
@@ -172,6 +182,7 @@ struct VehicleView: View {
             photo: wallpaperStore.image,
             modelScene: model3D.scene,
             modelGLBFile: heroGLB,
+            modelGLBCached: vehicle.vinNo == loadedModelVin && (readyGLBVins.contains(vehicle.vinNo) || HeroAssetCache.glb(for: vehicle.vinNo) != nil),
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             tireFrontTemp: model.tire?.frontTemp,
@@ -215,20 +226,27 @@ struct VehicleView: View {
 
     /// 切车时先用这份 VIN 缓存，避免 3D / 车图重新下载闪一下
     private func restoreCachedHero(vin: String) {
-        if let file = glbByVin[vin] {
-            heroGLB = file
+        let vehicle = model.selectedVehicle
+        let remote = vehicle?.model3DURL
+        if vehicle?.isGLBModel == true {
+            if let file = HeroAssetCache.glb(for: vin) ?? remote.flatMap({ GLBModelStore.existing(for: $0) }) {
+                HeroAssetCache.rememberGLB(file, vin: vin)
+                heroGLB = file
+                readyGLBVins.insert(vin)
+                model3D.clear()
+                return
+            }
+        } else if let remote {
+            model3D.restore(vin: vin, url: remote)
+            heroGLB = nil
+            return
+        }
+        if HeroAssetCache.glb(for: vin) == nil {
+            heroGLB = nil
+        }
+        if VehicleModelLoader.cachedScene(vin: vin) == nil {
             model3D.clear()
-            return
         }
-        heroGLB = nil
-        if let vehicle = model.selectedVehicle,
-           vehicle.vinNo == vin,
-           let url = vehicle.model3DURL,
-           !vehicle.isGLBModel {
-            model3D.load(url)
-            return
-        }
-        model3D.clear()
     }
 
     /// glb 走 model-viewer，其余格式交给 SceneKit；同一 VIN 命中磁盘/内存缓存就不再请求
@@ -240,44 +258,69 @@ struct VehicleView: View {
         }
         let vin = vehicle.vinNo
         await cacheSelectedPhoto()
-        if let cached = glbByVin[vin] {
+        if let cached = HeroAssetCache.glb(for: vin) {
             heroGLB = cached
+            readyGLBVins.insert(vin)
+            snapshotMarkerIfNeeded(vin: vin)
             return
         }
         guard let url = vehicle.model3DURL else {
             guard model.selectedVehicle?.vinNo == vin else { return }
             heroGLB = nil
             model3D.clear()
+            snapshotMarkerIfNeeded(vin: vin)
             return
         }
         if vehicle.isGLBModel {
             let file = try? await GLBModelStore.localFile(for: url)
             guard model.selectedVehicle?.vinNo == vin else { return }
             if let file {
-                glbByVin[vin] = file
+                HeroAssetCache.rememberGLB(file, vin: vin)
+                readyGLBVins.insert(vin)
                 heroGLB = file
             }
         } else {
             heroGLB = nil
-            model3D.load(url)
+            model3D.load(url, vin: vin)
         }
+        snapshotMarkerIfNeeded(vin: vin)
     }
 
     private func cacheSelectedPhoto() async {
         guard let vehicle = model.selectedVehicle, let url = vehicle.imageURL else { return }
         let vin = vehicle.vinNo
-        _ = await ResourceCache.image(for: url)
+        let image = await ResourceCache.image(for: url)
         guard model.selectedVehicle?.vinNo == vin else { return }
-        if WidgetSnapshot.loadImage(vin) == nil,
-           let image = ResourceCache.cachedImage(url),
-           let data = image.jpegData(compressionQuality: 0.84) {
-            WidgetSnapshot.saveImage(data, vin: vin)
+        if let image {
+            HeroAssetCache.rememberPhoto(image, vin: vin)
+            if let data = image.jpegData(compressionQuality: 0.86) {
+                WidgetSnapshot.saveImage(data, vin: vin)
+            }
         }
     }
 
+    private func snapshotMarkerIfNeeded(vin: String) {
+        if let scene = model3D.scene ?? VehicleModelLoader.cachedScene(vin: vin),
+           let shot = VehicleSceneSnapshot.image(from: scene) {
+            HeroAssetCache.rememberSnapshot(shot, vin: vin)
+            return
+        }
+        if let photo = HeroAssetCache.photo(for: vin) {
+            HeroAssetCache.rememberPhoto(photo, vin: vin)
+        }
+    }
+
+    private func mapMarkerImage(_ vehicle: Vehicle) -> UIImage? {
+        HeroAssetCache.photo(for: vehicle.vinNo)
+            ?? ResourceCache.cachedImage(vehicle.imageURL)
+            ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo)
+    }
+
     private func reloadPage() async {
-        await model.refreshAll()
+        // 只刷车辆数据，不重载主题 / 3D / 视频
+        await model.refreshQuiet()
         guard let vin = model.selectedVehicle?.vinNo else { return }
+        await model.loadTire(vin: vin)
         await loadRideSummary(vin: vin)
         await resolveAddressIfNeeded()
         await signin.syncWidget(model: model, ride: rideExtra)
@@ -403,7 +446,7 @@ struct VehicleView: View {
                 "lock",
                 success: queued
                     ? "车辆离线，指令已排队，上线后执行"
-                    : (locked ? "开锁成功" : "关锁成功")
+                    : (locked ? "开机指令已发送" : "关机指令已发送")
             ) {
                 try await model.toggleLock(vehicle)
             }
@@ -430,11 +473,11 @@ struct VehicleView: View {
                 }
 
                 VStack(spacing: 2) {
-                    Text(loading ? "请求中…" : (locked ? "一键解锁" : "点击关锁"))
+                    Text(loading ? "请求中…" : (locked ? "开机" : "关机"))
                         .font(.system(size: 16, weight: .heavy))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text(online ? (locked ? "车辆已关锁" : "车辆未关锁") : "离线 · 指令将排队")
+                    Text(online ? (locked ? "车辆已关机" : "车辆已开机") : "离线 · 指令将排队")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
@@ -469,7 +512,7 @@ struct VehicleView: View {
         .disabled(busy != nil)
         .animation(Motion.spring, value: locked)
         .animation(Motion.quick, value: online)
-        .accessibilityLabel(locked ? "一键解锁" : "点击关锁")
+        .accessibilityLabel(locked ? "开机" : "关机")
     }
 
     // MARK: - 位置 / 骑行
@@ -690,7 +733,7 @@ struct VehicleView: View {
             VehicleMapView(
                 coordinate: coordinate,
                 interactive: false,
-                vehicleImage: ResourceCache.cachedImage(vehicle.imageURL),
+                vehicleImage: mapMarkerImage(vehicle),
                 vehicleImageURL: vehicle.imageURL
             )
                 .id(vehicle.vinNo)

@@ -1,10 +1,12 @@
 import MapKit
 import SwiftUI
+import UIKit
 
 /// 车辆位置全屏地图（MapKit，零第三方依赖）
 struct TrackMapView: View {
     let vehicle: Vehicle
     var address: String? = nil
+    var vehicleImage: UIImage? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var recenterToken = 0
@@ -19,8 +21,9 @@ struct TrackMapView: View {
                 coordinate: coordinate,
                 showsUser: true,
                 recenterToken: recenterToken,
-                vehicleImage: ResourceCache.cachedImage(vehicle.imageURL),
-                vehicleImageURL: vehicle.imageURL
+                vehicleImage: vehicleImage ?? ResourceCache.cachedImage(vehicle.imageURL) ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo),
+                vehicleImageURL: vehicle.imageURL,
+                userUsesVehicleModel: true
             )
                 .ignoresSafeArea()
 

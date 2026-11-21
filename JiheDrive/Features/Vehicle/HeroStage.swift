@@ -26,6 +26,8 @@ struct HeroStage: View {
     let modelScene: SCNScene?
     /// 接口给的是 glb 时就地渲染（与安卓版同一套 model-viewer）
     var modelGLBFile: URL? = nil
+    /// 这份 GLB 已经展示过，切回来不要再闪 2D
+    var modelGLBCached: Bool = false
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
     var tireFrontBar: Double? = nil
     var tireRearBar: Double? = nil
@@ -52,6 +54,7 @@ struct HeroStage: View {
     var canSwitchVehicle: Bool = true
 
     @State private var glbRevealed = false
+    private var glbVisible: Bool { glbRevealed || modelGLBCached }
 
     private var onDark: Bool { !selection.isDefault || videoURL != nil }
 
@@ -64,11 +67,11 @@ struct HeroStage: View {
                 .allowsHitTesting(false)
                 .overlay(alignment: .bottom) {
                     LinearGradient(
-                        colors: [Color.clear, Theme.groupedBackground.opacity(0.55), Theme.groupedBackground],
+                        colors: [Color.clear, Theme.groupedBackground.opacity(0.35), Theme.groupedBackground],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: hasTire ? 88 : 36)
+                    .frame(height: hasTire ? 110 : 36)
                     .allowsHitTesting(false)
                 }
 
@@ -221,7 +224,7 @@ struct HeroStage: View {
     /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     /// 模型和胎压重叠一段，靠底部虚化过渡，不再硬切开
-    private var carBottomPad: CGFloat { hasTire ? 22 : 0 }
+    private var carBottomPad: CGFloat { hasTire ? 6 : 0 }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -232,7 +235,7 @@ struct HeroStage: View {
                         .overlay {
                             ZStack {
                                 twoDCar
-                                    .opacity(glbRevealed ? 0 : 1)
+                                    .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
                                     interactive: true,
@@ -240,14 +243,18 @@ struct HeroStage: View {
                                     onDrag: onInteract,
                                     onReady: { glbRevealed = true }
                                 )
-                                .opacity(glbRevealed ? 1 : 0)
+                                .opacity(glbVisible ? 1 : 0)
                             }
                         }
                         .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
                         .mask(carFadeMask)
+                        .overlay(alignment: .bottom) { tireBlend }
                         .simultaneousGesture(heroDrag)
-                        .onChange(of: modelGLBFile) { _, _ in glbRevealed = false }
+                        .onAppear { if modelGLBCached { glbRevealed = true } }
+                        .onChange(of: modelGLBFile) { _, _ in
+                            glbRevealed = modelGLBCached
+                        }
                 } else if let modelScene {
                     ZStack {
                         twoDCar.opacity(0.001)
@@ -262,16 +269,18 @@ struct HeroStage: View {
                     .padding(.top, carTopPad)
                     .padding(.bottom, carBottomPad)
                     .mask(carFadeMask)
+                    .overlay(alignment: .bottom) { tireBlend }
                     .simultaneousGesture(heroDrag)
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
                         .padding(.bottom, carBottomPad)
                         .mask(carFadeMask)
+                        .overlay(alignment: .bottom) { tireBlend }
                         .allowsHitTesting(false)
                 }
             }
-            .offset(x: -16)
+            .offset(x: -28)
 
             // 坐垫：叠在车图右上（对齐 Flutter / 小程序），不进顶栏
             Button(action: onOpenCushion) {
@@ -465,7 +474,7 @@ struct HeroStage: View {
             HStack(spacing: 4) {
                 Image(systemName: vehicle.isLocked ? "lock.fill" : "lock.open.fill")
                     .font(.system(size: 11, weight: .semibold))
-                Text(vehicle.isLocked ? "已关锁" : "未关锁")
+                Text(vehicle.isLocked ? "已关机" : "已开机")
                     .font(.system(size: 11, weight: .semibold))
             }
             .foregroundStyle(vehicle.isLocked ? primary.opacity(0.92) : Color(hex: 0xFF9F0A))
@@ -506,13 +515,33 @@ struct HeroStage: View {
         LinearGradient(
             stops: [
                 .init(color: .black, location: 0),
-                .init(color: .black, location: hasTire ? 0.72 : 0.92),
-                .init(color: .black.opacity(0.35), location: hasTire ? 0.88 : 0.97),
+                .init(color: .black, location: hasTire ? 0.58 : 0.9),
+                .init(color: .black.opacity(0.45), location: hasTire ? 0.78 : 0.96),
+                .init(color: .black.opacity(0.12), location: hasTire ? 0.9 : 0.99),
                 .init(color: .clear, location: 1)
             ],
             startPoint: .top,
             endPoint: .bottom
         )
+    }
+
+    /// 模型底部再铺一层背景色渐隐，做出和胎压的虚化过渡
+    @ViewBuilder
+    private var tireBlend: some View {
+        if hasTire {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: Theme.groupedBackground.opacity(0.25), location: 0.4),
+                    .init(color: Theme.groupedBackground.opacity(0.72), location: 0.78),
+                    .init(color: Theme.groupedBackground, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 64)
+            .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder

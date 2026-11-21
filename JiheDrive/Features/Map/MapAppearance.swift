@@ -16,6 +16,27 @@ enum MapAppearance {
         config.pointOfInterestFilter = .includingAll
         config.showsTraffic = false
         map.preferredConfiguration = config
+        map.isPitchEnabled = false
+        map.isRotateEnabled = false
+        map.backgroundColor = UIColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
+    }
+
+    /// 全屏回放追车：深色 + 真实地形，方便 3D 俯仰
+    static func applyCinematic(to map: MKMapView) {
+        map.mapType = .standard
+        map.overrideUserInterfaceStyle = .dark
+        map.showsCompass = false
+        map.showsScale = false
+        map.showsBuildings = true
+        map.showsTraffic = false
+        map.pointOfInterestFilter = .includingAll
+        let config = MKStandardMapConfiguration(elevationStyle: .realistic, emphasisStyle: .automatic)
+        config.pointOfInterestFilter = .includingAll
+        config.showsTraffic = false
+        map.preferredConfiguration = config
+        map.isPitchEnabled = true
+        map.isRotateEnabled = true
+        map.backgroundColor = UIColor(red: 0.07, green: 0.12, blue: 0.14, alpha: 1)
     }
 }
 

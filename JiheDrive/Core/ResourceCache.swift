@@ -92,6 +92,31 @@ enum ResourceCache {
     }
 }
 
+/// 按 VIN 记住已加载过的车图 / 3D，切回来不再重新下载
+enum HeroAssetCache {
+    private static var glbFiles: [String: URL] = [:]
+    private static var photos: [String: UIImage] = [:]
+    private static var snapshots: [String: UIImage] = [:]
+
+    static func glb(for vin: String) -> URL? { glbFiles[vin] }
+
+    static func rememberGLB(_ file: URL, vin: String) {
+        glbFiles[vin] = file
+    }
+
+    static func photo(for vin: String) -> UIImage? {
+        snapshots[vin] ?? photos[vin]
+    }
+
+    static func rememberPhoto(_ image: UIImage, vin: String) {
+        photos[vin] = image
+    }
+
+    static func rememberSnapshot(_ image: UIImage, vin: String) {
+        snapshots[vin] = image
+    }
+}
+
 enum CacheImageMode {
     case fill
     case fit

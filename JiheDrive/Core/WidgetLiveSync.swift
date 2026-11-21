@@ -49,7 +49,7 @@ enum WidgetLiveSync {
             snap.lastMin = 0
             snap.tireText = ""
             snap.tireBound = false
-            snap.imageData = WidgetSnapshot.loadImage(wantedVin)
+            snap.imageData = nil
         }
 
         var vehicle: Vehicle?
@@ -178,10 +178,11 @@ enum WidgetLiveSync {
                 }
             }
         }
-        snap.imageData = await resolveImage(
+        _ = await resolveImage(
             vin: vehicle?.vinNo ?? snap.vin,
             url: vehicle?.imageURL
         )
+        snap.imageData = nil
 
         WidgetSnapshot.write(snap)
         reload()
@@ -502,7 +503,7 @@ enum WidgetLiveSync {
         if let cached = WidgetSnapshot.loadImage(vin), !cached.isEmpty {
             return cached
         }
-        guard let url else { return nil }
+        guard let url else { return WidgetSnapshot.loadImage(vin) }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
         request.cachePolicy = .returnCacheDataElseLoad
@@ -513,6 +514,6 @@ enum WidgetLiveSync {
             return WidgetSnapshot.loadImage(vin)
         }
         WidgetSnapshot.saveImage(data, vin: vin)
-        return data
+        return WidgetSnapshot.loadImage(vin) ?? data
     }
 }

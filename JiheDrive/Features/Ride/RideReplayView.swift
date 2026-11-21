@@ -1,6 +1,7 @@
 import Foundation
 import MapKit
 import SwiftUI
+import UIKit
 
 /// 轨迹回放：Z-Link 弱化底图 + 自有速度着色轨迹，默认全览、不自动播。
 struct RideReplayView: View {
@@ -14,6 +15,8 @@ struct RideReplayView: View {
     @State private var rate: Double = 1
     @State private var follow = false
     @State private var showFullMap = false
+    @State private var prefer3D = true
+    @State private var liveAddress: String?
 
     init(vehicle: Vehicle, track: RideTrack) {
         self.vehicle = vehicle
@@ -33,7 +36,15 @@ struct RideReplayView: View {
         track.points.map { $0.mapCoordinate }
     }
 
-    private var speeds: [Double] { track.speedSamples }
+    private var speeds: [Double] {
+        let n = track.points.count
+        var samples = track.speedSamples
+        if samples.count == n { return samples }
+        if n == 0 { return samples }
+        if samples.count > n { return Array(samples.prefix(n)) }
+        samples.append(contentsOf: Array(repeating: samples.last ?? 0, count: n - samples.count))
+        return samples
+    }
 
     private var clock: (times: [TimeInterval], duration: TimeInterval) {
         ReplayClock.make(track)
@@ -46,7 +57,7 @@ struct RideReplayView: View {
     }
 
     private var currentSpeed: Double {
-        ReplayClock.sample(track, progress: progress).speed
+        ReplayClock.sampleValue(speeds, times: clock.times, duration: clock.duration, progress: progress)
     }
 
     private var maxSpeedValue: Double {
@@ -82,7 +93,7 @@ struct RideReplayView: View {
             if progress >= 1 { progress = 0 }
             var last = Date()
             while playing && !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 33_000_000)
+                try? await Task.sleep(nanoseconds: 16_000_000)
                 if Task.isCancelled { break }
                 let now = Date()
                 let delta = now.timeIntervalSince(last)
@@ -97,6 +108,44 @@ struct RideReplayView: View {
             }
         }
         .fullScreenCover(isPresented: $showFullMap) { fullMap }
+        .task(id: "\(showFullMap)-\(Int(progress * 40))") {
+            guard showFullMap else { return }
+            await refreshLiveAddress()
+        }
+    }
+
+    private var cinematic: Bool { prefer3D && (playing || progress > 0.002) }
+
+    private var replayVehicleImage: UIImage? {
+        HeroAssetCache.photo(for: vehicle.vinNo)
+            ?? ResourceCache.cachedImage(vehicle.imageURL)
+            ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo)
+    }
+
+    private var traveledKm: Double {
+        max(0, track.mileage * min(max(progress, 0), 1))
+    }
+
+    private var startPlace: String {
+        AmapGeocode.placeDetail(track.startAddress)
+            ?? track.startAddress
+            ?? "起点"
+    }
+
+    private var endPlace: String {
+        AmapGeocode.placeDetail(track.endAddress)
+            ?? track.endAddress
+            ?? "终点"
+    }
+
+    private func refreshLiveAddress() async {
+        let sample = ReplayClock.sample(track, progress: progress)
+        if let text = await AmapGeocode.reverse(
+            longitude: sample.point.longitude,
+            latitude: sample.point.latitude
+        ) {
+            liveAddress = text
+        }
     }
 
     // MARK: - 顶部
@@ -462,13 +511,15 @@ struct RideReplayView: View {
             duration: clock.duration,
             progress: progress,
             follow: playing,
-            edgePadding: UIEdgeInsets(top: 100, left: 40, bottom: 220, right: 40)
+            cinematic: cinematic,
+            vehicleImage: replayVehicleImage,
+            edgePadding: UIEdgeInsets(top: 100, left: 40, bottom: 260, right: 40)
         )
         .ignoresSafeArea()
         .overlay(alignment: .top) {
             LinearGradient(
                 colors: [
-                    Color.black.opacity(0.64),
+                    Color.black.opacity(cinematic ? 0.72 : 0.64),
                     Color.black.opacity(0.28),
                     Color.clear
                 ],
@@ -479,6 +530,12 @@ struct RideReplayView: View {
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
         }
+        .overlay(alignment: .bottom) {
+            locationBanner(onMap: true)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 214)
+                .allowsHitTesting(false)
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             fullMapChrome
         }
@@ -486,7 +543,10 @@ struct RideReplayView: View {
             fullMapBottomPanel
                 .environment(\.colorScheme, .light)
         }
-        .background(Color(red: 0.93, green: 0.94, blue: 0.96).ignoresSafeArea())
+        .background(
+            (cinematic ? Color(red: 0.07, green: 0.12, blue: 0.14) : Color(red: 0.93, green: 0.94, blue: 0.96))
+                .ignoresSafeArea()
+        )
     }
 
     private var fullMapChrome: some View {
@@ -514,11 +574,66 @@ struct RideReplayView: View {
 
             Spacer(minLength: 0)
 
+            Button {
+                prefer3D.toggle()
+            } label: {
+                Image(systemName: prefer3D ? "cube.fill" : "map")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Color.white.opacity(prefer3D ? 0.32 : 0.2)))
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            .accessibilityLabel(prefer3D ? "3D 地图" : "2D 地图")
+
             TrackSpeedLegend(compact: true)
         }
         .padding(.horizontal, Theme.page)
         .padding(.top, 4)
         .padding(.bottom, 10)
+    }
+
+    private func locationBanner(onMap: Bool) -> some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(String(format: "%.1f km", track.mileage))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundStyle(onMap ? Color.white : Theme.label)
+                    .shadow(color: onMap ? Color.black.opacity(0.45) : .clear, radius: 8, y: 2)
+                    .monospacedDigit()
+                if progress > 0.02, progress < 0.995 {
+                    Text(String(format: "已骑 %.1f km", traveledKm))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(onMap ? Color.white.opacity(0.7) : Theme.secondary)
+                        .monospacedDigit()
+                }
+                placeLine(
+                    color: Color(hex: 0x34D399),
+                    text: liveAddress ?? startPlace,
+                    onMap: onMap
+                )
+                placeLine(
+                    color: Color(hex: 0xFB923C),
+                    text: endPlace,
+                    onMap: onMap
+                )
+            }
+            Spacer(minLength: 8)
+        }
+    }
+
+    private func placeLine(color: Color, text: String, onMap: Bool) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .padding(.top, 5)
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(onMap ? Color.white.opacity(0.92) : Theme.label)
+                .shadow(color: onMap ? Color.black.opacity(0.4) : .clear, radius: 6, y: 1)
+                .lineLimit(2)
+        }
     }
 
     /// 底部：速度折线 + 时间轴，浅色底板，拖曲线或滑条都会联动地图
@@ -869,7 +984,8 @@ private struct SpeedCurve: View {
     let onScrub: (Double) -> Void
 
     private var maxValue: Double { max(1, speeds.max() ?? 1) }
-    private var span: TimeInterval { max(duration, times.last ?? 0, 1) }
+    /// 和进度条、地图共用同一段墙钟，不能再用 times.last 另算一条轴
+    private var span: TimeInterval { max(duration, 1) }
 
     var body: some View {
         GeometryReader { geo in
@@ -928,7 +1044,7 @@ private struct SpeedCurve: View {
         let top: CGFloat = 14
         let usable = max(1, size.height - top)
         let useTime = times.count == speeds.count && span > 0
-        return speeds.enumerated().map { index, speed in
+        var points = speeds.enumerated().map { index, speed in
             let x: CGFloat
             if useTime {
                 x = size.width * CGFloat(min(max(times[index] / span, 0), 1))
@@ -939,6 +1055,10 @@ private struct SpeedCurve: View {
             let y = top + usable * (1 - CGFloat(ratio))
             return CGPoint(x: x, y: y)
         }
+        if let last = points.last, last.x < size.width - 1 {
+            points.append(CGPoint(x: size.width, y: last.y))
+        }
+        return points
     }
 
     private func line(_ points: [CGPoint]) -> Path {

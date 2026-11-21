@@ -1,3 +1,4 @@
+import Metal
 import SceneKit
 import UIKit
 
@@ -151,6 +152,26 @@ enum VehicleSceneBuilder {
 
         orbit.addChildNode(rig)
         return orbit
+    }
+}
+
+/// 把当前 3D 场景拍成透明底图，给位置地图当定位点
+enum VehicleSceneSnapshot {
+    static func image(from scene: SCNScene, size: CGSize = CGSize(width: 360, height: 240)) -> UIImage? {
+        guard let device = MTLCreateSystemDefaultDevice() else { return nil }
+        let renderer = SCNRenderer(device: device, options: nil)
+        renderer.scene = scene
+        renderer.autoenablesDefaultLighting = false
+        var cameraNode: SCNNode?
+        scene.rootNode.enumerateChildNodes { node, stop in
+            if node.camera != nil {
+                cameraNode = node
+                stop.pointee = true
+            }
+        }
+        renderer.pointOfView = cameraNode
+        let shot = renderer.snapshot(atTime: 0, with: size, antialiasingMode: .multisampling2X)
+        return shot
     }
 }
 
