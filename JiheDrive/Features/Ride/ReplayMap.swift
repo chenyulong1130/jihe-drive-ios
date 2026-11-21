@@ -449,7 +449,7 @@ struct ReplayMap: UIViewRepresentable {
             switch title {
             case "起": return pinImage(fill: UIColor(red: 0.20, green: 0.78, blue: 0.45, alpha: 1), label: "起")
             case "终": return pinImage(fill: UIColor(red: 1.0, green: 0.55, blue: 0.18, alpha: 1), label: "终")
-            default: return vehicleImage()
+            default: return fallbackVehicleDot()
             }
         }
 
@@ -493,7 +493,7 @@ struct ReplayMap: UIViewRepresentable {
         }
 
         /// 当前车：外圈光晕 + 白环 + 品牌蓝实心
-        private func vehicleImage() -> UIImage {
+        private func fallbackVehicleDot() -> UIImage {
             let size = CGSize(width: 44, height: 44)
             let brand = UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 1)
             return UIGraphicsImageRenderer(size: size).image { ctx in
