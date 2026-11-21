@@ -35,7 +35,7 @@ enum WidgetLiveSync {
         var snap = cachedSnap ?? WidgetSnap()
         snap.loggedIn = true
 
-        let vehicle: Vehicle?
+        var vehicle: Vehicle?
         let tire: TireReading?
         let ride: RideTrackService.RideExtra?
         if mode == .reuse, let existingVehicle = existing?.vehicle,
