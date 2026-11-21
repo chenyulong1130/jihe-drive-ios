@@ -41,13 +41,13 @@ struct LoginView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             AmbientBackground()
                 .onTapGesture { focus = nil }
 
             VStack(spacing: 0) {
                 emblem.staggerIn(0)
-                    .padding(.top, 40)
+                    .padding(.top, 48)
 
                 Text("极核智行")
                     .font(Theme.largeTitle)
@@ -94,10 +94,12 @@ struct LoginView: View {
                 .padding(.top, 18)
                 .staggerIn(4)
 
-                Spacer(minLength: 40)
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 22)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .locksKeyboardAvoidance()
     }
 
     private var buttonTitle: String {
