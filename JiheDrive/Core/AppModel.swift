@@ -43,7 +43,7 @@ final class AppModel: ObservableObject {
 
     var selectedVehicle: Vehicle? {
         let base: Vehicle?
-        if let selectedVin, let hit = vehicles.first(where: { $0.vinNo == selectedVin }) {
+        if let selectedVin, let hit = vehicles.first(where: { WidgetSnapshot.sameVin($0.vinNo, selectedVin) }) {
             base = hit
         } else {
             base = vehicles.first
@@ -185,7 +185,7 @@ final class AppModel: ObservableObject {
     /// 胎压传感器接口，独立于车辆详情，失败不影响主流程
     func loadTire(vin: String) async {
         let reading = await TireService.fetch(vin: vin)
-        guard selectedVin == nil || selectedVin == vin else { return }
+        guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
         tire = reading
     }
 
@@ -201,7 +201,7 @@ final class AppModel: ObservableObject {
                 json.merge(nested) { current, _ in current }
             }
             guard let parsed = Vehicle(json: json) else { return }
-            guard selectedVin == nil || selectedVin == vin else { return }
+            guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
             detailVehicle = parsed
         } catch is CancellationError {
             // 切车打断，忽略
@@ -250,12 +250,12 @@ final class AppModel: ObservableObject {
                 }
             }
 
-            guard selectedVin == nil || selectedVin == vin else { return }
-            if items.isEmpty, let vehicle = selectedVehicle, vehicle.vinNo == vin {
+            guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
+            if items.isEmpty, let vehicle = selectedVehicle, WidgetSnapshot.sameVin(vehicle.vinNo, vin) {
                 items = [BatteryInfo.fallback(from: vehicle)]
             }
             batteries = items
-            if let battery = items.first, let current = selectedVehicle, current.vinNo == vin {
+            if let battery = items.first, let current = selectedVehicle, WidgetSnapshot.sameVin(current.vinNo, vin) {
                 let patched = current.withBattery(battery)
                 if detailVehicle?.vinNo == vin {
                     detailVehicle = (detailVehicle ?? current).withBattery(battery)
@@ -337,7 +337,7 @@ final class AppModel: ObservableObject {
     }
 
     private func seedWidgetSnap(for vin: String?) {
-        guard let vin, let vehicle = vehicles.first(where: { $0.vinNo == vin }) else { return }
+        guard let vin, let vehicle = vehicles.first(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) else { return }
         var snap = WidgetSnapshot.read() ?? WidgetSnap()
         if !WidgetSnapshot.sameVin(snap.vin, vehicle.vinNo) {
             snap.todayKm = 0

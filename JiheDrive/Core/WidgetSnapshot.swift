@@ -317,6 +317,9 @@ enum WidgetSnapshot {
         UserDefaults.standard.set(value, forKey: "widget_selectedVin")
         UserDefaults.standard.set(value, forKey: "selectedVin")
         UserDefaults.standard.synchronize()
+        if let url = selectedVinFileURL() {
+            try? value.data(using: .utf8)?.write(to: url, options: [.atomic])
+        }
         if let url = snapshotURL(),
            var json = (try? Data(contentsOf: url)).flatMap({
                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
@@ -330,6 +333,7 @@ enum WidgetSnapshot {
 
     static func selectedVin() -> String? {
         let candidates: [String?] = [
+            selectedVinFile(),
             suiteDefaults()?.string(forKey: "selectedVin"),
             snapshotSelectedVin(),
             UserDefaults.standard.string(forKey: "widget_selectedVin"),
@@ -340,6 +344,22 @@ enum WidgetSnapshot {
             let trimmed = vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return trimmed.isEmpty ? nil : trimmed
         }.first
+    }
+
+    private static func selectedVinFileURL() -> URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: suiteName)?
+            .appendingPathComponent("selected_vin.txt")
+    }
+
+    private static func selectedVinFile() -> String? {
+        guard let url = selectedVinFileURL(),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     static func sameVin(_ lhs: String?, _ rhs: String?) -> Bool {

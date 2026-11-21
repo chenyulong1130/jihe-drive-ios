@@ -58,10 +58,8 @@ struct ReplayMap: UIViewRepresentable {
         private var lineWidths: [ObjectIdentifier: CGFloat] = [:]
         private var marker: ReplayCursorAnnotation?
         private var didFit = false
-        private var didZoomFollow = false
         private var followEnabled = false
         private var cameraTarget: CLLocationCoordinate2D?
-        private var lerpUntil: CFTimeInterval = 0
         private var displayLink: CADisplayLink?
         private let tickProxy = TickProxy()
         private weak var mapView: MKMapView?
@@ -162,6 +160,9 @@ struct ReplayMap: UIViewRepresentable {
 
         func update(map: MKMapView, progress: Double, follow: Bool) {
             mapView = map
+            map.isZoomEnabled = true
+            map.isScrollEnabled = true
+            map.isRotateEnabled = false
             guard allPoints.count > 1 else { return }
             let sample = ReplayClock.interpolate(
                 points: modelPoints,
@@ -188,17 +189,6 @@ struct ReplayMap: UIViewRepresentable {
             }
 
             startLink()
-            if !didZoomFollow {
-                didZoomFollow = true
-                lerpUntil = CACurrentMediaTime() + 0.42
-                let camera = MKMapCamera(
-                    lookingAtCenter: current,
-                    fromDistance: 520,
-                    pitch: 0,
-                    heading: 0
-                )
-                map.setCamera(camera, animated: true)
-            }
         }
 
         private func startLink() {
@@ -215,27 +205,33 @@ struct ReplayMap: UIViewRepresentable {
         }
 
         fileprivate func onTick(_ link: CADisplayLink) {
+            _ = link
             guard followEnabled, let map = mapView, let target = cameraTarget else { return }
-            if CACurrentMediaTime() < lerpUntil { return }
+            if isUserGesture(on: map) { return }
 
-            let current = map.centerCoordinate
-            let far = abs(current.latitude - target.latitude) > 0.004
-                || abs(current.longitude - target.longitude) > 0.004
-            let next: CLLocationCoordinate2D
-            if far {
-                next = target
-            } else {
-                let dt = link.duration > 0 ? link.duration : 1.0 / 60.0
-                let k = 1 - exp(-dt / 0.12)
-                next = CLLocationCoordinate2D(
-                    latitude: current.latitude + (target.latitude - current.latitude) * k,
-                    longitude: current.longitude + (target.longitude - current.longitude) * k
-                )
-            }
+            let visible = map.visibleMapRect.insetBy(
+                dx: map.visibleMapRect.size.width * 0.18,
+                dy: map.visibleMapRect.size.height * 0.22
+            )
+            let point = MKMapPoint(target)
+            if visible.contains(point) { return }
+
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            map.centerCoordinate = next
+            map.setCenter(target, animated: false)
             CATransaction.commit()
+        }
+
+        private func isUserGesture(on map: MKMapView) -> Bool {
+            func active(_ view: UIView) -> Bool {
+                if view.gestureRecognizers?.contains(where: {
+                    $0.state == .began || $0.state == .changed
+                }) == true {
+                    return true
+                }
+                return view.subviews.contains(where: active)
+            }
+            return active(map)
         }
 
         private final class TickProxy: NSObject {
@@ -382,6 +378,7 @@ final class ReplayCursorAnnotation: MKPointAnnotation {
 
 final class ReplayCursorView: MKAnnotationView {
     static let reuseID = "replay-cursor"
+    private static let dotSize: CGFloat = 14
 
     private let bubble = UILabel()
     private let dot = UIView()
@@ -389,9 +386,11 @@ final class ReplayCursorView: MKAnnotationView {
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         canShowCallout = false
+        clipsToBounds = false
         zPriority = .max
-        frame = CGRect(x: 0, y: 0, width: 92, height: 42)
-        centerOffset = CGPoint(x: 0, y: -18)
+        // 锚点就是圆点中心，气泡画在 bounds 外面，避免偏出轨迹
+        frame = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
+        centerOffset = .zero
 
         bubble.font = .systemFont(ofSize: 11, weight: .bold)
         bubble.textColor = .white
@@ -400,9 +399,10 @@ final class ReplayCursorView: MKAnnotationView {
         bubble.layer.masksToBounds = true
 
         dot.backgroundColor = UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 1)
-        dot.layer.cornerRadius = 7
+        dot.layer.cornerRadius = Self.dotSize / 2
         dot.layer.borderWidth = 2.5
         dot.layer.borderColor = UIColor.white.cgColor
+        dot.frame = bounds
 
         addSubview(bubble)
         addSubview(dot)
@@ -421,9 +421,13 @@ final class ReplayCursorView: MKAnnotationView {
             : UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 0.94)
         let textSize = bubble.sizeThatFits(CGSize(width: 120, height: 20))
         let width = max(44, textSize.width + 14)
-        frame = CGRect(x: 0, y: 0, width: width, height: 42)
-        bubble.frame = CGRect(x: 0, y: 0, width: width, height: 20)
-        dot.frame = CGRect(x: (width - 14) / 2, y: 24, width: 14, height: 14)
-        centerOffset = CGPoint(x: 0, y: -18)
+        bubble.frame = CGRect(
+            x: (Self.dotSize - width) / 2,
+            y: -24,
+            width: width,
+            height: 20
+        )
+        dot.frame = bounds
+        centerOffset = .zero
     }
 }

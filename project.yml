@@ -69,6 +69,7 @@ targets:
       - path: JiheDrive/Core/CommunityTask.swift
       - path: JiheDrive/Core/SigninInfo.swift
       - path: JiheDrive/Core/ChargeActivityAttributes.swift
+      - path: JiheDrive/Core/BatteryInfo.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.liruixin.jihedrive.widget

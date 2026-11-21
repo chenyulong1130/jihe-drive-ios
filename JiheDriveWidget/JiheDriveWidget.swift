@@ -24,18 +24,32 @@ struct SnapshotProvider: TimelineProvider {
             return
         }
         if let snap = WidgetSnapshot.read(), snap.loggedIn || snap.soc > 0 || !snap.name.isEmpty {
-            completion(.from(snap))
+            completion(.from(matchingSelected(snap)))
             return
         }
-        completion(.from(WidgetSnapshot.read() ?? WidgetSnap()))
+        completion(.from(matchingSelected(WidgetSnapshot.read() ?? WidgetSnap())))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
         Task {
             let snap = await WidgetLiveSync.refresh()
             let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
-            completion(Timeline(entries: [.from(snap)], policy: .after(next)))
+            completion(Timeline(entries: [.from(matchingSelected(snap))], policy: .after(next)))
         }
+    }
+
+    private func matchingSelected(_ snap: WidgetSnap) -> WidgetSnap {
+        guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return snap }
+        guard !WidgetSnapshot.sameVin(snap.vin, wanted) else { return snap }
+        var copy = snap
+        copy.vin = wanted
+        copy.soc = 0
+        copy.rangeKm = 0
+        copy.charging = false
+        copy.todayKm = 0
+        copy.todayMin = 0
+        copy.imageData = WidgetSnapshot.loadImage(wanted)
+        return copy
     }
 
     /// 预览用，对齐 Scriptable 参考图
