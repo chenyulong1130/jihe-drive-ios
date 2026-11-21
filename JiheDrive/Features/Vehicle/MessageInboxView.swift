@@ -34,13 +34,13 @@ struct MessageInboxView: View {
                     empty
                 } else {
                     ScrollView(showsIndicators: false) {
-                        LazyVStack(spacing: 10) {
+                        LazyVStack(spacing: 12) {
                             ForEach(filtered) { item in
                                 Button {
                                     store.open(item)
                                     selected = item
                                 } label: {
-                                    row(item)
+                                    MessageCard(item: item)
                                 }
                                 .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
                             }
@@ -84,42 +84,6 @@ struct MessageInboxView: View {
         .buttonStyle(.plain)
     }
 
-    private func row(_ item: InboxMessage) -> some View {
-        AppleCard(padding: 14) {
-            HStack(alignment: .top, spacing: 10) {
-                Circle()
-                    .fill(item.unread ? Theme.brand : Color.clear)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 6)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(item.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(item.kindLabel)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Theme.secondary)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Theme.surfaceAlt))
-                    }
-                    if !item.content.isEmpty {
-                        Text(item.content)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.secondary)
-                            .lineLimit(2)
-                    }
-                    Text(item.timeText.isEmpty ? " " : item.timeText)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.tertiary)
-                }
-            }
-        }
-    }
-
     private var empty: some View {
         VStack(spacing: 10) {
             Image(systemName: "bell.slash")
@@ -128,7 +92,7 @@ struct MessageInboxView: View {
             Text("暂无消息")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Theme.label)
-            Text(store.error ?? "官方有新通知时会自动出现，前台约每 2 分钟同步一次")
+            Text(store.error ?? "官方有新通知时会自动出现")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondary)
                 .multilineTextAlignment(.center)
@@ -138,53 +102,169 @@ struct MessageInboxView: View {
     }
 }
 
+private struct MessageCard: View {
+    let item: InboxMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                icon
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(item.title)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Theme.label)
+                            .lineLimit(1)
+                        if item.unread {
+                            Circle()
+                                .fill(Theme.brand)
+                                .frame(width: 7, height: 7)
+                        }
+                        Spacer(minLength: 6)
+                        Text(item.kindLabel)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(accent.opacity(0.12)))
+                    }
+                    if !item.content.isEmpty, item.content != item.title {
+                        Text(item.content)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    HStack(spacing: 8) {
+                        if !item.carInfo.isEmpty {
+                            Label(item.carInfo, systemImage: "scooter")
+                        }
+                        Spacer(minLength: 0)
+                        Text(item.timeText)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+                    .lineLimit(1)
+                }
+            }
+            .padding(14)
+
+            if let url = item.imageURL {
+                CachedRemoteImage(url: url, contentMode: .fill)
+                    .frame(height: 118)
+                    .clipped()
+            }
+        }
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
+        .overlay(alignment: .leading) {
+            if item.unread {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 16)
+            }
+        }
+    }
+
+    private var accent: Color {
+        switch item.kind {
+        case 2: return Theme.orange
+        case 1: return Theme.indigo
+        default: return Theme.brand
+        }
+    }
+
+    private var icon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(accent.opacity(0.14))
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(accent)
+        }
+        .frame(width: 42, height: 42)
+    }
+
+    private var symbol: String {
+        let title = item.title
+        if title.contains("震动") { return "waveform.path.ecg" }
+        if title.contains("推动") || title.contains("移动") { return "arrow.left.arrow.right" }
+        if title.contains("充电") { return "bolt.fill" }
+        if item.kind == 1 { return "gift.fill" }
+        if item.kind == 2 { return "exclamationmark.triangle.fill" }
+        return "bell.fill"
+    }
+}
+
 struct MessageDetailView: View {
     let item: InboxMessage
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        SheetShell(title: item.title, subtitle: item.kindLabel, onClose: { dismiss() }) {
+        SheetShell(title: item.kindLabel, subtitle: item.timeText, onClose: { dismiss() }) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
-                    if !item.timeText.isEmpty {
-                        Text(item.timeText)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.tertiary)
+                    if let url = item.imageURL {
+                        CachedRemoteImage(url: url, contentMode: .fill)
+                            .frame(height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
-                    if !item.content.isEmpty {
-                        Text(item.content)
-                            .font(.system(size: 15))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(item.title)
+                            .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(Theme.label)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let url = item.jumpURL {
-                        Link(destination: url) {
-                            Text(url.absoluteString)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Theme.brand)
-                                .underline()
+                        if !item.content.isEmpty {
+                            Text(item.content)
+                                .font(.system(size: 15))
+                                .foregroundStyle(Theme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    AppleCard {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("接口返回参数")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.label)
-                            Text("GET /v1.0/mine/cfmotoservermine/app/Message/list_v2")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.tertiary)
-                            ForEach(item.fields, id: \.key) { field in
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(field.key)
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                        .foregroundStyle(Theme.secondary)
-                                    Text(field.value)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .foregroundStyle(Theme.label)
-                                        .textSelection(.enabled)
+
+                    if !item.carInfo.isEmpty || !item.addressText.isEmpty {
+                        AppleCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if !item.carInfo.isEmpty {
+                                    detailRow(icon: "scooter", title: "车辆", value: item.carInfo)
                                 }
-                                .padding(.vertical, 4)
+                                if !item.addressText.isEmpty {
+                                    detailRow(icon: "mappin.and.ellipse", title: "位置", value: item.addressText)
+                                }
                             }
+                        }
+                    }
+
+                    if !item.coordinate.isEmpty {
+                        Button {
+                            openMap()
+                        } label: {
+                            Label("在地图中查看", systemImage: "map")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(Theme.brand)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Theme.brand.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if let url = item.jumpURL {
+                        Link(destination: url) {
+                            Text("查看详情")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Theme.brand)
+                                )
                         }
                     }
                 }
@@ -193,5 +273,29 @@ struct MessageDetailView: View {
             }
         }
         .sheetChrome(detents: [.large])
+    }
+
+    private func openMap() {
+        let parts = item.coordinate.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 2 else { return }
+        NavigationLauncher.openBest(lat: parts[1], lon: parts[0], name: item.addressText.isEmpty ? item.title : item.addressText)
+    }
+
+    private func detailRow(icon: String, title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+                Text(value)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }

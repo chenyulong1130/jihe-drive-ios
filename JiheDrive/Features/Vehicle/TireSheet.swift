@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 /// 胎压监测二级页：对齐小程序 tire.vue（双轮卡 + 压力区间 + 说明）
@@ -408,9 +409,14 @@ struct TireSheet: View {
     private var historyCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("胎压历史")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.label)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("胎压走势")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                    Text("纵轴是气压（bar），绿带是安全区 1.9–3.2")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.tertiary)
+                }
                 Spacer()
                 HStack(spacing: 6) {
                     periodChip("24 小时", id: "1")
@@ -421,23 +427,19 @@ struct TireSheet: View {
             if histBusy && history == nil {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 16)
             } else if let history, !history.wheels.isEmpty {
+                TireHistoryChart(
+                    wheels: history.wheels,
+                    period: histPeriod,
+                    lowBar: lowBar,
+                    highBar: highBar
+                )
+                .frame(height: 176)
+
                 ForEach(history.wheels) { wheel in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(wheel.pos == "front" ? "前轮" : "后轮")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.label)
-                            Spacer()
-                            Text("均 \(wheel.avg.map { String(format: "%.1f", $0) } ?? "--")  低 \(wheel.min.map { String(format: "%.1f", $0) } ?? "--")  高 \(wheel.max.map { String(format: "%.1f", $0) } ?? "--")")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Theme.tertiary)
-                                .monospacedDigit()
-                        }
-                        historyBars(wheel.points)
-                    }
+                    historySummary(wheel)
                 }
             } else {
-                Text("传感器上报一段时间后可看趋势")
+                Text("传感器上报一段时间后可看走势")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.tertiary)
             }
@@ -447,6 +449,65 @@ struct TireSheet: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Theme.surface)
         }
+    }
+
+    private func historySummary(_ wheel: TireHistoryWheel) -> some View {
+        let name = wheel.pos == "front" ? "前轮" : "后轮"
+        let tint = wheel.pos == "front" ? Theme.brand : Color(hex: 0xE08A2C)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Text(historyInsight(wheel))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(historyInsightColor(wheel))
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                histStat("最低", wheel.min, tint)
+                histStat("平均", wheel.avg, tint)
+                histStat("最高", wheel.max, tint)
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func histStat(_ title: String, _ value: Double?, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value.map { String(format: "%.1f", $0) } ?? "--")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .monospacedDigit()
+                Text("bar")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Theme.surfaceAlt)
+        )
+    }
+
+    private func historyInsight(_ wheel: TireHistoryWheel) -> String {
+        if let min = wheel.min, min < lowBar { return "有偏低时段" }
+        if let max = wheel.max, max > highBar { return "有偏高时段" }
+        return "都在安全区"
+    }
+
+    private func historyInsightColor(_ wheel: TireHistoryWheel) -> Color {
+        if let min = wheel.min, min < lowBar { return Theme.orange }
+        if let max = wheel.max, max > highBar { return Theme.red }
+        return Theme.green
     }
 
     private func periodChip(_ title: String, id: String) -> some View {
@@ -463,24 +524,6 @@ struct TireSheet: View {
                 .background(Capsule().fill(on ? Theme.brand : Theme.surfaceAlt))
         }
         .buttonStyle(.plain)
-    }
-
-    private func historyBars(_ points: [TireHistoryPoint]) -> some View {
-        let sample = Array(points.suffix(48))
-        let values = sample.map(\.value)
-        let lo = min(values.min() ?? 1.6, 1.6)
-        let hi = max(values.max() ?? 3.2, 3.2)
-        let span = max(0.3, hi - lo)
-        return HStack(alignment: .bottom, spacing: 2) {
-            ForEach(Array(sample.enumerated()), id: \.offset) { _, point in
-                let h = 8 + ((point.value - lo) / span) * 52
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(point.value < 1.9 ? Theme.orange : Theme.brand.opacity(0.75))
-                    .frame(width: 4, height: h)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 62, alignment: .bottom)
     }
 
     private func reload() async {
@@ -507,5 +550,128 @@ private struct WheelReading: Identifiable {
 
     func isOk(low: Double, high: Double) -> Bool {
         !sensorWarn && pressure >= low && pressure <= high
+    }
+}
+
+private struct TireHistoryChart: View {
+    let wheels: [TireHistoryWheel]
+    let period: String
+    let lowBar: Double
+    let highBar: Double
+
+    private var series: [(name: String, points: [TireHistoryPoint])] {
+        wheels.map { wheel in
+            (wheel.pos == "front" ? "前轮" : "后轮", downsample(wheel.points))
+        }
+    }
+
+    var body: some View {
+        let values = wheels.flatMap(\.points).map(\.value)
+        let yLo = min(1.5, (values.min() ?? 1.8) - 0.2)
+        let yHi = max(3.5, (values.max() ?? 2.6) + 0.2)
+        let dates = series.flatMap { $0.points.map { Date(timeIntervalSince1970: $0.time / 1000) } }
+        let xStart = dates.min() ?? Date().addingTimeInterval(-3600)
+        let xEnd = dates.max() ?? Date()
+
+        Chart {
+            RectangleMark(
+                xStart: .value("起", xStart),
+                xEnd: .value("止", xEnd),
+                yStart: .value("低", lowBar),
+                yEnd: .value("高", highBar)
+            )
+            .foregroundStyle(Theme.green.opacity(0.14))
+
+            RuleMark(y: .value("偏低线", lowBar))
+                .foregroundStyle(Theme.orange.opacity(0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .annotation(position: .trailing, alignment: .leading) {
+                    Text("1.9 偏低")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.orange)
+                }
+
+            RuleMark(y: .value("偏高线", highBar))
+                .foregroundStyle(Theme.red.opacity(0.55))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                .annotation(position: .trailing, alignment: .leading) {
+                    Text("3.2 偏高")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.red)
+                }
+
+            ForEach(series, id: \.name) { item in
+                ForEach(item.points) { point in
+                    LineMark(
+                        x: .value("时间", Date(timeIntervalSince1970: point.time / 1000)),
+                        y: .value("胎压", point.value),
+                        series: .value("轮", item.name)
+                    )
+                    .foregroundStyle(by: .value("轮", item.name))
+                    .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                }
+
+                if let last = item.points.last {
+                    PointMark(
+                        x: .value("时间", Date(timeIntervalSince1970: last.time / 1000)),
+                        y: .value("胎压", last.value),
+                        series: .value("轮", item.name)
+                    )
+                    .foregroundStyle(by: .value("轮", item.name))
+                    .symbolSize(46)
+                    .annotation(position: .top, spacing: 3) {
+                        Text(String(format: "%.1f", last.value))
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.label)
+                    }
+                }
+            }
+        }
+        .chartForegroundStyleScale([
+            "前轮": Theme.brand,
+            "后轮": Color(hex: 0xE08A2C)
+        ])
+        .chartYScale(domain: yLo...yHi)
+        .chartLegend(position: .top, alignment: .trailing)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: [lowBar, 2.4, highBar]) { value in
+                AxisGridLine().foregroundStyle(Theme.separator.opacity(0.45))
+                AxisValueLabel {
+                    if let number = value.as(Double.self) {
+                        Text(String(format: "%.1f", number))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: period == "1" ? 4 : 5)) { value in
+                AxisGridLine().foregroundStyle(Theme.separator.opacity(0.3))
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(Self.format(date, period: period))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func downsample(_ points: [TireHistoryPoint]) -> [TireHistoryPoint] {
+        guard points.count > 72 else { return points }
+        let step = Double(points.count - 1) / 71
+        return (0..<72).map { index in
+            points[min(points.count - 1, Int((Double(index) * step).rounded()))]
+        }
+    }
+
+    private static func format(_ date: Date, period: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = period == "1" ? "HH:mm" : "M/d"
+        return formatter.string(from: date)
     }
 }

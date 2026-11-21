@@ -220,11 +220,11 @@ struct RideReplayView: View {
 
                 Spacer(minLength: 0)
 
-                HStack(alignment: .bottom, spacing: 8) {
+                VStack(alignment: .leading, spacing: 8) {
                     TrackSpeedLegend(compact: true)
-                    Spacer(minLength: 0)
                     chip(text: String(format: "%.1f km", track.mileage), icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .white)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(12)
         }
@@ -594,6 +594,11 @@ struct RideReplayView: View {
     /// 底部：速度折线 + 时间轴，浅色底板，拖曲线或滑条都会联动地图
     private var fullMapBottomPanel: some View {
         VStack(spacing: 10) {
+            HStack {
+                TrackSpeedLegend(compact: true, onDark: false)
+                Spacer(minLength: 0)
+            }
+
             HStack(alignment: .firstTextBaseline) {
                 Text(String(format: "%.1f", track.mileage))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -639,11 +644,6 @@ struct RideReplayView: View {
                         progress = min(max(value, 0), 1)
                     }
                 }
-            }
-
-            HStack {
-                Spacer(minLength: 0)
-                TrackSpeedLegend(compact: true, onDark: false)
             }
 
             HStack(spacing: 12) {

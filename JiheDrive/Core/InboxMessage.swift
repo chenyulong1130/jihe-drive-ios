@@ -12,8 +12,9 @@ struct InboxMessage: Identifiable, Hashable {
     var unread: Bool
     var imageURL: URL?
     var jumpURL: URL?
-    /// 原始字段，详情页展示「接口返回参数」
-    var fields: [(key: String, value: String)]
+    var carInfo: String
+    var addressText: String
+    var coordinate: String
 
     static func == (lhs: InboxMessage, rhs: InboxMessage) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -49,17 +50,23 @@ struct InboxMessage: Identifiable, Hashable {
         imageURL = urlValue(json, ["picUrl", "imageUrl", "picture", "coverUrl", "imgUrl"])
             ?? urlValue(extra, ["addressThumbnail", "picUrl", "imageUrl"])
         jumpURL = urlValue(json, ["jumpUrl", "skipUrl", "linkUrl", "url", "h5Url", "targetUrl"])
-        fields = json.keys.sorted().compactMap { key in
-            let value = json[key]
-            if value is NSNull { return (key, "null") }
-            if JSONSerialization.isValidJSONObject(value as Any) ,
-               let data = try? JSONSerialization.data(withJSONObject: value as Any),
-               let encoded = String(data: data, encoding: .utf8) {
-                return (key, encoded)
-            }
-            let encoded = "\(value ?? "")"
-            return encoded == "<null>" ? (key, "null") : (key, encoded)
+        carInfo = text(extra, ["carInfo"]).replacingOccurrences(of: "车辆：", with: "")
+        coordinate = text(extra, ["location"])
+        addressText = Self.parseAddress(extra)
+    }
+
+    private static func parseAddress(_ extra: [String: Any]) -> String {
+        let nested = extra["address"]
+        if let textValue = nested as? String,
+           let data = textValue.data(using: .utf8),
+           let map = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let name = text(map, ["name", "address"])
+            if !name.isEmpty { return name }
         }
+        if let map = nested as? [String: Any] {
+            return text(map, ["name", "address"])
+        }
+        return text(extra, ["address"])
     }
 
     static func label(for kind: Int) -> String {

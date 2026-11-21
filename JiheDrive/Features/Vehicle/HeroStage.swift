@@ -80,15 +80,17 @@ struct HeroStage: View {
                     .padding(.top, 10)
                 Spacer(minLength: 0)
                     .allowsHitTesting(false)
+                tireBar
+                    .padding(.bottom, 10)
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
-            .padding(.bottom, 4)
             .background(Color.clear)
             .allowsHitTesting(true)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
+        .clipped()
     }
 
     private func resetCamera() {
@@ -241,7 +243,7 @@ struct HeroStage: View {
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
-                                    reuseKey: "hero-\(vehicle.vinNo)",
+                                    reuseKey: "hero-\(vehicle.vinNo)-down2",
                                     interactive: true,
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,
@@ -257,7 +259,6 @@ struct HeroStage: View {
                                 .opacity(glbVisible ? 1 : 0)
                             }
                         }
-                        .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
                         .onAppear { if modelGLBCached { glbRevealed = true } }
@@ -279,15 +280,13 @@ struct HeroStage: View {
                             }
                         )
                     }
-                    .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 6)
-                        .overlay { tireMarks }
+                        .padding(.horizontal, 0)
+                        .padding(.bottom, showTireMarks ? 8 : 4)
                         .allowsHitTesting(false)
                 }
             }
@@ -312,27 +311,24 @@ struct HeroStage: View {
     }
 
     private var twoDCar: some View {
-        ZStack {
-                Ellipse()
-                    .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
-                    .frame(width: 240, height: 12)
-                    .blur(radius: 6)
-                .offset(y: 16)
-
-            Group {
-                if let url = vehicle.imageURL {
-                    CachedRemoteImage(url: url, contentMode: .fit)
-                        .id(vehicle.vinNo + url.absoluteString)
-                } else {
-                    placeholder
+        Color.clear
+            .overlay(alignment: .bottom) {
+                ZStack(alignment: .bottom) {
+                    Ellipse()
+                        .fill(Color.black.opacity(onDark ? 0.22 : 0.07))
+                        .frame(width: 260, height: 14)
+                        .blur(radius: 6)
+                        .offset(y: 6)
+                    if let url = vehicle.imageURL {
+                        BottomFitVehicleImage(url: url)
+                            .id(vehicle.vinNo + url.absoluteString)
+                    } else {
+                        placeholder
+                    }
                 }
+                .padding(.horizontal, 2)
+                .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
             }
-            .frame(maxWidth: .infinity)
-            .frame(maxHeight: .infinity)
-            .padding(.horizontal, 6)
-            .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
     private var placeholder: some View {
@@ -516,51 +512,48 @@ struct HeroStage: View {
 
     // MARK: - 胎压
 
-    /// 标在轮胎正下方。转动 3D 时隐藏。
     @ViewBuilder
-    private var tireMarks: some View {
+    private var tireBar: some View {
         if showTireMarks {
-            GeometryReader { geo in
-                let frontX = has3D ? 0.27 : 0.24
-                let rearX = has3D ? 0.73 : 0.76
-                let wheelY = has3D ? 0.70 : 0.86
-                ZStack {
-                    if let front = validBar(frontBar) {
-                        Button {
-                            onOpenTire?()
-                        } label: {
-                            TirePin(
-                                text: tireCaption(bar: front, temp: tireFrontTemp),
-                                tint: tireTint(front)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .position(x: geo.size.width * frontX, y: geo.size.height * wheelY)
-                    }
-                    if let rear = validBar(rearBar) {
-                        Button {
-                            onOpenTire?()
-                        } label: {
-                            TirePin(
-                                text: tireCaption(bar: rear, temp: tireRearTemp),
-                                tint: tireTint(rear)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .position(x: geo.size.width * rearX, y: geo.size.height * wheelY)
-                    }
+            Button {
+                onOpenTire?()
+            } label: {
+                HStack(spacing: 0) {
+                    tireColumn(title: "前轮", bar: validBar(frontBar), temp: tireFrontTemp)
+                    Spacer(minLength: 12)
+                    tireColumn(title: "后轮", bar: validBar(rearBar), temp: tireRearTemp)
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 6)
             }
-            .transition(.opacity)
-            .allowsHitTesting(onOpenTire != nil)
+            .buttonStyle(.plain)
+            .disabled(onOpenTire == nil)
         }
     }
 
-    private func tireCaption(bar: Double, temp: Double?) -> String {
-        if let temp, temp > -40, temp < 120 {
-            return String(format: "%.1fbar %.0f°C", bar, temp)
+    private func tireColumn(title: String, bar: Double?, temp: Double?) -> some View {
+        let tint = tireTint(bar)
+        let label = onDark ? Color.white.opacity(0.82) : Theme.secondary
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(label)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(bar.map { String(format: "%.1f", $0) } ?? "--")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .monospacedDigit()
+                Text("bar")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(tint.opacity(0.85))
+                if let temp, temp > -40, temp < 120 {
+                    Text(String(format: "%.0f°", temp))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(tint.opacity(0.85))
+                }
+            }
         }
-        return String(format: "%.1fbar", bar)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var frontBar: Double? {
@@ -577,50 +570,17 @@ struct HeroStage: View {
         return value
     }
 
-    private func tireTint(_ bar: Double) -> Color {
+    private func tireTint(_ bar: Double?) -> Color {
+        guard let bar else { return onDark ? Color.white.opacity(0.55) : Theme.tertiary }
         if bar < 1.8 { return Theme.red }
         if bar < 2.1 || bar > 2.9 { return Theme.orange }
-        return Color(hex: 0x1AA7B8)
+        return Color(hex: 0xE08A2C)
     }
 
     private var heroDrag: some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { _ in onInteract?(true) }
             .onEnded { _ in onInteract?(false) }
-    }
-}
-
-/// 轮胎正下方的标注
-private struct TirePin: View {
-    let text: String
-    var tint: Color = Color(hex: 0x1AA7B8)
-
-    var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .overlay(alignment: .top) {
-                VStack(spacing: 3) {
-                    Circle()
-                        .fill(tint)
-                        .frame(width: 6, height: 6)
-                    Text(text)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(tint)
-                        .monospacedDigit()
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.white.opacity(0.94))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(tint.opacity(0.85), lineWidth: 1)
-                        )
-                }
-                .fixedSize()
-                .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
-            }
     }
 }
 
@@ -641,6 +601,31 @@ private struct ChargingChip: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
                 pulse = true
+            }
+        }
+    }
+}
+
+/// 车图贴底等比缩放，避免 fit 在高框里上下居中留白
+private struct BottomFitVehicleImage: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+            } else {
+                Color.clear.frame(height: 1)
+            }
+        }
+        .task(id: url.absoluteString) {
+            image = ResourceCache.cachedImage(url)
+            if image == nil {
+                image = await ResourceCache.image(for: url)
             }
         }
     }
