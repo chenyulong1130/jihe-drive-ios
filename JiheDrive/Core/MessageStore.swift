@@ -1,6 +1,7 @@
 import Foundation
 import UserNotifications
 import SwiftUI
+import UIKit
 
 /// 消息收件箱：list_v2 拉取、未读角标、本地通知。前台约 2 分钟轮询一次。
 @MainActor
@@ -61,11 +62,18 @@ final class MessageStore: ObservableObject {
         }
 
         if !seeded {
-            seedSeen(items.map(\.id))
+            // 已读的记入 seen，未读的走一次本地通知，避免整页历史刷屏
+            seedSeen(items.filter { !$0.unread }.map(\.id))
             seeded = true
+            if notifyNew {
+                await notifyFresh(items)
+            } else {
+                seedSeen(items.map(\.id))
+            }
         } else if notifyNew {
             await notifyFresh(items)
         }
+        applyBadge()
     }
 
     func open(_ item: InboxMessage) {
@@ -76,8 +84,12 @@ final class MessageStore: ObservableObject {
         Task { await postRead(item.id) }
     }
 
-    func requestPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    func requestPermission() async {
+        let center = UNUserNotificationCenter.current()
+        let status = await center.notificationSettings().authorizationStatus
+        if status == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+        }
     }
 
     // MARK: - Network
@@ -142,11 +154,14 @@ final class MessageStore: ObservableObject {
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
             return
         }
-        for item in fresh.prefix(3) {
+        let incoming = fresh.filter(\.unread)
+        let notify = incoming.isEmpty ? Array(fresh.prefix(1)) : Array(incoming.prefix(3))
+        for item in notify {
             let content = UNMutableNotificationContent()
             content.title = item.title
             content.body = item.content.isEmpty ? item.kindLabel : item.content
             content.sound = .default
+            content.badge = NSNumber(value: unreadCount)
             let request = UNNotificationRequest(
                 identifier: "msg-\(item.id)",
                 content: content,
@@ -154,6 +169,12 @@ final class MessageStore: ObservableObject {
             )
             try? await center.add(request)
         }
+    }
+
+    private func applyBadge() {
+        let count = unreadCount
+        UNUserNotificationCenter.current().setBadgeCount(count) { _ in }
+        UIApplication.shared.applicationIconBadgeNumber = count
     }
 
     private func seedSeen(_ ids: some Collection<String>) {

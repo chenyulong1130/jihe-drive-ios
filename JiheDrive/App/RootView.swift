@@ -51,11 +51,10 @@ struct RootView: View {
         .task(id: model.isLoggedIn) {
             guard model.isLoggedIn else { return }
             LocationPermissionRequester.shared.request()
-            messages.requestPermission()
+            await messages.requestPermission()
             await messages.refresh()
-            // 前台约 2 分钟轮询消息（对齐几何面板 10 分钟偏慢，收件箱要更勤）
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 120_000_000_000)
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
                 guard !Task.isCancelled else { break }
                 await messages.refresh()
             }
@@ -70,6 +69,8 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 appearance.applyToWindows(setStyle: false)
+                guard model.isLoggedIn else { return }
+                Task { await messages.refresh() }
             }
         }
         .animation(nil, value: scenePhase)
