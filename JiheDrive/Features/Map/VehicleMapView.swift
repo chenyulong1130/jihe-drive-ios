@@ -84,14 +84,7 @@ struct VehicleMapView: UIViewRepresentable {
             guard track.count > 1 else { return }
 
             var coordinates = track.map { $0.mapCoordinate }
-            let count = coordinates.count
-
-            let casing = MKPolyline(coordinates: &coordinates, count: count)
-            casing.title = "casing"
-            map.addOverlay(casing)
-
-            var mirror = track.map { $0.mapCoordinate }
-            let line = MKPolyline(coordinates: &mirror, count: count)
+            let line = MKPolyline(coordinates: &coordinates, count: coordinates.count)
             line.title = "line"
             map.addOverlay(line)
         }
@@ -139,13 +132,8 @@ struct VehicleMapView: UIViewRepresentable {
             renderer.lineCap = .round
             renderer.lineJoin = .round
 
-            if line.title == "casing" {
-                renderer.strokeColor = UIColor.white.withAlphaComponent(0.9)
-                renderer.lineWidth = 9
-            } else {
-                renderer.strokeColor = UIColor(red: 0.043, green: 0.42, blue: 0.796, alpha: 1)
-                renderer.lineWidth = 5
-            }
+            renderer.strokeColor = UIColor(red: 0.043, green: 0.42, blue: 0.796, alpha: 1)
+            renderer.lineWidth = 5
             return renderer
         }
     }

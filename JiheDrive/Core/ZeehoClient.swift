@@ -342,4 +342,13 @@ final class ZeehoClient {
         }
         return message
     }
+
+    static func requireOK(_ response: [String: Any], fallback: String) throws {
+        let code = codeString(response["code"])
+        if code.isEmpty || code == "10000" || code == "0" { return }
+        throw ZeehoError.server(
+            code: code,
+            message: errorText(response) ?? fallback
+        )
+    }
 }

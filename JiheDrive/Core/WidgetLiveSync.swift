@@ -177,7 +177,9 @@ enum WidgetLiveSync {
     // MARK: - Vehicle
 
     private static func fetchVehicle(hint: Vehicle?) async -> Vehicle? {
-        let selectedVin = WidgetSnapshot.selectedVin() ?? hint?.vinNo
+        let wanted = WidgetSnapshot.selectedVin()
+            ?? hint?.vinNo
+            ?? WidgetSnapshot.read()?.vin
         var list: [Vehicle] = []
         if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicle/list") {
             let code = ZeehoClient.codeString(res["code"])
@@ -186,7 +188,13 @@ enum WidgetLiveSync {
             }
         }
         if list.isEmpty { return hint }
-        var picked = list.first(where: { $0.vinNo == selectedVin }) ?? list.first
+        let pickedVin = wanted?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var picked = list.first(where: { $0.vinNo == pickedVin })
+            ?? list.first(where: { $0.vinNo == hint?.vinNo })
+            ?? (pickedVin?.isEmpty == false ? nil : list.first)
+        if picked == nil, pickedVin?.isEmpty == false {
+            return hint
+        }
         guard let vin = picked?.vinNo else { return hint }
         if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)") {
             let code = ZeehoClient.codeString(res["code"])
@@ -228,6 +236,9 @@ enum WidgetLiveSync {
         ride: RideTrackService.RideExtra?
     ) {
         guard let vehicle else { return }
+        if let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty, vehicle.vinNo != wanted {
+            return
+        }
         snap.name = vehicle.name
         snap.vin = vehicle.vinNo
         snap.soc = vehicle.soc

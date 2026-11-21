@@ -293,7 +293,7 @@ struct VehicleView: View {
                 tint: Theme.label,
                 busy: busy == "find"
             ) {
-                run("find") { try await model.findVehicle(vehicle) }
+                run("find", success: "寻车指令已发送") { try await model.findVehicle(vehicle) }
             }
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.55).onEnded { _ in
@@ -365,8 +365,8 @@ struct VehicleView: View {
             run(
                 "lock",
                 success: queued
-                    ? "车辆离线，指令已排队"
-                    : (locked ? "开锁指令已发送" : "关锁指令已发送")
+                    ? "车辆离线，指令已排队，上线后执行"
+                    : (locked ? "开锁成功" : "关锁成功")
             ) {
                 try await model.toggleLock(vehicle)
             }
@@ -442,7 +442,7 @@ struct VehicleView: View {
             locationCard(vehicle)
             rideCard(vehicle)
         }
-        .frame(height: 198)
+        .frame(height: 176)
     }
 
     private func locationCard(_ vehicle: Vehicle) -> some View {
@@ -495,8 +495,8 @@ struct VehicleView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
@@ -519,7 +519,7 @@ struct VehicleView: View {
                 Text("骑行记录")
                     .font(.system(size: 13, weight: .heavy))
                     .foregroundStyle(Theme.label)
-                    .padding(.bottom, 6)
+                    .padding(.bottom, 12)
 
                 if rideLoading && rideExtra == nil {
                     VStack(alignment: .leading, spacing: 10) {
@@ -537,7 +537,7 @@ struct VehicleView: View {
                         tint: Color(hex: 0xFF3B64),
                         phase: 0.4
                     )
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 8)
 
                     rideWaveRow(
                         value: formatRideMinutes(rideExtra?.lastMin),
@@ -619,8 +619,9 @@ struct VehicleView: View {
             .fixedSize(horizontal: true, vertical: false)
 
             RideWaveLine(tint: tint, phase: phase)
-                .frame(height: 22)
+                .frame(height: 18)
                 .frame(maxWidth: .infinity)
+                .padding(.top, 4)
         }
     }
 

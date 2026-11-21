@@ -1,19 +1,19 @@
 import MapKit
 import SwiftUI
 
-/// 对齐 Z-Link：浅色弱化底图、无 POI 图标、无交通。轨迹画法仍用自己的。
+/// 浅色底图，保留建筑和地名；关掉交通，轨迹仍自己画。
 enum MapAppearance {
     static func apply(to map: MKMapView) {
         map.mapType = .standard
         map.overrideUserInterfaceStyle = .light
         map.showsCompass = false
         map.showsScale = false
-        map.showsBuildings = false
+        map.showsBuildings = true
         map.showsTraffic = false
-        map.pointOfInterestFilter = .excludingAll
+        map.pointOfInterestFilter = .includingAll
 
-        let config = MKStandardMapConfiguration(elevationStyle: .flat, emphasisStyle: .muted)
-        config.pointOfInterestFilter = .excludingAll
+        let config = MKStandardMapConfiguration(elevationStyle: .realistic, emphasisStyle: .default)
+        config.pointOfInterestFilter = .includingAll
         config.showsTraffic = false
         map.preferredConfiguration = config
     }

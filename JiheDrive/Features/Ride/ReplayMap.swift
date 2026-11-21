@@ -2,7 +2,7 @@ import MapKit
 import SwiftUI
 import UIKit
 
-/// 轨迹回放地图：按速度分段着色（低蓝 → 高红）+ 发光底衬，
+/// 轨迹回放地图：按速度分段着色（低蓝 → 高红），无光环。
 /// 标记在两个采样点之间插值，回放时是平滑移动而不是逐点跳。
 struct ReplayMap: UIViewRepresentable {
     let points: [CLLocationCoordinate2D]
@@ -91,9 +91,7 @@ struct ReplayMap: UIViewRepresentable {
                     end += 1
                 }
                 let slice = Array(points[index...end])
-                let color = Self.palette[tone]
-                addLine(map, slice, color: color.withAlphaComponent(0.22), width: 14)
-                addLine(map, slice, color: color, width: 5)
+                addLine(map, slice, color: Self.palette[tone], width: 5)
                 index = end
             }
 

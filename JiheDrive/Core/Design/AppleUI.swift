@@ -245,6 +245,26 @@ struct StatusPill: View {
     }
 }
 
+struct ToastView: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.black.opacity(0.82))
+            )
+            .padding(.horizontal, 28)
+            .shadow(color: Color.black.opacity(0.2), radius: 12, y: 4)
+            .accessibilityAddTraits(.updatesFrequently)
+    }
+}
+
 // MARK: - 按钮
 
 struct PrimaryButton: View {

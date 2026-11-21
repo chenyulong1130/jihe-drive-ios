@@ -48,6 +48,20 @@ enum AmapGeocode {
         return out
     }
 
+    /// 回放详情：去掉省，保留市区街道和地点名
+    static func placeDetail(_ text: String?) -> String? {
+        guard var out = readableAddress(text) else { return nil }
+        if let range = out.range(of: #"^.{1,8}?(省|自治区|特别行政区)"#, options: .regularExpression) {
+            out.removeSubrange(range)
+        }
+        out = out.trimmingCharacters(in: CharacterSet(charactersIn: " ·，,、-"))
+        guard !out.isEmpty else { return readableAddress(text) }
+        if out.count > 36 {
+            return String(out.prefix(36)) + "…"
+        }
+        return out
+    }
+
     /// 行程起终点：再压短，去掉括号说明后截断
     static func placeShort(_ text: String?, limit: Int = 10) -> String? {
         guard var out = compact(text, limit: max(limit + 8, 24)) else { return nil }

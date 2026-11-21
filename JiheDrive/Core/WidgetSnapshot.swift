@@ -231,7 +231,7 @@ enum WidgetSnapshot {
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
-        payload["selectedVin"] = snap.vin
+        payload["selectedVin"] = selectedVin() ?? snap.vin
 
         if let defaults = suiteDefaults() {
             for (key, value) in payload {

@@ -328,7 +328,7 @@ struct RideReplayView: View {
                     icon: "location.fill",
                     tint: Theme.green,
                     title: "起点",
-                    value: AmapGeocode.placeShort(track.startAddress, limit: 16)
+                    value: AmapGeocode.placeDetail(track.startAddress)
                         ?? track.startAddress
                         ?? "未记录地址"
                 )
@@ -337,7 +337,7 @@ struct RideReplayView: View {
                     icon: "flag.checkered",
                     tint: Theme.orange,
                     title: "终点",
-                    value: AmapGeocode.placeShort(track.endAddress, limit: 16)
+                    value: AmapGeocode.placeDetail(track.endAddress)
                         ?? track.endAddress
                         ?? "未记录地址"
                 )
@@ -520,7 +520,7 @@ struct RideReplayView: View {
         .padding(.bottom, 10)
     }
 
-    /// 底部：速度折线 + 时间轴，共用 progress，拖曲线或滑条都会联动地图
+    /// 底部：速度折线 + 时间轴，浅色底板，拖曲线或滑条都会联动地图
     private var fullMapBottomPanel: some View {
         VStack(spacing: 10) {
             if speeds.count > 1 {
@@ -528,11 +528,11 @@ struct RideReplayView: View {
                     HStack {
                         Text("速度")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.78))
+                            .foregroundStyle(Theme.secondary)
                         Spacer(minLength: 0)
                         Text(String(format: "峰值 %.0f km/h", maxSpeedValue))
                             .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(Theme.tertiary)
                             .monospacedDigit()
                     }
 
@@ -540,7 +540,7 @@ struct RideReplayView: View {
                         speeds: speeds,
                         times: clock.times,
                         progress: progress,
-                        tint: Color(hex: 0x5B8CFF),
+                        tint: Theme.brand,
                         height: 72
                     ) { value in
                         playing = false
@@ -576,7 +576,8 @@ struct RideReplayView: View {
                     current: wallClock(progress),
                     start: wallClock(0),
                     end: wallClock(1),
-                    speed: speeds.count > 1 ? currentSpeed : nil
+                    speed: speeds.count > 1 ? currentSpeed : nil,
+                    onDark: false
                 )
 
                 Button {
@@ -584,9 +585,9 @@ struct RideReplayView: View {
                 } label: {
                     Text("\(Int(rate))x")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.label)
                         .frame(width: 40, height: 32)
-                        .background(Capsule().fill(Color.white.opacity(0.16)))
+                        .background(Capsule().fill(Theme.surfaceAlt))
                 }
                 .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
             }
@@ -602,18 +603,8 @@ struct RideReplayView: View {
                 topTrailingRadius: 22,
                 style: .continuous
             )
-            .fill(.ultraThinMaterial)
-            .overlay {
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 22,
-                    bottomLeadingRadius: 0,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: 22,
-                    style: .continuous
-                )
-                .fill(Color.black.opacity(0.55))
-            }
-            .shadow(color: Color.black.opacity(0.28), radius: 20, y: -6)
+            .fill(Theme.surface)
+            .shadow(color: Color.black.opacity(0.12), radius: 16, y: -4)
             .ignoresSafeArea(edges: .bottom)
         }
     }
@@ -805,19 +796,20 @@ private struct ReplayTimeline: View {
     let start: String
     let end: String
     var speed: Double?
+    var onDark: Bool = true
 
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 0) {
                 Text(current)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(onDark ? Color.white : Theme.label)
                     .monospacedDigit()
                 Spacer(minLength: 0)
                 if let speed {
                     Text(String(format: "%.0f km/h", speed))
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0x7DD3FC))
+                        .foregroundStyle(onDark ? Color(hex: 0x7DD3FC) : Theme.brand)
                         .monospacedDigit()
                 }
             }
@@ -825,7 +817,7 @@ private struct ReplayTimeline: View {
             GeometryReader { geo in
                 let x = geo.size.width * CGFloat(min(max(progress, 0), 1))
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.16))
+                    Capsule().fill(onDark ? Color.white.opacity(0.16) : Theme.separator.opacity(0.7))
                     Capsule()
                         .fill(
                             LinearGradient(
@@ -836,9 +828,9 @@ private struct ReplayTimeline: View {
                         )
                         .frame(width: max(8, x))
                     Circle()
-                        .fill(Color.white)
+                        .fill(onDark ? Color.white : Color(hex: 0x5B8CFF))
                         .frame(width: 14, height: 14)
-                        .shadow(color: Color.black.opacity(0.35), radius: 3, y: 1)
+                        .shadow(color: Color.black.opacity(0.18), radius: 2, y: 1)
                         .offset(x: min(max(x - 7, 0), geo.size.width - 14))
                 }
                 .contentShape(Rectangle())
@@ -858,7 +850,7 @@ private struct ReplayTimeline: View {
                 Text(end)
             }
             .font(.system(size: 10, weight: .medium, design: .rounded))
-            .foregroundStyle(.white.opacity(0.55))
+            .foregroundStyle(onDark ? Color.white.opacity(0.55) : Theme.tertiary)
             .monospacedDigit()
         }
     }

@@ -14,18 +14,10 @@ struct VehicleSettingsView: View {
             subtitle: vehicle.name,
             onClose: { dismiss() }
         ) {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    if store.loading && store.raw.isEmpty {
-                        HStack(spacing: 8) {
-                            ProgressView().scaleEffect(0.8)
-                            Text("正在读取车辆设置")
-                                .font(Theme.footnote)
-                                .foregroundStyle(Theme.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 40)
-                    } else {
+            ZStack {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        if !store.loading || !store.raw.isEmpty {
                         ForEach(VehicleSettingsService.groups) { group in
                             SectionHeader(group.title)
                             AppleCard(padding: 0) {
@@ -55,10 +47,23 @@ struct VehicleSettingsView: View {
                             .multilineTextAlignment(.center)
                             .padding(.top, 18)
                             .padding(.horizontal, 10)
+                        }
                     }
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.bottom, 32)
+
+                if store.loading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.15)
+                        Text("正在读取车辆设置…")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.groupedBackground.opacity(store.raw.isEmpty ? 1 : 0.78))
+                }
             }
         }
         .sheetChrome()
@@ -90,11 +95,15 @@ struct VehicleSettingsView: View {
 
             Spacer(minLength: 8)
 
-            control(item)
+            if store.busyKey == item.key {
+                ProgressView().scaleEffect(0.85)
+            } else {
+                control(item)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .opacity(store.busyKey == item.key ? 0.55 : 1)
+        .opacity(store.busyKey == item.key ? 0.7 : 1)
     }
 
     @ViewBuilder
@@ -104,7 +113,10 @@ struct VehicleSettingsView: View {
             Toggle("", isOn: Binding(
                 get: { store.value(for: item) == "1" },
                 set: { _ in
-                    Task { await store.toggle(item: item) }
+                    Task {
+                        let ok = await store.toggle(item: item)
+                        showToast(ok ? "\(item.title) 已更新" : (store.error ?? "设置失败"))
+                    }
                 }
             ))
             .labelsHidden()
@@ -116,8 +128,8 @@ struct VehicleSettingsView: View {
                 ForEach(options) { option in
                     Button {
                         Task {
-                            await store.select(item: item, newValue: option.value)
-                            showToast("\(item.title)：\(option.label)")
+                            let ok = await store.select(item: item, newValue: option.value)
+                            showToast(ok ? "\(item.title)：\(option.label)" : (store.error ?? "设置失败"))
                         }
                     } label: {
                         if store.value(for: item) == option.value {
@@ -147,8 +159,12 @@ struct VehicleSettingsView: View {
         case .action:
             Button {
                 Task {
-                    await store.runAction(item: item)
-                    showToast(item.key == "openCushion" ? "坐垫解锁指令已发送" : "指令已发送")
+                    let ok = await store.runAction(item: item)
+                    if ok {
+                        showToast(item.key == "openCushion" ? "坐垫解锁成功" : "指令已发送")
+                    } else {
+                        showToast(store.error ?? "执行失败")
+                    }
                 }
             } label: {
                 Text("执行")

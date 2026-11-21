@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.set(selectedVin, forKey: Self.vinKey)
             WidgetSnapshot.persistSelectedVin(selectedVin)
             guard oldValue != selectedVin else { return }
+            seedWidgetSnap(for: selectedVin)
             // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度
             batteries = []
             batteryError = nil
@@ -284,11 +285,11 @@ final class AppModel: ObservableObject {
 
     func toggleLock(_ vehicle: Vehicle) async throws {
         let unlocking = vehicle.isLocked
-        _ = try await client.post(
+        let res = try await client.post(
             "/v1.0/app/cfmotoserverapp/vehicleSet/network/unlock",
             body: ["vinNo": vehicle.vinNo, "lockFlag": unlocking ? 1 : 0]
         )
-        // 乐观翻转：列表/详情刷新前先改本地锁态，避免按钮卡住
+        try ZeehoClient.requireOK(res, fallback: unlocking ? "开锁失败" : "关锁失败")
         applyOptimisticLock(vin: vehicle.vinNo, locked: !unlocking)
         await loadVehicles()
         if let vin = selectedVin {
@@ -306,21 +307,23 @@ final class AppModel: ObservableObject {
     }
 
     func findVehicle(_ vehicle: Vehicle) async throws {
-        _ = try await client.put(
+        let res = try await client.put(
             "/v1.0/app/cfmotoserverapp/vehicleInfo/control/\(vehicle.vinNo)"
         )
+        try ZeehoClient.requireOK(res, fallback: "寻车失败")
     }
 
     /// 高声寻车：鸣笛 + 闪灯（与 Flutter loudFindVehicle 一致）
     func loudFindVehicle(_ vehicle: Vehicle) async throws {
-        _ = try await client.post(
+        let res = try await client.post(
             "/v1.0/app/cfmotoserverapp/vehicleInfo/controlV2",
             body: ["param": "4", "vin": vehicle.vinNo]
         )
+        try ZeehoClient.requireOK(res, fallback: "寻车失败")
     }
 
     func openCushion(_ vehicle: Vehicle) async throws {
-        _ = try await client.put(
+        let res = try await client.put(
             "/v1.0/app/cfmotoserverapp/vehicleSet/propertyTwo/one",
             body: [
                 "commond": "28",
@@ -329,6 +332,22 @@ final class AppModel: ObservableObject {
                 "version": "v2",
             ]
         )
+        try ZeehoClient.requireOK(res, fallback: "坐垫解锁失败")
+    }
+
+    private func seedWidgetSnap(for vin: String?) {
+        guard let vin, let vehicle = vehicles.first(where: { $0.vinNo == vin }) else { return }
+        var snap = WidgetSnapshot.read() ?? WidgetSnap()
+        snap.vin = vehicle.vinNo
+        snap.name = vehicle.name
+        snap.soc = vehicle.soc
+        snap.rangeKm = vehicle.rangeKm
+        snap.charging = vehicle.isCharging
+        snap.locked = vehicle.isLocked
+        snap.online = vehicle.isOnline
+        snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+        snap.updatedAt = Date().timeIntervalSince1970
+        WidgetSnapshot.write(snap)
     }
 
     // MARK: - Response helpers

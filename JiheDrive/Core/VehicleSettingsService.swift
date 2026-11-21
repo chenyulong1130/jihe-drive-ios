@@ -482,34 +482,42 @@ final class VehicleSettingsStore: ObservableObject {
         VehicleSettingsService.currentValue(in: raw, for: item)
     }
 
-    func toggle(item: VehicleSettingItem) async {
+    @discardableResult
+    func toggle(item: VehicleSettingItem) async -> Bool {
         let current = value(for: item)
         let next = current == "1" ? "0" : "1"
-        await send(item: item, value: next)
+        return await send(item: item, value: next)
     }
 
-    func select(item: VehicleSettingItem, newValue: String) async {
-        guard newValue != value(for: item) else { return }
-        await send(item: item, value: newValue)
+    @discardableResult
+    func select(item: VehicleSettingItem, newValue: String) async -> Bool {
+        guard newValue != value(for: item) else { return true }
+        return await send(item: item, value: newValue)
     }
 
-    func runAction(item: VehicleSettingItem) async {
+    @discardableResult
+    func runAction(item: VehicleSettingItem) async -> Bool {
         await send(item: item, value: "1")
     }
 
-    private func send(item: VehicleSettingItem, value: String) async {
-        guard !vin.isEmpty, busyKey == nil else { return }
+    @discardableResult
+    private func send(item: VehicleSettingItem, value: String) async -> Bool {
+        guard !vin.isEmpty, busyKey == nil else { return false }
         busyKey = item.key
+        error = nil
         let previous = raw
         applyOptimistic(key: item.readKeys.first ?? item.key, value: value)
 
         do {
             try await VehicleSettingsService.write(vin: vin, item: item, value: value)
+            busyKey = nil
+            return true
         } catch let failure {
             raw = previous
             self.error = failure.localizedDescription
+            busyKey = nil
+            return false
         }
-        busyKey = nil
     }
 
     private func applyOptimistic(key: String, value: String) {
