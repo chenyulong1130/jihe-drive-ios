@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
@@ -42,62 +43,64 @@ struct LoginView: View {
     var body: some View {
         ZStack {
             AmbientBackground()
-                .onTapGesture { focus = nil }
 
-            VStack(spacing: 0) {
-                emblem.staggerIn(0)
-                    .padding(.top, 48)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 40)
 
-                Text("极核智行")
-                    .font(Theme.largeTitle)
-                    .foregroundStyle(Theme.label)
-                    .padding(.top, 20)
-                    .staggerIn(1)
+                    emblem.staggerIn(0)
 
-                modeSwitch
-                    .padding(.top, 26)
-                    .staggerIn(2)
+                    Text("极核智行")
+                        .font(Theme.largeTitle)
+                        .foregroundStyle(Theme.label)
+                        .padding(.top, 20)
+                        .staggerIn(1)
 
-                Group {
-                    if mode == .phone {
-                        phoneForm
-                    } else {
-                        tokenForm
+                    modeSwitch
+                        .padding(.top, 26)
+                        .staggerIn(2)
+
+                    Group {
+                        if mode == .phone {
+                            phoneForm
+                        } else {
+                            tokenForm
+                        }
                     }
-                }
-                .padding(.top, 12)
-                .staggerIn(3)
-
-                if let message {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 11))
-                        Text(message)
-                            .font(.system(size: 12, weight: .medium))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(Theme.red)
                     .padding(.top, 12)
-                    .transition(.opacity)
-                }
+                    .staggerIn(3)
 
-                PrimaryButton(
-                    label: buttonTitle,
-                    icon: submitting ? nil : "arrow.right",
-                    enabled: canSubmit,
-                    loading: submitting
-                ) {
-                    submit()
-                }
-                .padding(.top, 18)
-                .staggerIn(4)
+                    if let message {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text(message)
+                                .font(.system(size: 12, weight: .medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(Theme.red)
+                        .padding(.top, 12)
+                        .transition(.opacity)
+                    }
 
-                Spacer(minLength: 40)
+                    PrimaryButton(
+                        label: buttonTitle,
+                        icon: submitting ? nil : "arrow.right",
+                        enabled: canSubmit,
+                        loading: submitting
+                    ) {
+                        submit()
+                    }
+                    .padding(.top, 18)
+                    .staggerIn(4)
+
+                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal, 22)
             }
-            .padding(.horizontal, 22)
         }
-        .ignoringKeyboardSafeArea()
+        .onTapGesture { focus = nil }
     }
 
     private var buttonTitle: String {
@@ -229,12 +232,11 @@ struct LoginView: View {
                     .foregroundStyle(focus == .token ? Theme.brand : Theme.tertiary)
                     .frame(width: 20)
 
-                TextField("粘贴 access token", text: $token)
+                TextField("粘贴 access token", text: $token, axis: .vertical)
+                    .lineLimit(2...4)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .submitLabel(.done)
                     .focused($focus, equals: .token)
-                    .onSubmit { focus = nil }
                     .font(.system(size: 14, design: .monospaced))
                     .foregroundStyle(Theme.label)
                     .tint(Theme.brand)
