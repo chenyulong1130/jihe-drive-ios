@@ -27,10 +27,11 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
+        let disk = matchingSelected(WidgetSnapshot.read() ?? WidgetSnap())
+        let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
+        completion(Timeline(entries: [.from(disk)], policy: .after(next)))
         Task {
-            let snap = await WidgetLiveSync.refresh()
-            let next = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
-            completion(Timeline(entries: [.from(matchingSelected(snap))], policy: .after(next)))
+            _ = await WidgetLiveSync.refresh()
         }
     }
 

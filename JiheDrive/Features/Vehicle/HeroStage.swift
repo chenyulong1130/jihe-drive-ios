@@ -69,15 +69,6 @@ struct HeroStage: View {
         ZStack {
             backdrop
                 .allowsHitTesting(false)
-                .overlay(alignment: .bottom) {
-                    LinearGradient(
-                        colors: [Color.clear, Theme.groupedBackground.opacity(0.28), Theme.groupedBackground],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 36)
-                    .allowsHitTesting(false)
-                }
 
             carLayer
 
@@ -93,10 +84,10 @@ struct HeroStage: View {
             .padding(.horizontal, 18)
             .padding(.top, topInset)
             .padding(.bottom, 4)
+            .background(Color.clear)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
-        .clipped()
         .onChange(of: cameraReset) { _, _ in
             modelRotated = false
         }
@@ -230,9 +221,9 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图顶距：躲开顶栏 + 电量；3D 再多留一点，把车压到下半区
-    private var carTopPad: CGFloat { topInset + 96 }
-    private var modelTopPad: CGFloat { topInset + 118 }
+    /// 车图铺满英雄区，顶栏/底栏透明叠在上面，不再裁掉车头车轮
+    private var carTopPad: CGFloat { 8 }
+    private var modelTopPad: CGFloat { 4 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -266,8 +257,7 @@ struct HeroStage: View {
                             }
                         }
                         .padding(.top, modelTopPad)
-                        .padding(.horizontal, 4)
-                        .mask(carFadeMask)
+                        .padding(.horizontal, 16)
                         .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
@@ -291,15 +281,13 @@ struct HeroStage: View {
                         )
                     }
                     .padding(.top, modelTopPad)
-                    .padding(.horizontal, 4)
-                    .mask(carFadeMask)
+                    .padding(.horizontal, 16)
                     .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
-                        .mask(carFadeMask)
                         .overlay { tireMarks }
                         .allowsHitTesting(false)
                 }
@@ -313,12 +301,12 @@ struct HeroStage: View {
                     .padding(.vertical, 8)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.92))
+                            .fill(Color.white.opacity(0.55))
                     )
                     .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-            .padding(.top, carTopPad)
+            .padding(.top, topInset + 6)
             .padding(.trailing, 16)
             .accessibilityLabel("打开坐垫")
         }
@@ -422,7 +410,7 @@ struct HeroStage: View {
         Button(action: action) {
             content()
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(Color.white.opacity(0.82)))
+                .background(Circle().fill(Color.white.opacity(0.55)))
                 .shadow(color: Color.black.opacity(0.06), radius: 6, y: 1)
                 .overlay(alignment: .topTrailing) {
                     if badge > 0 {
@@ -450,6 +438,7 @@ struct HeroStage: View {
                 Text("\(soc)")
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(energy)
+                    .shadow(color: Color.white.opacity(0.7), radius: 8)
                     .monospacedDigit()
                 Text("%")
                     .font(.system(size: 13, weight: .medium))
@@ -533,19 +522,6 @@ struct HeroStage: View {
 
     // MARK: - 胎压
 
-    private var carFadeMask: some View {
-        LinearGradient(
-            stops: [
-                .init(color: .black, location: 0),
-                .init(color: .black, location: 0.9),
-                .init(color: .black.opacity(0.4), location: 0.97),
-                .init(color: .clear, location: 1)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
-
     /// 直接标在车轮上，无底栏。转动 3D 时隐藏。
     @ViewBuilder
     private var tireMarks: some View {
@@ -563,7 +539,7 @@ struct HeroStage: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.58, y: geo.size.height * 0.84)
+                        .position(x: geo.size.width * 0.78, y: geo.size.height * 0.72)
                     }
                     if let rear = validBar(rearBar) {
                         Button {
@@ -576,7 +552,7 @@ struct HeroStage: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.38, y: geo.size.height * 0.82)
+                        .position(x: geo.size.width * 0.24, y: geo.size.height * 0.74)
                     }
                 }
             }

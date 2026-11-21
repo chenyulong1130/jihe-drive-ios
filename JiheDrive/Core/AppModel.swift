@@ -25,12 +25,6 @@ final class AppModel: ObservableObject {
             tire = nil
             detailVehicle = nil
             WidgetCenter.shared.reloadAllTimelines()
-            Task {
-                await WidgetLiveSync.refresh(
-                    existing: .init(vehicle: self.selectedVehicle),
-                    mode: .timeline
-                )
-            }
         }
     }
     @Published var errorMessage: String?
@@ -188,8 +182,10 @@ final class AppModel: ObservableObject {
         guard isLoggedIn, let vin = selectedVehicle?.vinNo else { return }
         async let battery: Void = loadBattery(vin: vin, quiet: true)
         async let detail: Void = loadDetail(vin: vin)
-        _ = await (battery, detail)
+        async let tire: Void = loadTire(vin: vin)
+        _ = await (battery, detail, tire)
         WidgetSnapshot.publish(from: self, ride: nil)
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     /// 胎压传感器接口，独立于车辆详情，失败不影响主流程
@@ -199,6 +195,7 @@ final class AppModel: ObservableObject {
         // 接口失败时保留旧读数，避免下拉刷新把胎压刷没
         if let reading {
             tire = reading
+            WidgetSnapshot.publish(from: self)
         }
     }
 
@@ -217,6 +214,7 @@ final class AppModel: ObservableObject {
             guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
             detailVehicle = parsed
             applyLockHold()
+            WidgetSnapshot.publish(from: self)
         } catch is CancellationError {
             // 切车打断，忽略
         } catch let error as URLError where error.code == .cancelled {
@@ -276,6 +274,10 @@ final class AppModel: ObservableObject {
                 } else {
                     detailVehicle = patched
                 }
+                if let index = vehicles.firstIndex(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) {
+                    vehicles[index] = vehicles[index].withBattery(battery)
+                }
+                WidgetSnapshot.publish(from: self)
             }
             if items.isEmpty {
                 batteryError = "云端暂未返回电池数据"

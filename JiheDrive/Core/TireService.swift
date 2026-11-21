@@ -41,17 +41,17 @@ enum TireService {
             var unordered: [(bar: Double, temp: Double?)] = []
 
             for item in list {
-                let position = Vehicle.intValue(item["sensorPosition"])
+                let position = wheelPosition(item["sensorPosition"] ?? item["position"] ?? item["tirePosition"])
                 guard let pressure = positiveBar(item["tirePressure"] ?? item["pressure"] ?? item["tyrePressure"]) else { continue }
                 let temperature = Vehicle.doubleValue(
                     item["tireTemp"] ?? item["tyreTemp"] ?? item["tireTemperature"]
                         ?? item["temperature"] ?? item["temp"]
                 )
 
-                if position == 1 {
+                if position == .front {
                     reading.frontBar = pressure
                     reading.frontTemp = temperature
-                } else if position == 2 {
+                } else if position == .rear {
                     reading.rearBar = pressure
                     reading.rearTemp = temperature
                 } else {
@@ -80,25 +80,38 @@ enum TireService {
            let stats = data["statisticsData"] as? [String: Any],
            let list = stats["data"] as? [[String: Any]] {
             for item in list {
-                let position = Vehicle.intValue(item["sensorPosition"])
+                let position = wheelPosition(item["sensorPosition"] ?? item["position"] ?? item["tirePosition"])
                 if let stat = item["tirePressureStat"] as? [String: Any],
                    let points = stat["list"] as? [[String: Any]],
                    let last = points.last,
                    let value = positiveBar(last["value"] ?? last["displayedValue"]) {
-                    if position == 1 { reading.frontBar = value }
-                    if position == 2 { reading.rearBar = value }
+                    if position == .front { reading.frontBar = value }
+                    if position == .rear { reading.rearBar = value }
                 }
                 if let stat = item["tireTempStat"] as? [String: Any],
                    let points = stat["list"] as? [[String: Any]],
                    let last = points.last,
                    let temp = Vehicle.doubleValue(last["value"] ?? last["displayedValue"]) {
-                    if position == 1 { reading.frontTemp = temp }
-                    if position == 2 { reading.rearTemp = temp }
+                    if position == .front { reading.frontTemp = temp }
+                    if position == .rear { reading.rearTemp = temp }
                 }
             }
         }
 
         return reading.hasData ? reading : nil
+    }
+
+    private enum WheelSlot { case front, rear }
+
+    /// 官方两位传感器：1/前=前轮，2/后=后轮。
+    private static func wheelPosition(_ raw: Any?) -> WheelSlot? {
+        let text = "\(raw ?? "")".trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if text.contains("FRONT") || text.contains("前") { return .front }
+        if text.contains("REAR") || text.contains("后") { return .rear }
+        let number = Vehicle.intValue(raw)
+        if number == 1 { return .front }
+        if number == 2 { return .rear }
+        return nil
     }
 
     /// 0 / 负值不当作有效胎压（对齐小程序 firstNum）

@@ -196,6 +196,11 @@ enum WidgetSnapshot {
             snap.monthMile = vehicle.monthMileage ?? snap.monthMile
             snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
             snap.imageData = nil
+            if loadImage(vehicle.vinNo) == nil, let url = vehicle.imageURL,
+               let image = ResourceCache.cachedImage(url),
+               let data = image.jpegData(compressionQuality: 0.86) {
+                saveImage(data, vin: vehicle.vinNo)
+            }
         }
         if let ride {
             snap.todayKm = ride.todayKm ?? snap.todayKm
@@ -231,6 +236,14 @@ enum WidgetSnapshot {
 #endif
 
     static func write(_ snap: WidgetSnap) {
+        var snap = snap
+        if snap.loggedIn, let old = read() {
+            if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
+            if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
+            if snap.vin.isEmpty { snap.vin = old.vin }
+            if snap.name.isEmpty { snap.name = old.name }
+            if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
+        }
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
@@ -431,8 +444,11 @@ enum WidgetSnapshot {
 
     static func loadImage(_ vin: String? = nil) -> Data? {
         let targetVin = vin ?? selectedVin()
-        guard imageKey(targetVin) != nil, let url = imageFileURL(targetVin) else { return nil }
-        if let data = try? Data(contentsOf: url), !data.isEmpty {
+        if imageKey(targetVin) != nil, let url = imageFileURL(targetVin),
+           let data = try? Data(contentsOf: url), !data.isEmpty {
+            return data
+        }
+        if let generic = imageFileURL(), let data = try? Data(contentsOf: generic), !data.isEmpty {
             return data
         }
         return nil

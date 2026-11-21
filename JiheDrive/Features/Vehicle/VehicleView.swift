@@ -153,6 +153,7 @@ struct VehicleView: View {
                 syncChargeIsland()
                 if let current = model.selectedVehicle?.vinNo {
                     await loadRideSummary(vin: current)
+                    await model.loadTire(vin: current)
                     await signin.syncWidget(model: model, ride: rideExtra)
                 }
             }

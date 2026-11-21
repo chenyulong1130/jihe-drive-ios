@@ -215,10 +215,10 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "-6.5deg 83.06deg 3.086m"
-        let target = "0.02m 0.42m auto"
-        let minOrbit = interactive ? "auto 70deg 2.4m" : "auto 83deg 2.9m"
-        let maxOrbit = interactive ? "auto 95deg 4.6m" : "auto 83deg 3.4m"
+        let orbit = "-6.5deg 83.06deg 3.28m"
+        let target = "0.02m 0.28m auto"
+        let minOrbit = interactive ? "auto 70deg 2.5m" : "auto 83deg 3.1m"
+        let maxOrbit = interactive ? "auto 95deg 4.8m" : "auto 83deg 3.6m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
         let controls = interactive ? "camera-controls touch-action=\"none\"" : "interaction-prompt=\"none\""
 
@@ -236,9 +236,7 @@ enum ModelViewerAsset {
             touch-action: none;
           }
           model-viewer {
-            width: 108%; height: 118%;
-            margin-left: -4%;
-            margin-top: 10%;
+            width: 100%; height: 100%;
             background: transparent;
             --progress-bar-height: 0px;
             --progress-bar-color: transparent;
@@ -254,7 +252,7 @@ enum ModelViewerAsset {
           loading="eager"
           camera-orbit="\(orbit)"
           camera-target="\(target)"
-          field-of-view="32deg"
+          field-of-view="30deg"
           min-camera-orbit="\(minOrbit)"
           max-camera-orbit="\(maxOrbit)"
           shadow-intensity="0"

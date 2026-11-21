@@ -42,17 +42,10 @@ enum WidgetLiveSync {
         snap.loggedIn = true
         if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
             snap.vin = wantedVin
-            snap.name = existing?.vehicle?.name ?? ""
-            snap.soc = existing?.vehicle?.soc ?? 0
-            snap.rangeKm = existing?.vehicle?.rangeKm ?? 0
-            snap.charging = existing?.vehicle?.isCharging ?? false
-            snap.todayKm = 0
-            snap.todayMin = 0
-            snap.lastKm = 0
-            snap.lastMin = 0
-            snap.tireText = ""
-            snap.tireBound = false
-            snap.imageData = nil
+            if let name = existing?.vehicle?.name, !name.isEmpty { snap.name = name }
+            if let soc = existing?.vehicle?.soc, soc > 0 { snap.soc = soc }
+            if let range = existing?.vehicle?.rangeKm, range > 0 { snap.rangeKm = range }
+            if let charging = existing?.vehicle?.isCharging { snap.charging = charging }
         }
 
         var vehicle: Vehicle?
@@ -170,16 +163,12 @@ enum WidgetLiveSync {
             if battery.range > 0 { snap.rangeKm = battery.range }
             snap.charging = battery.charging || snap.charging
         }
-        if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
+        if snap.soc <= 0, let cached = cachedSnap, cached.soc > 0 {
+            snap.soc = cached.soc
+            if snap.rangeKm <= 0 { snap.rangeKm = cached.rangeKm }
+        }
+        if let wantedVin, !wantedVin.isEmpty, snap.vin.isEmpty {
             snap.vin = wantedVin
-            if let vehicle, WidgetSnapshot.sameVin(vehicle.vinNo, wantedVin) {
-                applyVehicle(&snap, vehicle: vehicle, tire: tire, ride: ride)
-                if let battery {
-                    if battery.soc > 0 { snap.soc = battery.soc }
-                    if battery.range > 0 { snap.rangeKm = battery.range }
-                    snap.charging = battery.charging || snap.charging
-                }
-            }
         }
         _ = await resolveImage(
             vin: vehicle?.vinNo ?? snap.vin,
@@ -238,6 +227,13 @@ enum WidgetLiveSync {
 
     private static func fetchVehicle(hint: Vehicle?, wanted: String?) async -> Vehicle? {
         let wanted = wanted ?? WidgetSnapshot.selectedVin() ?? hint?.vinNo
+        if wanted == nil || wanted?.isEmpty == true {
+            if let hint { return hint }
+            if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicle/list") {
+                return Vehicle.list(from: res).first
+            }
+            return nil
+        }
         guard let vin = wanted, !vin.isEmpty else { return nil }
         var picked: Vehicle? = WidgetSnapshot.sameVin(hint?.vinNo, vin) ? hint : nil
         if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)") {
@@ -318,9 +314,6 @@ enum WidgetLiveSync {
         } else if vehicle.hasTirePressure, let kpa = vehicle.tireRearKpa ?? vehicle.tireFrontKpa {
             snap.tireText = String(format: "%.1fbar", kpa / 100)
             snap.tireBound = true
-        } else {
-            snap.tireText = ""
-            snap.tireBound = false
         }
     }
 
