@@ -530,8 +530,6 @@ struct RideReplayView: View {
             }
 
             Spacer(minLength: 8)
-
-            TrackSpeedLegend(compact: true, onDark: false)
         }
         .padding(.horizontal, Theme.page)
         .padding(.top, 4)
@@ -641,6 +639,11 @@ struct RideReplayView: View {
                         progress = min(max(value, 0), 1)
                     }
                 }
+            }
+
+            HStack {
+                Spacer(minLength: 0)
+                TrackSpeedLegend(compact: true, onDark: false)
             }
 
             HStack(spacing: 12) {

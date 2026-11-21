@@ -237,7 +237,8 @@ struct ReplayMap: UIViewRepresentable {
                 view.apply(
                     speed: marker.speed,
                     vehicleImage: vehicleImage,
-                    cinematic: cinematic
+                    heading: marker.heading,
+                    mapHeading: map.camera.heading
                 )
             }
         }
@@ -266,7 +267,8 @@ struct ReplayMap: UIViewRepresentable {
                 view.apply(
                     speed: sample.speed,
                     vehicleImage: vehicleImage,
-                    cinematic: cinematicEnabled
+                    heading: heading,
+                    mapHeading: map.camera.heading
                 )
             }
             return current
@@ -411,7 +413,8 @@ struct ReplayMap: UIViewRepresentable {
                 view.apply(
                     speed: cursor.speed,
                     vehicleImage: vehicleImage,
-                    cinematic: cinematicEnabled
+                    heading: cursor.heading,
+                    mapHeading: mapView.camera.heading
                 )
                 return view
             }
@@ -531,11 +534,14 @@ final class ReplayCursorAnnotation: MKPointAnnotation {
 final class ReplayCursorView: MKAnnotationView {
     static let reuseID = "replay-cursor"
     private static let dotSize: CGFloat = 14
-    private static let modelSize = CGSize(width: 92, height: 62)
+    private static let modelSize = CGSize(width: 78, height: 52)
+    /// 官方车图默认车头朝左（西，270°）
+    private static let imageNose: CLLocationDirection = 270
 
     private let bubble = UILabel()
     private let dot = UIView()
     private let model = UIImageView()
+    private var shownHeading: CLLocationDirection?
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
@@ -567,14 +573,20 @@ final class ReplayCursorView: MKAnnotationView {
         addSubview(bubble)
         addSubview(dot)
         addSubview(model)
-        apply(speed: 0, vehicleImage: nil, cinematic: false)
+        apply(speed: 0, vehicleImage: nil)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func apply(speed: Double, vehicleImage: UIImage? = nil, cinematic: Bool = false) {
+    func apply(
+        speed: Double,
+        vehicleImage: UIImage? = nil,
+        cinematic: Bool = false,
+        heading: CLLocationDirection = 0,
+        mapHeading: CLLocationDirection = 0
+    ) {
         let idle = speed < 0.5
         bubble.text = idle ? "静止" : String(format: "%.0f km/h", speed)
         bubble.backgroundColor = idle
@@ -590,7 +602,9 @@ final class ReplayCursorView: MKAnnotationView {
 
         if useModel {
             bounds = CGRect(origin: .zero, size: Self.modelSize)
-            model.frame = bounds
+            model.bounds = CGRect(origin: .zero, size: Self.modelSize)
+            model.center = CGPoint(x: Self.modelSize.width / 2, y: Self.modelSize.height / 2)
+            pointVehicle(heading: heading, mapHeading: mapHeading)
             bubble.frame = CGRect(
                 x: (Self.modelSize.width - width) / 2,
                 y: -26,
@@ -599,6 +613,8 @@ final class ReplayCursorView: MKAnnotationView {
             )
             centerOffset = CGPoint(x: 0, y: -10)
         } else {
+            shownHeading = nil
+            model.transform = .identity
             bounds = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
             dot.frame = bounds
             bubble.frame = CGRect(
@@ -609,5 +625,25 @@ final class ReplayCursorView: MKAnnotationView {
             )
             centerOffset = .zero
         }
+    }
+
+    /// 车头对准轨迹方向；气泡不转。地图旋转时扣掉相机朝向。
+    private func pointVehicle(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
+        var screen = heading - mapHeading
+        while screen < 0 { screen += 360 }
+        while screen >= 360 { screen -= 360 }
+
+        let from = shownHeading ?? screen
+        var delta = screen - from
+        while delta > 180 { delta -= 360 }
+        while delta < -180 { delta += 360 }
+        let next = from + delta * (shownHeading == nil ? 1 : 0.45)
+        var wrapped = next
+        while wrapped < 0 { wrapped += 360 }
+        while wrapped >= 360 { wrapped -= 360 }
+        shownHeading = wrapped
+
+        let radians = (wrapped - Self.imageNose) * .pi / 180
+        model.transform = CGAffineTransform(rotationAngle: radians)
     }
 }

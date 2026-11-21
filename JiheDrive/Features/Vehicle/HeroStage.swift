@@ -230,8 +230,9 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车图顶距：躲开顶栏 + 电量，把车往下压，吃掉底部空白
+    /// 车图顶距：躲开顶栏 + 电量；3D 再多留一点，把车压到下半区
     private var carTopPad: CGFloat { topInset + 96 }
+    private var modelTopPad: CGFloat { topInset + 118 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -264,8 +265,8 @@ struct HeroStage: View {
                                 .opacity(glbVisible ? 1 : 0)
                             }
                         }
-                        .padding(.top, carTopPad)
-                        .padding(.horizontal, 26)
+                        .padding(.top, modelTopPad)
+                        .padding(.horizontal, 4)
                         .mask(carFadeMask)
                         .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
@@ -289,8 +290,8 @@ struct HeroStage: View {
                             }
                         )
                     }
-                    .padding(.top, carTopPad)
-                    .padding(.horizontal, 26)
+                    .padding(.top, modelTopPad)
+                    .padding(.horizontal, 4)
                     .mask(carFadeMask)
                     .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
@@ -562,7 +563,7 @@ struct HeroStage: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.70, y: geo.size.height * 0.77)
+                        .position(x: geo.size.width * 0.58, y: geo.size.height * 0.84)
                     }
                     if let rear = validBar(rearBar) {
                         Button {
@@ -575,7 +576,7 @@ struct HeroStage: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.30, y: geo.size.height * 0.73)
+                        .position(x: geo.size.width * 0.38, y: geo.size.height * 0.82)
                     }
                 }
             }
