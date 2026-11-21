@@ -20,6 +20,7 @@ struct RootView: View {
             } else {
                 LoginView()
                     .transition(.opacity)
+                    .ignoresSafeArea(.keyboard)
             }
         }
         .environmentObject(model)

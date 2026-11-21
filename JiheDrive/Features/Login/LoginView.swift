@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
@@ -30,7 +29,6 @@ struct LoginView: View {
 
     @FocusState private var focus: Field?
     @Namespace private var modePill
-    @State private var keyboardHeight: CGFloat = 0
 
     private var phoneValid: Bool { phone.count == 11 && phone.hasPrefix("1") }
     private var canSendCode: Bool { phoneValid && countdown == 0 && !sending }
@@ -46,92 +44,65 @@ struct LoginView: View {
             AmbientBackground()
                 .onTapGesture { focus = nil }
 
-            ScrollViewReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        emblem.staggerIn(0)
-                            .padding(.top, focus == nil ? 48 : 12)
+            VStack(spacing: 0) {
+                emblem.staggerIn(0)
+                    .padding(.top, focus == nil ? 48 : 8)
+                    .scaleEffect(focus == nil ? 1 : 0.78)
+                    .padding(.bottom, focus == nil ? 0 : -10)
 
-                        Text("极核智行")
-                            .font(Theme.largeTitle)
-                            .foregroundStyle(Theme.label)
-                            .padding(.top, 20)
-                            .staggerIn(1)
+                Text("极核智行")
+                    .font(Theme.largeTitle)
+                    .foregroundStyle(Theme.label)
+                    .padding(.top, 20)
+                    .staggerIn(1)
 
-                        modeSwitch
-                            .padding(.top, 26)
-                            .staggerIn(2)
+                modeSwitch
+                    .padding(.top, 26)
+                    .staggerIn(2)
 
-                        Group {
-                            if mode == .phone {
-                                phoneForm
-                            } else {
-                                tokenForm
-                            }
-                        }
-                        .padding(.top, 12)
-                        .staggerIn(3)
-                        .id("login-form")
-
-                        if let message {
-                            HStack(spacing: 6) {
-                                Image(systemName: "exclamationmark.circle.fill")
-                                    .font(.system(size: 11))
-                                Text(message)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 0)
-                            }
-                            .foregroundStyle(Theme.red)
-                            .padding(.top, 12)
-                            .transition(.opacity)
-                        }
-
-                        PrimaryButton(
-                            label: buttonTitle,
-                            icon: submitting ? nil : "arrow.right",
-                            enabled: canSubmit,
-                            loading: submitting
-                        ) {
-                            submit()
-                        }
-                        .padding(.top, 18)
-                        .staggerIn(4)
-                    }
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, max(36, keyboardHeight + 20))
-                    .frame(maxWidth: .infinity)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: focus) { _, value in
-                    guard value != nil else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        withAnimation(.easeOut(duration: 0.22)) {
-                            proxy.scrollTo("login-form", anchor: .center)
-                        }
+                Group {
+                    if mode == .phone {
+                        phoneForm
+                    } else {
+                        tokenForm
                     }
                 }
-                .onChange(of: keyboardHeight) { _, height in
-                    guard height > 0, focus != nil else { return }
-                    withAnimation(.easeOut(duration: 0.22)) {
-                        proxy.scrollTo("login-form", anchor: .center)
+                .padding(.top, 12)
+                .staggerIn(3)
+
+                if let message {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 11))
+                        Text(message)
+                            .font(.system(size: 12, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
                     }
+                    .foregroundStyle(Theme.red)
+                    .padding(.top, 12)
+                    .transition(.opacity)
                 }
+
+                PrimaryButton(
+                    label: buttonTitle,
+                    icon: submitting ? nil : "arrow.right",
+                    enabled: canSubmit,
+                    loading: submitting
+                ) {
+                    submit()
+                }
+                .padding(.top, 18)
+                .staggerIn(4)
+
+                Spacer(minLength: 12)
             }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 36)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .animation(Motion.quick, value: focus)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
-            let overlap = max(0, UIScreen.main.bounds.maxY - frame.minY)
-            withAnimation(.easeOut(duration: 0.22)) {
-                keyboardHeight = overlap
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            withAnimation(.easeOut(duration: 0.22)) {
-                keyboardHeight = 0
-            }
-        }
+        .ignoresSafeArea(.keyboard)
     }
 
     private var buttonTitle: String {
