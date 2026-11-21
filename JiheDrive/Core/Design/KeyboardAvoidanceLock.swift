@@ -1,7 +1,11 @@
+import SwiftUI
 import UIKit
 
-/// 登录时关掉窗口宿主的键盘安全区，登入后再打开。
-/// 只处理 SwiftUI 宿主窗口，不碰键盘自己的 UITextEffectsWindow。
+/// 登录页关掉 SwiftUI 宿主的键盘安全区，避免整页被压成空视图。
+///
+/// 29 号包能用，是因为它只改 UIHostingController，绝不去碰键盘自己的窗口。
+/// 后来几版用 CADisplayLink / 延迟 removeAllAnimations 去「钉」所有窗口，
+/// 键盘弹起后宿主视图高度被改成 0，或者渲染动画被清掉，看起来就是整页没了。
 enum KeyboardAvoidance {
     private static var enabled = true
     private static var observers: [NSObjectProtocol] = []
@@ -16,18 +20,37 @@ enum KeyboardAvoidance {
         }
     }
 
+    static func applyLoginLock() {
+        applyAll(raw: 1)
+        pinHostWindows()
+    }
+
+    /// 只挑 SwiftUI 宿主窗口。键盘的 UITextEffectsWindow / UIRemoteKeyboardWindow
+    /// 也有 rootViewController，改它们的 frame 或底色会把整页盖住。
     private static func hostingWindows() -> [UIWindow] {
         var result: [UIWindow] = []
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
-            for window in windowScene.windows {
-                let sel = NSSelectorFromString("setSafeAreaRegions:")
-                if let root = window.rootViewController, root.responds(to: sel) {
-                    result.append(window)
-                }
+            for window in windowScene.windows where isHostingWindow(window) {
+                result.append(window)
             }
         }
         return result
+    }
+
+    static func isHostingWindow(_ window: UIWindow) -> Bool {
+        if isSystemOverlayWindow(window) { return false }
+        let sel = NSSelectorFromString("setSafeAreaRegions:")
+        return window.rootViewController?.responds(to: sel) == true
+    }
+
+    static func isSystemOverlayWindow(_ window: UIWindow) -> Bool {
+        let name = NSStringFromClass(type(of: window))
+        return name.contains("TextEffects")
+            || name.contains("Keyboard")
+            || name.contains("RemoteKeyboard")
+            || name.contains("InputSet")
+            || name.contains("Prediction")
     }
 
     private static func applyAll(raw: UInt) {
@@ -39,7 +62,9 @@ enum KeyboardAvoidance {
         }
         for window in hostingWindows() {
             walk(window.rootViewController)
-            window.frame.origin = .zero
+            if window.frame.origin != .zero {
+                window.frame.origin = .zero
+            }
         }
     }
 
@@ -48,29 +73,23 @@ enum KeyboardAvoidance {
         guard vc.responds(to: sel), let imp = vc.method(for: sel) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, UInt) -> Void
         unsafeBitCast(imp, to: Setter.self)(vc, sel, raw)
-        vc.additionalSafeAreaInsets.bottom = 0
-    }
-
-    private static func pinLiftedViews() {
-        for window in hostingWindows() {
-            window.frame.origin = .zero
-            reset(window.rootViewController?.view)
-            var stack: [UIViewController] = []
-            if let root = window.rootViewController { stack.append(root) }
-            while let vc = stack.popLast() {
-                reset(vc.view)
-                stack.append(contentsOf: vc.children)
-                if let presented = vc.presentedViewController { stack.append(presented) }
-            }
+        if vc.additionalSafeAreaInsets.bottom != 0 {
+            vc.additionalSafeAreaInsets.bottom = 0
         }
     }
 
-    private static func reset(_ view: UIView?) {
-        guard let view else { return }
-        if view.transform != .identity { view.transform = .identity }
-        if view.frame.origin.y < -0.5 {
-            view.layer.removeAllAnimations()
-            view.frame.origin.y = 0
+    private static func pinHostWindows() {
+        for window in hostingWindows() {
+            if window.frame.origin != .zero {
+                window.frame.origin = .zero
+            }
+            guard let view = window.rootViewController?.view else { continue }
+            if view.transform != .identity {
+                view.transform = .identity
+            }
+            if view.frame.origin.y < -0.5 {
+                view.frame.origin.y = 0
+            }
         }
     }
 
@@ -86,15 +105,7 @@ enum KeyboardAvoidance {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in
                 guard !enabled else { return }
                 applyAll(raw: 1)
-                pinLiftedViews()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    guard !enabled else { return }
-                    pinLiftedViews()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    guard !enabled else { return }
-                    pinLiftedViews()
-                }
+                pinHostWindows()
             })
         }
     }
@@ -103,5 +114,44 @@ enum KeyboardAvoidance {
         guard !observers.isEmpty else { return }
         observers.forEach(NotificationCenter.default.removeObserver)
         observers.removeAll()
+    }
+}
+
+extension View {
+    /// 登录页挂一个不可见探针：键盘改安全区时再关掉一次 keyboard region。
+    func locksKeyboardAvoidance() -> some View {
+        background(KeyboardAvoidanceProbe())
+            .ignoresSafeArea(.keyboard)
+    }
+}
+
+private struct KeyboardAvoidanceProbe: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> KeyboardAvoidanceProbeController {
+        KeyboardAvoidanceProbeController()
+    }
+
+    func updateUIViewController(_ uiViewController: KeyboardAvoidanceProbeController, context: Context) {}
+}
+
+final class KeyboardAvoidanceProbeController: UIViewController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        KeyboardAvoidance.applyLoginLock()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        KeyboardAvoidance.applyLoginLock()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        KeyboardAvoidance.applyLoginLock()
     }
 }

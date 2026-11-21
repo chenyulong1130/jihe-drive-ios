@@ -47,7 +47,7 @@ struct LoginView: View {
                 .padding(.bottom, 200)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .ignoresSafeArea(.keyboard)
+        .locksKeyboardAvoidance()
         .onAppear { KeyboardAvoidance.setKeyboardRegion(false) }
         .onDisappear { KeyboardAvoidance.setKeyboardRegion(true) }
     }

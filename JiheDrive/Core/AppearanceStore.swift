@@ -74,11 +74,17 @@ final class AppearanceStore: ObservableObject {
         let canvas = dark ? Self.darkCanvas : Self.lightCanvas
         UIView.performWithoutAnimation {
             for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
-                for window in scene.windows where window.rootViewController != nil {
+                for window in scene.windows where Self.shouldPaint(window) {
                     Self.paint(window, style: style, canvas: canvas, setStyle: setStyle)
                 }
             }
         }
+    }
+
+    /// 键盘弹起会新建 TextEffects 窗口。给它涂不透明底色会把登录页整页盖住。
+    private static func shouldPaint(_ window: UIWindow) -> Bool {
+        if KeyboardAvoidance.isSystemOverlayWindow(window) { return false }
+        return window.rootViewController != nil
     }
 
     private static func paint(
@@ -130,6 +136,7 @@ final class AppearanceStore: ObservableObject {
                     self?.applyToWindows(setStyle: false)
                     return
                 }
+                guard Self.shouldPaint(window) else { return }
                 let dark = self?.resolvedScheme == .dark
                 Self.paint(
                     window,
