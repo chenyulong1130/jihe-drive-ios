@@ -153,8 +153,9 @@ final class MessageStore: ObservableObject {
             if await accepted(try? await ZeehoClient.shared.get(path, query: query)) { return }
         }
 
+        let messageId: Any = Int(id) ?? id
         var body: [String: Any] = [
-            "messageId": Int(id) ?? id,
+            "messageId": messageId,
             "unread": 1
         ]
         if !uid.isEmpty { body["userId"] = uid }
@@ -167,7 +168,7 @@ final class MessageStore: ObservableObject {
             if await accepted(try? await ZeehoClient.shared.post(path, body: body)) { return }
         }
 
-        body["messageIds"] = [Int(id) ?? id]
+        body["messageIds"] = [messageId]
         if await accepted(try? await ZeehoClient.shared.post(
             "/v1.0/mine/cfmotoservermine/app/Message/read_v2",
             body: body
