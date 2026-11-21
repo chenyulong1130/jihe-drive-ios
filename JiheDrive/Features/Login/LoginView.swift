@@ -41,66 +41,65 @@ struct LoginView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             AmbientBackground()
+                .onTapGesture { focus = nil }
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 40)
+            VStack(spacing: 0) {
+                emblem.staggerIn(0)
+                    .padding(.top, 48)
 
-                    emblem.staggerIn(0)
+                Text("极核智行")
+                    .font(Theme.largeTitle)
+                    .foregroundStyle(Theme.label)
+                    .padding(.top, 20)
+                    .staggerIn(1)
 
-                    Text("极核智行")
-                        .font(Theme.largeTitle)
-                        .foregroundStyle(Theme.label)
-                        .padding(.top, 20)
-                        .staggerIn(1)
+                modeSwitch
+                    .padding(.top, 26)
+                    .staggerIn(2)
 
-                    modeSwitch
-                        .padding(.top, 26)
-                        .staggerIn(2)
-
-                    Group {
-                        if mode == .phone {
-                            phoneForm
-                        } else {
-                            tokenForm
-                        }
+                Group {
+                    if mode == .phone {
+                        phoneForm
+                    } else {
+                        tokenForm
                     }
-                    .padding(.top, 12)
-                    .staggerIn(3)
-
-                    if let message {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.circle.fill")
-                                .font(.system(size: 11))
-                            Text(message)
-                                .font(.system(size: 12, weight: .medium))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundStyle(Theme.red)
-                        .padding(.top, 12)
-                        .transition(.opacity)
-                    }
-
-                    PrimaryButton(
-                        label: buttonTitle,
-                        icon: submitting ? nil : "arrow.right",
-                        enabled: canSubmit,
-                        loading: submitting
-                    ) {
-                        submit()
-                    }
-                    .padding(.top, 18)
-                    .staggerIn(4)
-
-                    Spacer(minLength: 40)
                 }
-                .padding(.horizontal, 22)
+                .padding(.top, 12)
+                .staggerIn(3)
+
+                if let message {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 11))
+                        Text(message)
+                            .font(.system(size: 12, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.red)
+                    .padding(.top, 12)
+                    .transition(.opacity)
+                }
+
+                PrimaryButton(
+                    label: buttonTitle,
+                    icon: submitting ? nil : "arrow.right",
+                    enabled: canSubmit,
+                    loading: submitting
+                ) {
+                    submit()
+                }
+                .padding(.top, 18)
+                .staggerIn(4)
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 22)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .onTapGesture { focus = nil }
+        .locksKeyboardAvoidance()
     }
 
     private var buttonTitle: String {
