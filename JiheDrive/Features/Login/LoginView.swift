@@ -1,8 +1,8 @@
 import SwiftUI
-import UIKit
 
-/// 弹窗式登录：轻遮罩 + 居中偏上的浮动卡片，卡片整体在键盘上方，
-/// 键盘弹出时页面不动；输入框仍用 UIKit，配合 KeyboardAvoidance 关掉整页避让。
+/// 弹窗式登录：遮罩 + 浮动卡片。
+/// 卡片放在 ScrollView 里，键盘弹出时系统只压缩滚动区（必要时自动滚动到焦点），页面本身不动，
+/// 不再用任何私有 API 硬关键盘避让。
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -10,6 +10,10 @@ struct LoginView: View {
         case phone, token
         var id: String { rawValue }
         var title: String { self == .phone ? "手机号" : "Token" }
+    }
+
+    private enum Field: Hashable {
+        case phone, code, token
     }
 
     @State private var mode: Mode = .phone
@@ -21,6 +25,7 @@ struct LoginView: View {
     @State private var submitting = false
     @State private var message: String?
     @State private var countdownTask: Task<Void, Never>?
+    @FocusState private var focus: Field?
     @Namespace private var modePill
 
     private var phoneValid: Bool { phone.count == 11 && phone.hasPrefix("1") }
@@ -36,21 +41,22 @@ struct LoginView: View {
         ZStack {
             Theme.groupedBackground
                 .ignoresSafeArea()
-                .onTapGesture { hideKeyboard() }
 
             // 遮罩：压暗背景，衬出弹窗
             Color.black.opacity(0.12)
                 .ignoresSafeArea()
-                .onTapGesture { hideKeyboard() }
 
-            dialog
-                .padding(.horizontal, 26)
-                .padding(.bottom, 200)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 110)
+                    dialog
+                        .padding(.horizontal, 26)
+                    Color.clear.frame(height: 40)
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
         }
-        .ignoresSafeArea(.keyboard)
-        .onAppear { KeyboardAvoidance.setKeyboardRegion(false) }
-        .onDisappear { KeyboardAvoidance.setKeyboardRegion(true) }
+        .onTapGesture { focus = nil }
     }
 
     // MARK: - 弹窗卡片
@@ -129,6 +135,7 @@ struct LoginView: View {
                     withAnimation(Motion.spring) {
                         mode = item
                         message = nil
+                        focus = nil
                     }
                 } label: {
                     Text(item.title)
@@ -161,8 +168,15 @@ struct LoginView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
                     .frame(width: 20)
-                LoginKitField(text: $phone, placeholder: "手机号", keyboard: .numberPad)
-                    .frame(height: 22)
+                TextField("手机号", text: $phone)
+                    .keyboardType(.numberPad)
+                    .textContentType(.telephoneNumber)
+                    .focused($focus, equals: .phone)
+                    .font(.system(size: 16))
+                    .onChange(of: phone) { _, value in
+                        let filtered = String(value.filter(\.isNumber).prefix(11))
+                        if filtered != phone { phone = filtered }
+                    }
             }
             .padding(.horizontal, 4)
             .frame(height: 48)
@@ -174,8 +188,15 @@ struct LoginView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
                     .frame(width: 20)
-                LoginKitField(text: $code, placeholder: "短信验证码", keyboard: .numberPad)
-                    .frame(height: 22)
+                TextField("短信验证码", text: $code)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .focused($focus, equals: .code)
+                    .font(.system(size: 16))
+                    .onChange(of: code) { _, value in
+                        let filtered = String(value.filter(\.isNumber).prefix(6))
+                        if filtered != code { code = filtered }
+                    }
                 Button(action: sendCode) {
                     Text(countdown > 0 ? "\(countdown)s" : (sending ? "发送中" : "获取验证码"))
                         .font(.system(size: 12.5, weight: .bold))
@@ -201,17 +222,27 @@ struct LoginView: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.tertiary)
                 .frame(width: 20)
-                .padding(.top, 14)
-            LoginKitArea(text: $token, placeholder: "粘贴 access token")
-                .frame(height: 84)
+                .padding(.top, 10)
+            ZStack(alignment: .topLeading) {
+                if token.isEmpty {
+                    Text("粘贴 access token")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(Theme.tertiary)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $token)
+                    .focused($focus, equals: .token)
+                    .font(.system(size: 13, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+            .frame(height: 84)
         }
     }
 
     // MARK: - 动作
-
-    private func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
 
     private func sendCode() {
         guard canSendCode else { return }
@@ -221,6 +252,7 @@ struct LoginView: View {
             do {
                 try await model.requestCode(phone: phone)
                 startCountdown()
+                focus = .code
             } catch {
                 withAnimation(Motion.quick) { message = error.localizedDescription }
             }
@@ -242,7 +274,7 @@ struct LoginView: View {
 
     private func submit() {
         guard canSubmit else { return }
-        hideKeyboard()
+        focus = nil
         submitting = true
         withAnimation(Motion.quick) { message = nil }
         Task {
@@ -258,106 +290,6 @@ struct LoginView: View {
                 withAnimation(Motion.quick) { message = error.localizedDescription }
             }
             submitting = false
-        }
-    }
-}
-
-private struct LoginKitField: UIViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-    var keyboard: UIKeyboardType
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    func makeUIView(context: Context) -> UITextField {
-        let field = UITextField()
-        field.placeholder = placeholder
-        field.keyboardType = keyboard
-        field.font = .systemFont(ofSize: 17)
-        field.textColor = .label
-        field.tintColor = .systemBlue
-        field.borderStyle = .none
-        field.autocorrectionType = .no
-        field.delegate = context.coordinator
-        field.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .editingChanged)
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return field
-    }
-
-    func updateUIView(_ field: UITextField, context: Context) {
-        context.coordinator.text = $text
-        if field.text != text { field.text = text }
-        field.placeholder = placeholder
-        field.keyboardType = keyboard
-    }
-
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-
-        @objc func changed(_ sender: UITextField) {
-            text.wrappedValue = sender.text ?? ""
-        }
-
-        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-            guard textField.keyboardType == .numberPad else { return true }
-            let current = textField.text ?? ""
-            let next = (current as NSString).replacingCharacters(in: range, with: string)
-            return next.count <= 11 && next.allSatisfy(\.isNumber)
-        }
-    }
-}
-
-private struct LoginKitArea: UIViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
-        view.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
-        view.textColor = .label
-        view.tintColor = .systemBlue
-        view.backgroundColor = .clear
-        view.textContainerInset = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
-        view.delegate = context.coordinator
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        context.coordinator.placeholder.text = placeholder
-        view.addSubview(context.coordinator.placeholder)
-        context.coordinator.placeholder.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            context.coordinator.placeholder.topAnchor.constraint(equalTo: view.topAnchor, constant: 14),
-            context.coordinator.placeholder.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4)
-        ])
-        context.coordinator.syncPlaceholder(view)
-        return view
-    }
-
-    func updateUIView(_ view: UITextView, context: Context) {
-        context.coordinator.text = $text
-        context.coordinator.placeholder.text = placeholder
-        if view.text != text { view.text = text }
-        context.coordinator.syncPlaceholder(view)
-    }
-
-    final class Coordinator: NSObject, UITextViewDelegate {
-        var text: Binding<String>
-        let placeholder = UILabel()
-        init(text: Binding<String>) {
-            self.text = text
-            super.init()
-            placeholder.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
-            placeholder.textColor = .placeholderText
-        }
-
-        func textViewDidChange(_ textView: UITextView) {
-            text.wrappedValue = textView.text
-            syncPlaceholder(textView)
-        }
-
-        func syncPlaceholder(_ textView: UITextView) {
-            placeholder.isHidden = !textView.text.isEmpty
         }
     }
 }
