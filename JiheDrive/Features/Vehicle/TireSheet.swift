@@ -1,4 +1,3 @@
-import Charts
 import SwiftUI
 
 /// 胎压监测二级页：对齐小程序 tire.vue（双轮卡 + 压力区间 + 说明）
@@ -604,65 +603,116 @@ private struct TireHistoryChart: View {
     }
 
     var body: some View {
-        Chart {
-            safeBand
-            RuleMark(y: .value("偏低线", lowBar))
-                .foregroundStyle(Theme.orange.opacity(0.7))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            RuleMark(y: .value("偏高线", highBar))
-                .foregroundStyle(Theme.red.opacity(0.55))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            ForEach(plot) { point in
-                LineMark(
-                    x: .value("时间", point.date),
-                    y: .value("胎压", point.value),
-                    series: .value("轮", point.name)
-                )
-                .foregroundStyle(by: .value("轮", point.name))
-                .interpolationMethod(.catmullRom)
-                .lineStyle(StrokeStyle(lineWidth: 2.2))
+        let front = plot.filter { $0.name == "前轮" }
+        let rear = plot.filter { $0.name == "后轮" }
+        let yMarks = [lowBar, 2.4, highBar]
+        let xCount = period == "1" ? 4 : 5
+        let span = max(xEnd.timeIntervalSince(xStart), 1)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                legendDot(Theme.brand, "前轮")
+                legendDot(Color(hex: 0xE08A2C), "后轮")
+                Spacer(minLength: 0)
+                Text("绿带 = 安全")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.green)
             }
-            ForEach(lastPoints) { point in
-                PointMark(
-                    x: .value("时间", point.date),
-                    y: .value("胎压", point.value),
-                    series: .value("轮", point.name)
-                )
-                .foregroundStyle(by: .value("轮", point.name))
-                .symbolSize(46)
-            }
-        }
-        .chartForegroundStyleScale([
-            "前轮": Theme.brand,
-            "后轮": Color(hex: 0xE08A2C)
-        ])
-        .chartYScale(domain: yLo...yHi)
-        .chartLegend(position: .top, alignment: .trailing)
-        .chartYAxis {
-            AxisMarks(position: .leading, values: [lowBar, 2.4, highBar])
-        }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: period == "1" ? 4 : 5)) { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let date = value.as(Date.self) {
+
+            GeometryReader { geo in
+                let left: CGFloat = 28
+                let bottom: CGFloat = 18
+                let plotSize = CGSize(width: max(geo.size.width - left, 1), height: max(geo.size.height - bottom, 1))
+
+                ZStack(alignment: .topLeading) {
+                    safeBand(size: plotSize).offset(x: left)
+
+                    ForEach(yMarks, id: \.self) { mark in
+                        let y = leftY(mark, height: plotSize.height)
+                        Path { path in
+                            path.move(to: CGPoint(x: left, y: y))
+                            path.addLine(to: CGPoint(x: left + plotSize.width, y: y))
+                        }
+                        .stroke(
+                            mark == lowBar ? Theme.orange.opacity(0.55) : mark == highBar ? Theme.red.opacity(0.45) : Theme.separator.opacity(0.45),
+                            style: StrokeStyle(lineWidth: 1, dash: mark == 2.4 ? [] : [4, 3])
+                        )
+                        Text(String(format: "%.1f", mark))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.tertiary)
+                            .position(x: 14, y: y)
+                    }
+
+                    line(front, size: plotSize, span: span)
+                        .stroke(Theme.brand, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                        .offset(x: left)
+                    line(rear, size: plotSize, span: span)
+                        .stroke(Color(hex: 0xE08A2C), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                        .offset(x: left)
+
+                    ForEach(lastPoints) { point in
+                        let pos = locate(point, size: plotSize, span: span)
+                        Circle()
+                            .fill(point.name == "前轮" ? Theme.brand : Color(hex: 0xE08A2C))
+                            .frame(width: 8, height: 8)
+                            .position(x: left + pos.x, y: pos.y)
+                        Text(String(format: "%.1f", point.value))
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.label)
+                            .position(x: left + pos.x, y: max(8, pos.y - 12))
+                    }
+
+                    ForEach(0..<xCount, id: \.self) { index in
+                        let ratio = CGFloat(index) / CGFloat(max(xCount - 1, 1))
+                        let date = xStart.addingTimeInterval(span * Double(ratio))
                         Text(Self.format(date, period: period))
-                            .font(.system(size: 9))
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Theme.tertiary)
+                            .position(x: left + plotSize.width * ratio, y: plotSize.height + 10)
                     }
                 }
             }
         }
     }
 
-    @ChartContentBuilder
-    private var safeBand: some ChartContent {
-        RectangleMark(
-            xStart: .value("起", xStart),
-            xEnd: .value("止", xEnd),
-            yStart: .value("低", lowBar),
-            yEnd: .value("高", highBar)
-        )
-        .foregroundStyle(Theme.green.opacity(0.14))
+    private func legendDot(_ color: Color, _ title: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.secondary)
+        }
+    }
+
+    private func safeBand(size: CGSize) -> some View {
+        let top = leftY(highBar, height: size.height)
+        let bottom = leftY(lowBar, height: size.height)
+        return Rectangle()
+            .fill(Theme.green.opacity(0.14))
+            .frame(width: size.width, height: max(4, bottom - top))
+            .offset(y: top)
+    }
+
+    private func leftY(_ value: Double, height: CGFloat) -> CGFloat {
+        let span = max(yHi - yLo, 0.3)
+        let ratio = (value - yLo) / span
+        return height * (1 - CGFloat(min(max(ratio, 0), 1)))
+    }
+
+    private func locate(_ point: TirePlotPoint, size: CGSize, span: TimeInterval) -> CGPoint {
+        let x = size.width * CGFloat(min(max(point.date.timeIntervalSince(xStart) / span, 0), 1))
+        return CGPoint(x: x, y: leftY(point.value, height: size.height))
+    }
+
+    private func line(_ points: [TirePlotPoint], size: CGSize, span: TimeInterval) -> Path {
+        Path { path in
+            guard let first = points.first else { return }
+            let start = locate(first, size: size, span: span)
+            path.move(to: start)
+            for point in points.dropFirst() {
+                path.addLine(to: locate(point, size: size, span: span))
+            }
+        }
     }
 
     private static func downsample(_ points: [TireHistoryPoint]) -> [TireHistoryPoint] {
