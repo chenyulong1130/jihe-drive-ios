@@ -29,13 +29,29 @@ struct SnapshotProvider: TimelineProvider {
         Task {
             let disk = WidgetSnapshot.read() ?? WidgetSnap()
             let live = await WidgetLiveSync.refresh()
+            let wanted = WidgetSnapshot.selectedVin()
             var snap = live
-            if snap.soc <= 0, disk.soc > 0 { snap.soc = disk.soc }
-            if snap.rangeKm <= 0, disk.rangeKm > 0 { snap.rangeKm = disk.rangeKm }
-            if snap.vin.isEmpty { snap.vin = disk.vin }
-            if snap.name.isEmpty { snap.name = disk.name }
-            if snap.todayKm == 0, disk.todayKm > 0 { snap.todayKm = disk.todayKm }
-            if snap.todayMin == 0, disk.todayMin > 0 { snap.todayMin = disk.todayMin }
+            let liveMatches = wanted == nil || wanted?.isEmpty == true || WidgetSnapshot.sameVin(live.vin, wanted)
+            let diskMatches = WidgetSnapshot.sameVin(disk.vin, wanted)
+            if !liveMatches, diskMatches {
+                snap = disk
+                snap.pointsTotal = live.pointsTotal
+                snap.pointsToday = live.pointsToday
+                snap.signedToday = live.signedToday
+                snap.communityDone = live.communityDone
+                snap.continueDays = live.continueDays
+                snap.lotteryText = live.lotteryText
+                snap.lotteryLeft = live.lotteryLeft
+                snap.lotteryClaimed = live.lotteryClaimed
+            } else {
+                if snap.soc <= 0, disk.soc > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.soc = disk.soc }
+                if snap.rangeKm <= 0, disk.rangeKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.rangeKm = disk.rangeKm }
+                if snap.vin.isEmpty { snap.vin = wanted ?? disk.vin }
+                if snap.name.isEmpty { snap.name = disk.name }
+                if snap.todayKm == 0, disk.todayKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.todayKm = disk.todayKm }
+                if snap.todayMin == 0, disk.todayMin > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.todayMin = disk.todayMin }
+            }
+            if let wanted, !wanted.isEmpty { snap.vin = wanted }
             let next = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
             completion(Timeline(entries: [.from(matchingSelected(snap))], policy: .after(next)))
         }
@@ -43,11 +59,8 @@ struct SnapshotProvider: TimelineProvider {
 
     private func matchingSelected(_ snap: WidgetSnap) -> WidgetSnap {
         var copy = snap
-        copy.imageData = nil
         guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return copy }
-        if copy.vin.isEmpty {
-            copy.vin = wanted
-        }
+        copy.vin = wanted
         return copy
     }
 
@@ -456,6 +469,7 @@ struct JiheDriveWidgetEntryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .id(snap.vin)
     }
 
     private func pill(_ text: String, bg: Color, fg: Color) -> some View {

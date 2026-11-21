@@ -159,109 +159,103 @@ struct BatterySheet: View {
 
     // MARK: - Hero
 
+    private var heroAccent: Color {
+        if charging { return Color(hex: 0x22C55E) }
+        if soc <= 15 { return Theme.red }
+        if soc <= 30 { return Theme.orange }
+        return Color(hex: 0x0B6BCB)
+    }
+
     private var hero: some View {
-        let colors: [Color] = charging
-            ? [Color(hex: 0x14532D), Color(hex: 0x15803D), Color(hex: 0x22C55E)]
-            : [Color(hex: 0x0F3D74), Color(hex: 0x0B6BCB), Color(hex: 0x22A3F5)]
+        VStack(spacing: 18) {
+            BatteryPackVisual(progress: CGFloat(soc) / 100, charging: charging, tint: heroAccent)
 
-        return VStack(spacing: 16) {
-            HStack(alignment: .center, spacing: 16) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.18), lineWidth: 8)
-                    Circle()
-                        .trim(from: 0, to: CGFloat(soc) / 100)
-                        .stroke(
-                            Color.white,
-                            style: StrokeStyle(lineWidth: 8, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                    VStack(spacing: 0) {
-                        Text("\(soc)")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .monospacedDigit()
-                        Text("%")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text("\(soc)")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.label)
+                        .monospacedDigit()
+                    Text("%")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                        .offset(y: -4)
                 }
-                .frame(width: 88, height: 88)
+                if charging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(heroAccent)
+                        .offset(y: -8)
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(rangeKm)")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.label)
+                        .monospacedDigit()
+                    Text("km 可骑")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.tertiary)
+                }
+            }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Text(charging ? "充电中" : (battery?.stateText.isEmpty == false ? battery!.stateText : "待机"))
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                        if charging {
-                            Image(systemName: "bolt.fill")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(rangeKm)")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .monospacedDigit()
-                        Text("km 可骑")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.72))
-                    }
-                    if !etaShort.isEmpty {
-                        Text("充满还需 \(etaShort)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.82))
-                    } else if temp != 0 {
-                        Text("电池温度 \(Int(temp))°C")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.82))
-                    }
+            HStack(spacing: 8) {
+                Text(charging ? "充电中" : (battery?.stateText.isEmpty == false ? battery!.stateText : "待机"))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(charging ? heroAccent : Theme.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(heroAccent.opacity(charging ? 0.14 : 0.08))
+                    )
+                if !etaShort.isEmpty {
+                    Text("充满还需 \(etaShort)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                } else if temp != 0 {
+                    Text("电池 \(Int(temp))°C")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
                 }
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 heroLive("电压", volts > 0 ? String(format: "%.1f", volts) : "—", "V")
                 heroLive("电流", amps.map { String(format: "%.1f", $0) } ?? "—", "A")
                 heroLive("功率", watts.map { "\(Int($0.rounded()))" } ?? "—", "W")
                 heroLive("温度", temp != 0 ? "\(Int(temp))" : "—", "°C")
             }
-            .padding(.top, 4)
-            .overlay(alignment: .top) {
-                Rectangle().fill(.white.opacity(0.16)).frame(height: 1)
-            }
         }
         .padding(18)
-        .background(
-            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(
-            color: (charging ? Color(hex: 0x15803D) : Color(hex: 0x0B6BCB)).opacity(0.38),
-            radius: 16,
-            y: 8
-        )
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: Color.black.opacity(0.06), radius: 16, y: 6)
     }
 
     private func heroLive(_ label: String, _ value: String, _ unit: String) -> some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.62))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(value)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(unit)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(Theme.tertiary)
             }
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.surfaceAlt)
+        )
     }
 
     // MARK: - 动力电池
@@ -737,6 +731,73 @@ struct BatterySheet: View {
             current: live?.current,
             power: p
         )
+    }
+}
+
+private struct BatteryPackVisual: View {
+    var progress: CGFloat
+    var charging: Bool
+    var tint: Color
+
+    @State private var shine: CGFloat = -0.4
+
+    var body: some View {
+        HStack(spacing: 5) {
+            GeometryReader { geo in
+                let pct = min(1, max(0, progress))
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Theme.surfaceAlt)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(tint.opacity(0.28), lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [tint.opacity(0.75), tint],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(10, (geo.size.width - 10) * pct))
+                        .padding(5)
+                    if charging {
+                        LinearGradient(
+                            colors: [.clear, Color.white.opacity(0.45), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: geo.size.width * 0.38)
+                        .offset(x: geo.size.width * shine)
+                        .mask(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .frame(width: max(10, (geo.size.width - 10) * pct))
+                                .padding(5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        )
+                    }
+                }
+            }
+            .frame(height: 56)
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(tint.opacity(0.55))
+                .frame(width: 7, height: 22)
+        }
+        .onAppear {
+            guard charging else { return }
+            withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+                shine = 1.1
+            }
+        }
+        .onChange(of: charging) { _, on in
+            if on {
+                shine = -0.4
+                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+                    shine = 1.1
+                }
+            } else {
+                shine = -0.4
+            }
+        }
     }
 }
 

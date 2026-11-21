@@ -36,16 +36,25 @@ enum WidgetLiveSync {
 
         let cachedSnap = WidgetSnapshot.read()
         let wantedVin = WidgetSnapshot.selectedVin()
-            ?? existing?.vehicle?.vinNo
             ?? cachedSnap?.vin
+            ?? existing?.vehicle?.vinNo
         var snap = cachedSnap ?? WidgetSnap()
         snap.loggedIn = true
         if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
             snap.vin = wantedVin
-            if let name = existing?.vehicle?.name, !name.isEmpty { snap.name = name }
-            if let soc = existing?.vehicle?.soc, soc > 0 { snap.soc = soc }
-            if let range = existing?.vehicle?.rangeKm, range > 0 { snap.rangeKm = range }
-            if let charging = existing?.vehicle?.isCharging { snap.charging = charging }
+            snap.name = existing?.vehicle?.name ?? ""
+            snap.soc = existing?.vehicle?.soc ?? 0
+            snap.rangeKm = existing?.vehicle?.rangeKm ?? 0
+            snap.charging = existing?.vehicle?.isCharging ?? false
+            snap.locked = existing?.vehicle?.isLocked ?? true
+            snap.online = existing?.vehicle?.isOnline ?? false
+            snap.imageURL = existing?.vehicle?.imageURL?.absoluteString ?? ""
+            snap.todayKm = 0
+            snap.todayMin = 0
+            snap.lastKm = 0
+            snap.lastMin = 0
+            snap.tireText = ""
+            snap.tireBound = false
         }
 
         var vehicle: Vehicle?
@@ -65,7 +74,7 @@ enum WidgetLiveSync {
                wantedVin == nil || WidgetSnapshot.sameVin(hint.vinNo, wantedVin) {
                 vehicle = hint
             }
-            let vin = vehicle?.vinNo ?? wantedVin
+            let vin = wantedVin ?? vehicle?.vinNo
             async let tireTask = fetchTire(vin: vin)
             async let rideTask = fetchRide(vin: vin)
             async let batteryTask = fetchBattery(vin: vin)
@@ -171,8 +180,8 @@ enum WidgetLiveSync {
             snap.vin = wantedVin
         }
         _ = await resolveImage(
-            vin: vehicle?.vinNo ?? snap.vin,
-            url: vehicle?.imageURL
+            vin: wantedVin ?? vehicle?.vinNo ?? snap.vin,
+            url: vehicle?.imageURL ?? URL(string: snap.imageURL)
         )
         snap.imageData = nil
 
@@ -254,9 +263,6 @@ enum WidgetLiveSync {
             let list = Vehicle.list(from: res)
             if let hit = list.first(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) {
                 return (picked ?? hit).merged(with: hit)
-            }
-            if picked == nil, hint == nil, let first = list.first {
-                return first
             }
         }
         return WidgetSnapshot.sameVin(hint?.vinNo, vin) ? hint : nil

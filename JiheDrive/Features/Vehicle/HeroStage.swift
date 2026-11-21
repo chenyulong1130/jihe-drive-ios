@@ -222,9 +222,9 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 车头让开顶栏，左右留白，模型整体下移、缩小
-    private var carTopPad: CGFloat { topInset + 108 }
-    private var modelTopPad: CGFloat { topInset + 112 }
+    /// 车头让开顶栏；略放大、略上移
+    private var carTopPad: CGFloat { topInset + 92 }
+    private var modelTopPad: CGFloat { topInset + 96 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -258,7 +258,8 @@ struct HeroStage: View {
                             }
                         }
                         .padding(.top, modelTopPad)
-                        .padding(.horizontal, 36)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 28)
                         .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
@@ -282,14 +283,16 @@ struct HeroStage: View {
                         )
                     }
                     .padding(.top, modelTopPad)
-                    .padding(.horizontal, 36)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
                     .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
-                        .padding(.horizontal, 28)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 28)
                         .overlay { tireMarks }
                         .allowsHitTesting(false)
                 }
@@ -308,8 +311,8 @@ struct HeroStage: View {
                     .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-            .padding(.top, topInset + 6)
-            .padding(.trailing, 16)
+            .padding(.top, modelTopPad + 8)
+            .padding(.trailing, 20)
             .accessibilityLabel("打开坐垫")
         }
     }
@@ -321,11 +324,6 @@ struct HeroStage: View {
                     .frame(width: 240, height: 12)
                     .blur(radius: 6)
                 .offset(y: 16)
-
-            if vehicle.isCharging {
-                ChargingGlow()
-                    .offset(y: 18)
-            }
 
             Group {
                 if let url = vehicle.imageURL {
@@ -340,7 +338,8 @@ struct HeroStage: View {
             .padding(.horizontal, 6)
             .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .offset(y: -10)
     }
 
     private var placeholder: some View {
@@ -537,11 +536,11 @@ struct HeroStage: View {
                             TirePin(
                                 text: tireCaption(bar: front, temp: tireFrontTemp),
                                 tint: tireTint(front),
-                                leader: .leading
+                                leader: .trailing
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.76, y: geo.size.height * 0.70)
+                        .position(x: geo.size.width * 0.23, y: geo.size.height * 0.68)
                     }
                     if let rear = validBar(rearBar) {
                         Button {
@@ -550,11 +549,11 @@ struct HeroStage: View {
                             TirePin(
                                 text: tireCaption(bar: rear, temp: tireRearTemp),
                                 tint: tireTint(rear),
-                                leader: .trailing
+                                leader: .leading
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.26, y: geo.size.height * 0.72)
+                        .position(x: geo.size.width * 0.77, y: geo.size.height * 0.68)
                     }
                 }
             }
@@ -597,7 +596,7 @@ struct HeroStage: View {
     }
 }
 
-/// 贴在轮胎旁的标注：白底描边 + 指引线，无整条背景层
+/// 轮毂锚点 + 指向气泡，标签在车身外侧
 private struct TirePin: View {
     enum Leader { case leading, trailing }
 
@@ -607,18 +606,27 @@ private struct TirePin: View {
 
     var body: some View {
         Color.clear
-            .frame(width: 8, height: 8)
+            .frame(width: 10, height: 10)
             .overlay(alignment: leader == .trailing ? .trailing : .leading) {
                 HStack(spacing: 0) {
-                    if leader == .trailing { caption; stemLine }
-                    Circle()
-                        .fill(tint)
-                        .frame(width: 8, height: 8)
-                    if leader == .leading { stemLine; caption }
+                    if leader == .trailing { caption; caret; stem }
+                    hub
+                    if leader == .leading { stem; caret; caption }
                 }
                 .fixedSize()
-                .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
+                .shadow(color: Color.black.opacity(0.16), radius: 8, y: 2)
             }
+    }
+
+    private var hub: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white)
+                .frame(width: 12, height: 12)
+            Circle()
+                .fill(tint)
+                .frame(width: 7, height: 7)
+        }
     }
 
     private var caption: some View {
@@ -629,36 +637,26 @@ private struct TirePin: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.white.opacity(0.94))
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.white.opacity(0.96))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .strokeBorder(tint, lineWidth: 1.4)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(tint.opacity(0.9), lineWidth: 1.2)
             )
     }
 
-    private var stemLine: some View {
+    private var stem: some View {
         Rectangle()
             .fill(tint)
-            .frame(width: 16, height: 1.5)
+            .frame(width: 22, height: 2)
     }
-}
 
-/// 车底充电光晕
-private struct ChargingGlow: View {
-    @State private var pulse = false
-
-    var body: some View {
-        Ellipse()
-            .fill(Theme.green.opacity(pulse ? 0.38 : 0.14))
-            .frame(width: 268, height: 22)
-            .blur(radius: 8)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
-            }
+    private var caret: some View {
+        Image(systemName: leader == .trailing ? "arrowtriangle.right.fill" : "arrowtriangle.left.fill")
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(tint)
+            .offset(x: leader == .trailing ? 1 : -1)
     }
 }
 

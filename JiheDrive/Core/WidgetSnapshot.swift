@@ -238,18 +238,19 @@ enum WidgetSnapshot {
     static func write(_ snap: WidgetSnap) {
         var snap = snap
         if snap.loggedIn, let old = read() {
-            if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
-            if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
+            let sameCar = sameVin(snap.vin, old.vin)
+            if sameCar, snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
+            if sameCar, snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
             if snap.vin.isEmpty { snap.vin = old.vin }
-            if snap.name.isEmpty { snap.name = old.name }
-            if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
+            if snap.name.isEmpty, sameCar || snap.vin.isEmpty { snap.name = old.name }
+            if snap.imageURL.isEmpty, sameCar { snap.imageURL = old.imageURL }
         }
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
         let wanted = selectedVin()
         payload["selectedVin"] = wanted ?? snap.vin
-        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted), snap.soc <= 0 {
+        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted) {
             return
         }
 
@@ -292,9 +293,15 @@ enum WidgetSnapshot {
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             fromFile = WidgetSnap.from(json)
         }
+        let wanted = selectedVin()
         switch (fromDefaults, fromFile) {
         case let (a?, b?):
-            if a.soc != b.soc { return a.soc > b.soc ? a : b }
+            if let wanted, !wanted.isEmpty {
+                let aHit = sameVin(a.vin, wanted)
+                let bHit = sameVin(b.vin, wanted)
+                if aHit && !bHit { return a }
+                if bHit && !aHit { return b }
+            }
             return a.updatedAt >= b.updatedAt ? a : b
         case let (a?, nil): return a
         case let (nil, b?): return b
@@ -441,10 +448,13 @@ enum WidgetSnapshot {
 
     static func saveImage(_ data: Data, vin: String? = nil) {
         let targetVin = vin ?? selectedVin()
-        guard imageKey(targetVin) != nil, let url = imageFileURL(targetVin) else { return }
+        guard let key = imageKey(targetVin) else { return }
         let payload = prepareImage(data) ?? data
-        try? payload.write(to: url, options: [.atomic])
-        // 当前选中车再写一份通用文件，只给预览占位，读图必须带 VIN
+        if let url = imageFileURL(targetVin) {
+            try? payload.write(to: url, options: [.atomic])
+        }
+        suiteDefaults()?.set(payload, forKey: "widget_image_\(key)")
+        suiteDefaults()?.synchronize()
         if sameVin(targetVin, selectedVin()), let generic = imageFileURL() {
             try? payload.write(to: generic, options: [.atomic])
         }
@@ -452,9 +462,15 @@ enum WidgetSnapshot {
 
     static func loadImage(_ vin: String? = nil) -> Data? {
         let targetVin = vin ?? selectedVin()
-        if imageKey(targetVin) != nil, let url = imageFileURL(targetVin),
-           let data = try? Data(contentsOf: url), !data.isEmpty {
-            return data
+        if let key = imageKey(targetVin) {
+            if let url = imageFileURL(targetVin),
+               let data = try? Data(contentsOf: url), !data.isEmpty {
+                return data
+            }
+            if let data = suiteDefaults()?.data(forKey: "widget_image_\(key)"), !data.isEmpty {
+                return data
+            }
+            return nil
         }
         if let generic = imageFileURL(), let data = try? Data(contentsOf: generic), !data.isEmpty {
             return data
