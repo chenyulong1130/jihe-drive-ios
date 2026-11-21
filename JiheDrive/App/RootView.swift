@@ -8,6 +8,7 @@ struct RootView: View {
     @StateObject private var videoStore = VideoBackdropStore()
     @StateObject private var appearance = AppearanceStore()
     @StateObject private var messages = MessageStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -61,5 +62,11 @@ struct RootView: View {
                 appearance.refreshResolved()
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                appearance.applyToWindows()
+            }
+        }
+        .animation(nil, value: scenePhase)
     }
 }

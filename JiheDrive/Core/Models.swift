@@ -661,6 +661,20 @@ enum ReplayClock {
         )
     }
 
+    /// 进度对应的墙钟；有开始时间就按真实时刻走
+    static func wallDate(track: RideTrack, progress: Double) -> Date? {
+        let clock = make(track)
+        let elapsed = clock.duration * min(max(progress, 0), 1)
+        if let start = track.startedAt, start > 1_000_000_000 {
+            return Date(timeIntervalSince1970: start + elapsed)
+        }
+        if let first = track.timestamps.first(where: { $0 > 1_000_000_000 }) {
+            let origin = clock.times.first ?? 0
+            return Date(timeIntervalSince1970: first - origin + elapsed)
+        }
+        return nil
+    }
+
     static func interpolate(
         points: [Coordinate],
         speeds: [Double],

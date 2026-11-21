@@ -90,10 +90,6 @@ struct BatterySheet: View {
         battery?.isCharging ?? vehicle.isCharging
     }
 
-    private var online: Bool {
-        battery?.isOnline ?? vehicle.isOnline
-    }
-
     private var rangeKm: Int {
         battery?.rangeKm ?? vehicle.rangeKm
     }
@@ -168,91 +164,104 @@ struct BatterySheet: View {
             ? [Color(hex: 0x14532D), Color(hex: 0x15803D), Color(hex: 0x22C55E)]
             : [Color(hex: 0x0F3D74), Color(hex: 0x0B6BCB), Color(hex: 0x22A3F5)]
 
-        return VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Text("当前电量")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.72))
-                        if charging {
-                            HStack(spacing: 3) {
-                                Image(systemName: "bolt.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("充电中")
-                                    .font(.system(size: 11, weight: .bold))
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(.white.opacity(0.18)))
-                        }
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+        return VStack(spacing: 16) {
+            HStack(alignment: .center, spacing: 16) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.18), lineWidth: 8)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(soc) / 100)
+                        .stroke(
+                            Color.white,
+                            style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                    VStack(spacing: 0) {
                         Text("\(soc)")
-                            .font(.system(size: 46, weight: .bold, design: .rounded))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .monospacedDigit()
                         Text("%")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.72))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
                     }
                 }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 8) {
-                    Text("剩余可骑")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.72))
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                .frame(width: 88, height: 88)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text(charging ? "充电中" : (battery?.stateText.isEmpty == false ? battery!.stateText : "待机"))
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                        if charging {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text("\(rangeKm)")
-                            .font(.system(size: 46, weight: .bold, design: .rounded))
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                             .monospacedDigit()
-                        Text("km")
-                            .font(.system(size: 15, weight: .bold))
+                        Text("km 可骑")
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.72))
                     }
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-
-            HStack(spacing: 6) {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(online ? Color(hex: 0x4ADE80) : Color(hex: 0xFBBF24))
-                        .frame(width: 7, height: 7)
-                        .shadow(color: (online ? Color(hex: 0x4ADE80) : Color(hex: 0xFBBF24)).opacity(0.45), radius: 3)
-                    Text(online ? "车辆在线" : "车辆离线")
-                }
-                if temp > 0 {
-                    Text("·").foregroundStyle(.white.opacity(0.45))
-                    Text("电池温度 \(Int(temp))°C")
-                }
-                if !etaShort.isEmpty {
-                    Text("·").foregroundStyle(.white.opacity(0.45))
-                    Text("充满还需 \(etaShort)")
+                    if !etaShort.isEmpty {
+                        Text("充满还需 \(etaShort)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.82))
+                    } else if temp != 0 {
+                        Text("电池温度 \(Int(temp))°C")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.82))
+                    }
                 }
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white.opacity(0.82))
-            .padding(.horizontal, 18)
-            .padding(.top, 13)
-            .padding(.bottom, 13)
+
+            HStack(spacing: 0) {
+                heroLive("电压", volts > 0 ? String(format: "%.1f", volts) : "—", "V")
+                heroLive("电流", amps.map { String(format: "%.1f", $0) } ?? "—", "A")
+                heroLive("功率", watts.map { "\(Int($0.rounded()))" } ?? "—", "W")
+                heroLive("温度", temp != 0 ? "\(Int(temp))" : "—", "°C")
+            }
+            .padding(.top, 4)
             .overlay(alignment: .top) {
                 Rectangle().fill(.white.opacity(0.16)).frame(height: 1)
             }
         }
+        .padding(18)
         .background(
             LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(
             color: (charging ? Color(hex: 0x15803D) : Color(hex: 0x0B6BCB)).opacity(0.38),
             radius: 16,
             y: 8
         )
+    }
+
+    private func heroLive(_ label: String, _ value: String, _ unit: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.62))
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(value)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 动力电池
@@ -284,13 +293,6 @@ struct BatterySheet: View {
                 }
                 .padding(.top, 8)
 
-                HStack(spacing: 0) {
-                    liveMetric("电压", volts > 0 ? String(format: "%.1f V", volts) : "—")
-                    liveMetric("电流", amps.map { String(format: "%.1f A", $0) } ?? "—")
-                    liveMetric("功率", watts.map { "\(Int($0.rounded())) W" } ?? "—")
-                }
-                .padding(.top, 12)
-                .overlay(alignment: .top) { HairLine() }
             }
         }
     }
@@ -313,20 +315,6 @@ struct BatterySheet: View {
             }
         }
         .frame(height: 10)
-    }
-
-    private func liveMetric(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 4) {
-            Text(label)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.tertiary)
-            Text(value)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(Theme.label)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 充电

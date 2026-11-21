@@ -1,10 +1,12 @@
 import Foundation
 
 /// 社区任务：发帖 → 点赞 → 分享 → 删帖（对齐小程序 communityTask.js）
+/// 发帖只允许手动点一次；今日已发过就不再 create。
 enum CommunityTask {
     private static let base = "/v1.0/social/cfmotoserversocial"
     private static let mine = "/v1.0/mine/cfmotoservermine"
     private static let postContent = "生尽欢，死无憾。"
+    private static let lock = CommunityTaskLock()
 
     static func todayKey() -> String {
         let formatter = DateFormatter()
@@ -28,12 +30,18 @@ enum CommunityTask {
         defaults?.synchronize()
     }
 
-    /// 今日社区是否完成：本地日期标记优先，没有再用积分明细反推（换机也能恢复）
+    /// 今日社区是否完成：本地日期标记 → 积分明细 → 今日已有帖。任一命中都不再发帖。
     static func resolveDone(userId: String) async -> Bool {
         if isDoneToday(userId: userId) { return true }
-        let done = await doneFromIntegral(userId: userId)
-        if done { markDone(userId: userId) }
-        return done
+        if await doneFromIntegral(userId: userId) {
+            markDone(userId: userId)
+            return true
+        }
+        if await postedToday(userId: userId) {
+            markDone(userId: userId)
+            return true
+        }
+        return false
     }
 
     static func dayKey(_ raw: String) -> String? {
@@ -50,20 +58,45 @@ enum CommunityTask {
         "jihe.community.done.\(userId).\(todayKey())"
     }
 
-    struct Result {
+    struct Result: Sendable {
         var success: Bool
         var summary: String
     }
 
     static func run(userId: String) async -> Result {
+        await lock.run {
+            await runLocked(userId: userId)
+        }
+    }
+
+    private static func runLocked(userId: String) async -> Result {
+        if await resolveDone(userId: userId) {
+            return Result(success: true, summary: "今日社区已完成")
+        }
         var steps: [String] = []
         do {
             let create = try await ZeehoClient.shared.post(
                 "\(base)/commonArticle",
                 body: ["postcontent": postContent]
             )
-            let createOK = ZeehoClient.codeString(create["code"]) == "10000"
-            steps.append(createOK ? "发帖:OK" : "发帖:FAIL")
+            let createCode = ZeehoClient.codeString(create["code"])
+            let createMsg = "\(create["message"] ?? create["msg"] ?? "")"
+            let createOK = createCode == "10000"
+            let createAlready = createMsg.contains("重复")
+                || createMsg.contains("上限")
+                || createMsg.contains("已发")
+                || createMsg.contains("已完成")
+                || createMsg.contains("频繁")
+                || createMsg.contains("过多")
+                || createMsg.contains("次数")
+            steps.append(createOK ? "发帖:OK" : (createAlready ? "发帖:已做" : "发帖:FAIL"))
+            // 发帖成功或今日额度已用：立刻落闸门，避免后续失败导致反复发帖
+            if createOK || createAlready {
+                markDone(userId: userId)
+            }
+            if createAlready, !createOK {
+                return Result(success: true, summary: steps.joined(separator: " | "))
+            }
 
             try await Task.sleep(nanoseconds: 350_000_000)
             let mineRes = try await ZeehoClient.shared.get(
@@ -134,8 +167,33 @@ enum CommunityTask {
             if name.contains("发帖") || name.contains("帖子") || name.contains("发布") { post = true }
             else if name.contains("点赞") { like = true }
             else if name.contains("分享") { share = true }
+            if quotaFull(remarks) { return true }
         }
-        return post && like && share
+        // 今天已经拿过发帖分，就视为做过，绝不再 create
+        return post || (like && share)
+    }
+
+    /// 我的帖子里今天已经有文，同样视为已发过
+    static func postedToday(userId: String) async -> Bool {
+        guard let res = try? await ZeehoClient.shared.get(
+            "\(base)/community/mineArticleInfo",
+            query: ["userId": userId, "page": "1", "pageSize": "10"]
+        ) else { return false }
+        let list: [[String: Any]]
+        if let arr = res["data"] as? [[String: Any]] {
+            list = arr
+        } else if let map = res["data"] as? [String: Any] {
+            list = (map["list"] as? [[String: Any]]) ?? (map["records"] as? [[String: Any]]) ?? []
+        } else {
+            list = []
+        }
+        let today = todayKey()
+        return list.contains { item in
+            let when = "\(item["createDate"] ?? item["createTime"] ?? item["updateDate"] ?? "")"
+            guard dayKey(when) == today else { return false }
+            let text = "\(item["postcontent"] ?? item["content"] ?? item["postContent"] ?? "")"
+            return text.contains("生尽欢") || text.isEmpty == false
+        }
     }
 
     /// remarks 形如「每日上限1次  (1/1)」表示今日额度已用完
@@ -199,5 +257,12 @@ enum CommunityTask {
             return uid == userId
         }
         return firstID(own)
+    }
+}
+
+/// 串行执行发帖，避免小组件刷新和页面同步同时 create
+private actor CommunityTaskLock {
+    func run(_ body: @Sendable () async -> CommunityTask.Result) async -> CommunityTask.Result {
+        await body()
     }
 }

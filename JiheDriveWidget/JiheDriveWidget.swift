@@ -82,65 +82,69 @@ struct JiheDriveWidgetEntryView: View {
         .containerBackground(for: .widget) { widgetBackground }
     }
 
-    // MARK: - Medium：左栏标题/骑行/电量/按钮，右栏车图
+    // MARK: - Medium：顶栏全宽，左侧骑行/电量/按钮，右侧车图
 
     private var medium: some View {
-        HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                headerRow(titleSize: 12)
+        VStack(alignment: .leading, spacing: 5) {
+            headerRow(titleSize: 13)
 
-                Text("今日骑行")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x94A3B8))
-                Text(todayRideData)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x0F172A))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text("\(snap.soc)")
-                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+            HStack(alignment: .bottom, spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("今日骑行")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color(hex: 0x94A3B8))
+                    Text(todayRideData)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color(hex: 0x0F172A))
-                        .monospacedDigit()
-                    Text("%")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0x9AA4B2))
-                    Text("\(snap.rangeKm) km")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(hex: 0x6B7280))
-                    if snap.charging {
-                        Text("充")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(Color(hex: 0x0369A1))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(snap.soc)")
+                            .font(.system(size: 28, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color(hex: 0x0F172A))
+                            .monospacedDigit()
+                        Text("%")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color(hex: 0x9AA4B2))
+                        Text("\(snap.rangeKm) km")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(hex: 0x6B7280))
+                        if snap.charging {
+                            Text("充电中")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color(hex: 0x0369A1))
+                        }
+                    }
+                    .padding(.top, 2)
+
+                    progress
+
+                    HStack {
+                        controlBar
+                        Spacer(minLength: 0)
+                        pointsInline
+                    }
+                    .padding(.top, 6)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    vehicleImage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if !tireLabel.isEmpty {
+                        Text("胎压 \(tireLabel)")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Color(hex: 0x9AA4B2))
+                            .lineLimit(1)
                     }
                 }
-                .padding(.top, 1)
-
-                progress
-
-                controlBar
-                    .padding(.top, 4)
-
-                pointsInline
-                    .padding(.top, 2)
+                .frame(width: 128)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: 2) {
-                vehicleImage
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if !tireLabel.isEmpty {
-                    Text("胎压 \(tireLabel)")
-                        .font(.system(size: 8))
-                        .foregroundStyle(Color(hex: 0x9AA4B2))
-                        .lineLimit(1)
-                }
-            }
-            .frame(width: 118)
+            .frame(maxHeight: .infinity)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Small
@@ -360,7 +364,7 @@ struct JiheDriveWidgetEntryView: View {
             controlButton(
                 intent: WidgetCushionIntent(),
                 symbol: "rectangle.portrait.bottomhalf.filled",
-                tint: Color(hex: 0x334155),
+                tint: Color(hex: 0x475569),
                 label: "坐垫"
             )
             controlButton(
@@ -369,7 +373,6 @@ struct JiheDriveWidgetEntryView: View {
                 tint: Color(hex: 0x2563EB),
                 label: "寻车"
             )
-            Spacer(minLength: 0)
         }
     }
 
@@ -381,18 +384,12 @@ struct JiheDriveWidgetEntryView: View {
     ) -> some View {
         Button(intent: intent) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(tint.opacity(0.12))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(tint.opacity(0.18), lineWidth: 0.8)
-                )
-                .contentShape(Rectangle())
+                .background(Circle().fill(Color.white.opacity(0.95)))
+                .overlay(Circle().strokeBorder(Color(hex: 0xE2E8F0), lineWidth: 0.8))
+                .contentShape(Circle())
                 .accessibilityLabel(label)
         }
         .buttonStyle(.plain)

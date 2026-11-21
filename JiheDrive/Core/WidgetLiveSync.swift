@@ -31,7 +31,8 @@ enum WidgetLiveSync {
             return empty
         }
 
-        var snap = WidgetSnap()
+        let cachedSnap = WidgetSnapshot.read()
+        var snap = cachedSnap ?? WidgetSnap()
         snap.loggedIn = true
 
         let vehicle: Vehicle?
@@ -49,7 +50,6 @@ enum WidgetLiveSync {
             ride = await rideTask ?? existing?.ride
         }
 
-        let cachedSnap = WidgetSnapshot.read()
         let cachedIsToday = Self.snapIsToday(cachedSnap)
         let uid = ZeehoClient.shared.userId
 
@@ -69,7 +69,7 @@ enum WidgetLiveSync {
             ?? (cachedIsToday ? cachedSnap?.todaySignScore : nil)
             ?? 0
 
-        // 签到：今天做过就不再打 info / POST
+        // 签到：先查今日状态；已签则只记闸门，未签才 POST
         if !signedToday {
             let status = await fetchSigninStatus()
             if status.continueDays > 0 { continueDays = status.continueDays }
@@ -86,10 +86,9 @@ enum WidgetLiveSync {
         }
         if signedToday { WidgetSnapshot.markSignedToday() }
 
-        // 社区：今天做过就整串跳过
+        // 社区只读状态，绝不在小组件/定时刷新里发帖。发帖只走签到页手动按钮。
         if !communityDone, let uid, !uid.isEmpty {
-            let result = await CommunityTask.run(userId: uid)
-            communityDone = result.success || CommunityTask.isDoneToday(userId: uid)
+            communityDone = await CommunityTask.resolveDone(userId: uid)
         }
 
         snap.signedToday = signedToday
@@ -238,14 +237,14 @@ enum WidgetLiveSync {
         snap.online = vehicle.isOnline
         snap.totalMile = vehicle.totalMileKm
         snap.monthMile = vehicle.monthMileage ?? "--"
-        snap.imageURL = vehicle.imageURL?.absoluteString ?? ""
-        snap.todayKm = ride?.todayKm ?? 0
-        snap.todayMin = ride?.todayMin ?? 0
-        snap.lastKm = ride?.lastKm ?? 0
-        snap.lastMin = ride?.lastMin ?? 0
-        snap.accel = ride?.todayAccel ?? 0
-        snap.brake = ride?.todayBrake ?? 0
-        snap.maxSpeed = Int((ride?.todayMaxSpeed ?? 0).rounded())
+        snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+        if let km = ride?.todayKm { snap.todayKm = km }
+        if let minutes = ride?.todayMin { snap.todayMin = minutes }
+        if let km = ride?.lastKm { snap.lastKm = km }
+        if let minutes = ride?.lastMin { snap.lastMin = minutes }
+        if let accel = ride?.todayAccel { snap.accel = accel }
+        if let brake = ride?.todayBrake { snap.brake = brake }
+        if let peak = ride?.todayMaxSpeed { snap.maxSpeed = Int(peak.rounded()) }
         let formatted = WidgetSnapshot.tireCaption(tire)
         if formatted.bound {
             snap.tireText = formatted.text

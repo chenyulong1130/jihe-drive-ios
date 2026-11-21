@@ -31,7 +31,6 @@ struct DashboardWallpaperSheet: View {
         ) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
-                    Color.clear.frame(height: 2)
                     PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
                         HStack(spacing: 10) {
                             Image(systemName: "plus.circle.fill")
@@ -151,7 +150,10 @@ struct DashboardWallpaperSheet: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .aspectRatio(16 / 10, contentMode: .fit)
+                .aspectRatio(
+                    CGFloat(WallpaperExporter.homeW) / CGFloat(WallpaperExporter.homeH),
+                    contentMode: .fit
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -180,16 +182,25 @@ struct DashboardWallpaperSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     if let home = draftHome {
-                        draftFrame(title: "主页", image: home, outline: outlines.homeOutlineURL, ratio: 1024 / 600)
+                        labeledFrame(title: "主页") {
+                            instrumentFrame(dark: false) {
+                                ZStack {
+                                    fillPhoto(home)
+                                    WallpaperOutlineLayer(url: outlines.homeOutlineURL, onDark: false)
+                                }
+                            }
+                        }
                     }
-                    if let speed = draftSpeed {
-                        draftFrame(
-                            title: "速度卡",
-                            image: speed,
-                            outline: outlines.speedOutlineURL,
-                            subject: outlines.speedSubjectURL,
-                            ratio: 307 / 460
-                        )
+                    if let home = draftHome, let speed = draftSpeed {
+                        labeledFrame(title: "速度卡") {
+                            instrumentFrame(dark: true) {
+                                ZStack {
+                                    fillPhoto(home)
+                                    speedSlot(fillPhoto(speed))
+                                    WallpaperOutlineLayer(url: outlines.speedOutlineURL, onDark: true)
+                                }
+                            }
+                        }
                     }
 
                     Button {
@@ -218,58 +229,41 @@ struct DashboardWallpaperSheet: View {
         .sheetChrome(detents: [.large])
     }
 
-    private func draftFrame(
-        title: String,
-        image: UIImage,
-        outline: URL?,
-        subject: URL? = nil,
-        ratio: CGFloat
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.secondary)
-            ZStack {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                WallpaperOutlineLayer(url: outline, onDark: subject != nil)
-                if let subject {
-                    CachedRemoteImage(url: subject, stretch: true)
-                        .allowsHitTesting(false)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(ratio, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
-            )
-        }
-    }
-
     private func wallpaperDetail(_ item: DashboardWallpaperItem) -> some View {
         SheetShell(title: item.name, subtitle: item.isLive ? "仪表使用中" : "云端壁纸", onClose: {
             selected = nil
         }) {
             ScrollView {
                 VStack(spacing: 16) {
-                    previewBlock(
-                        title: "主页",
-                        url: item.homeURL,
-                        outline: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().homeOutlineURL,
-                        subject: nil,
-                        ratio: 1024 / 600
-                    )
-                    previewBlock(
-                        title: "速度卡",
-                        url: item.speedURL,
-                        outline: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().speedOutlineURL,
-                        subject: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().speedSubjectURL,
-                        ratio: 307 / 460
-                    )
+                    labeledFrame(title: "主页") {
+                        instrumentFrame(dark: false) {
+                            ZStack {
+                                if let url = item.homeURL {
+                                    CachedRemoteImage(url: url, contentMode: .fill)
+                                }
+                                WallpaperOutlineLayer(
+                                    url: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().homeOutlineURL,
+                                    onDark: false
+                                )
+                            }
+                        }
+                    }
+                    labeledFrame(title: "速度卡") {
+                        instrumentFrame(dark: true) {
+                            ZStack {
+                                if let url = item.homeURL {
+                                    CachedRemoteImage(url: url, contentMode: .fill)
+                                }
+                                if let url = item.speedURL {
+                                    speedSlot(CachedRemoteImage(url: url, contentMode: .fill))
+                                }
+                                WallpaperOutlineLayer(
+                                    url: (item.outlines ?? vehicle.wallpaperOutlines)?.withFallback().speedOutlineURL,
+                                    onDark: true
+                                )
+                            }
+                        }
+                    }
 
                     Button(role: .destructive) {
                         Task { await delete(item) }
@@ -301,55 +295,62 @@ struct DashboardWallpaperSheet: View {
         .sheetChrome(detents: [.medium, .large])
     }
 
-    private func previewBlock(
-        title: String,
-        url: URL?,
-        outline: URL?,
-        subject: URL?,
-        ratio: CGFloat
-    ) -> some View {
-        let isSpeed = title.contains("速度")
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.secondary)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: isSpeed ? 22 : 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: 0x1C1C1E), Color(hex: 0x2C2C2E)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+    private func labeledFrame<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .overlay(alignment: .topLeading) {
+                Text(title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.black.opacity(0.55))
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: isSpeed ? 22 : 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1.2)
-                    )
-                    .shadow(color: Color.black.opacity(0.22), radius: 14, y: 6)
-
-                ZStack {
-                    Group {
-                        if let url {
-                            CachedRemoteImage(url: url, contentMode: .fill)
-                        } else {
-                            Theme.surfaceAlt
-                        }
-                    }
-
-                    WallpaperOutlineLayer(url: outline, onDark: isSpeed)
-                    if let subject {
-                        CachedRemoteImage(url: subject, stretch: true)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: isSpeed ? 14 : 10, style: .continuous))
-                .padding(isSpeed ? 10 : 8)
+                    .padding(8)
             }
+    }
+
+    /// 仪表统一 1024×600 预览帧。先定宽高，再叠图，避免按图片自身比例被拉高。
+    private func instrumentFrame<Content: View>(dark: Bool, @ViewBuilder content: () -> Content) -> some View {
+        Color.clear
+            .aspectRatio(
+                CGFloat(WallpaperExporter.homeW) / CGFloat(WallpaperExporter.homeH),
+                contentMode: .fit
+            )
             .frame(maxWidth: .infinity)
-            .aspectRatio(ratio, contentMode: .fit)
+            .background(dark ? Color(hex: 0x0A0A0C) : Color(hex: 0xB8B8C0))
+            .overlay { content() }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(dark ? 0.16 : 0.2), lineWidth: 1)
+            )
+    }
+
+    private func fillPhoto(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+    }
+
+    /// 速度卡叠回主页 (358, 54, 307×460) 槽位，与导出裁切一致
+    private func speedSlot<Content: View>(_ content: Content) -> some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let x = CGFloat(WallpaperExporter.speedCropX) / CGFloat(WallpaperExporter.homeW) * w
+            let y = CGFloat(WallpaperExporter.speedCropY) / CGFloat(WallpaperExporter.homeH) * h
+            let sw = CGFloat(WallpaperExporter.speedW) / CGFloat(WallpaperExporter.homeW) * w
+            let sh = CGFloat(WallpaperExporter.speedH) / CGFloat(WallpaperExporter.homeH) * h
+            content
+                .frame(width: sw, height: sh)
+                .clipped()
+                .offset(x: x, y: y)
         }
+        .allowsHitTesting(false)
     }
 
     // MARK: - Network

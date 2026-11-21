@@ -42,8 +42,11 @@ enum TireService {
 
             for item in list {
                 let position = Vehicle.intValue(item["sensorPosition"])
-                guard let pressure = positiveBar(item["tirePressure"]) else { continue }
-                let temperature = Vehicle.doubleValue(item["tireTemp"])
+                guard let pressure = positiveBar(item["tirePressure"] ?? item["pressure"] ?? item["tyrePressure"]) else { continue }
+                let temperature = Vehicle.doubleValue(
+                    item["tireTemp"] ?? item["tyreTemp"] ?? item["tireTemperature"]
+                        ?? item["temperature"] ?? item["temp"]
+                )
 
                 if position == 1 {
                     reading.frontBar = pressure
@@ -78,12 +81,20 @@ enum TireService {
            let list = stats["data"] as? [[String: Any]] {
             for item in list {
                 let position = Vehicle.intValue(item["sensorPosition"])
-                guard let stat = item["tirePressureStat"] as? [String: Any],
-                      let points = stat["list"] as? [[String: Any]],
-                      let last = points.last,
-                      let value = positiveBar(last["value"]) else { continue }
-                if position == 1 { reading.frontBar = value }
-                if position == 2 { reading.rearBar = value }
+                if let stat = item["tirePressureStat"] as? [String: Any],
+                   let points = stat["list"] as? [[String: Any]],
+                   let last = points.last,
+                   let value = positiveBar(last["value"] ?? last["displayedValue"]) {
+                    if position == 1 { reading.frontBar = value }
+                    if position == 2 { reading.rearBar = value }
+                }
+                if let stat = item["tireTempStat"] as? [String: Any],
+                   let points = stat["list"] as? [[String: Any]],
+                   let last = points.last,
+                   let temp = Vehicle.doubleValue(last["value"] ?? last["displayedValue"]) {
+                    if position == 1 { reading.frontTemp = temp }
+                    if position == 2 { reading.rearTemp = temp }
+                }
             }
         }
 

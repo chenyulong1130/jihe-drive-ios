@@ -90,11 +90,15 @@ final class AppearanceStore: ObservableObject {
             }
         }
         observers.append(center.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
+            forName: UIApplication.willEnterForegroundNotification,
             object: nil,
-            queue: .main,
-            using: handler
-        ))
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                // 回前台只重涂窗口底色，不要重发 ColorScheme，否则整页会闪白
+                self?.applyToWindows()
+            }
+        })
         observers.append(center.addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
             object: nil,

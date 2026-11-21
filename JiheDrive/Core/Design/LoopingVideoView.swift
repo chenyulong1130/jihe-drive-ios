@@ -36,12 +36,16 @@ final class LoopingPlayerView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
+        let canvas = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
+        backgroundColor = canvas
         isOpaque = true
         isUserInteractionEnabled = false
         clipsToBounds = true
         playerLayer.videoGravity = .resizeAspectFill
-        playerLayer.backgroundColor = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1).cgColor
+        playerLayer.isOpaque = true
+        playerLayer.backgroundColor = canvas.cgColor
+        layer.isOpaque = true
+        layer.backgroundColor = canvas.cgColor
         layer.addSublayer(playerLayer)
         Self.activateAudio()
 
@@ -60,7 +64,7 @@ final class LoopingPlayerView: UIView {
             queue: .main
         ) { [weak self] _ in
             self?.shouldPlay = true
-            self?.player?.play()
+            self?.resumeIfNeeded()
         })
     }
 

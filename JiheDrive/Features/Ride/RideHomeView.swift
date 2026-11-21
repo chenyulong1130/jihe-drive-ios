@@ -16,6 +16,7 @@ struct RideHomeView: View {
     @State private var selecting = false
     @State private var picked: Set<String> = []
     @State private var replayBundle: RideReplayBundle?
+    @State private var loadedKey: String?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -56,10 +57,10 @@ struct RideHomeView: View {
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.top, showsClose ? 10 : 8)
-                .padding(.bottom, selecting ? 168 : 120)
+                .padding(.bottom, listBottomPadding)
             }
             .background(Theme.groupedBackground)
-            .refreshable { await loadMonth() }
+            .refreshable { await loadMonth(force: true) }
 
             if selecting {
                 selectBar
@@ -67,7 +68,11 @@ struct RideHomeView: View {
         }
         .task(id: "\(model.selectedVehicle?.vinNo ?? "")-\(monthKey)-\(shouldLoadRides)") {
             guard shouldLoadRides else { return }
-            await loadMonth()
+            let key = "\(model.selectedVehicle?.vinNo ?? "")-\(monthKey)"
+            if loadedKey != key { loading = true }
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled, shouldLoadRides else { return }
+            await loadMonth(force: false)
         }
         .fullScreenCover(item: $selected) { track in
             if let vehicle = model.selectedVehicle {
@@ -132,6 +137,14 @@ struct RideHomeView: View {
         }
     }
 
+    /// 底栏胶囊大约 70pt + 安全区；全屏打开时没有 Tab，少留一点
+    private var listBottomPadding: CGFloat {
+        if selecting {
+            return showsClose ? 120 : 210
+        }
+        return showsClose ? 40 : 120
+    }
+
     private var selectBar: some View {
         HStack(spacing: 12) {
             Text("已选 \(picked.count) 条")
@@ -154,8 +167,8 @@ struct RideHomeView: View {
             .disabled(picked.isEmpty)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .padding(.bottom, 8)
+        .padding(.top, 12)
+        .padding(.bottom, showsClose ? 10 : 96)
         .background(.regularMaterial)
         .shadow(color: Color.black.opacity(0.08), radius: 16, y: -4)
     }
@@ -299,25 +312,28 @@ struct RideHomeView: View {
     }
 
     private func rideRow(_ track: RideTrack, checked: Bool) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             if selecting {
                 Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(checked ? Theme.brand : Theme.tertiary)
+                    .padding(.top, 2)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(timeRange(track))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.label)
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 thumb(track)
                     .frame(width: 68, height: 68)
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Spacer(minLength: 0)
                     Text(formatKm(track.mileage))
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(Theme.brand)
@@ -325,7 +341,6 @@ struct RideHomeView: View {
                     Text("km")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.secondary)
-                    Spacer(minLength: 0)
                     if !selecting {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .semibold))
@@ -426,8 +441,10 @@ struct RideHomeView: View {
         monthAnchor = next
     }
 
-    private func loadMonth() async {
+    private func loadMonth(force: Bool = true) async {
         guard let vehicle = model.selectedVehicle else { return }
+        let key = "\(vehicle.vinNo)-\(monthKey)"
+        if !force, loadedKey == key, !groups.isEmpty { return }
         loading = true
         errorText = nil
         defer { loading = false }
@@ -456,6 +473,7 @@ struct RideHomeView: View {
             return
         }
         groups = Self.buildGroups(days: days, tracks: tracks)
+        loadedKey = key
     }
 
     private static func tracksForDays(vin: String, days: [RideTrackService.MonthDay]) async -> [RideTrack] {

@@ -53,6 +53,8 @@ struct SettingsView: View {
         .animation(nil, value: appearance.resolvedScheme)
         .task(id: activeMainTab) {
             guard activeMainTab == .settings else { return }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            guard !Task.isCancelled, activeMainTab == .settings else { return }
             async let sign: Void = signin.refresh()
             async let profile: Void = profileStore.refresh()
             _ = await (sign, profile)

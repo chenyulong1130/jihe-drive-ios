@@ -142,6 +142,11 @@ final class SigninStore: ObservableObject {
         }
         communityRunning = true
         defer { communityRunning = false }
+        // 手动点「社区」也先查积分，已完成只同步状态
+        if await CommunityTask.resolveDone(userId: uid) {
+            communityDone = true
+            return
+        }
         let result = await CommunityTask.run(userId: uid)
         communityDone = result.success || CommunityTask.isDoneToday(userId: uid)
         if !result.success {

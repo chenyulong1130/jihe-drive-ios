@@ -17,8 +17,7 @@ struct StaggerIn: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 16)
+            .offset(y: shown ? 0 : 10)
             .onAppear {
                 withAnimation(Motion.softSpring.delay(Double(index) * 0.06)) {
                     shown = true

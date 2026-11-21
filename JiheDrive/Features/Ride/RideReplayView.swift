@@ -286,6 +286,7 @@ struct RideReplayView: View {
                 if speeds.count > 1 {
                     SpeedCurve(
                         speeds: speeds,
+                        times: clock.times,
                         progress: progress,
                         tint: Theme.brand
                     ) { value in
@@ -537,9 +538,10 @@ struct RideReplayView: View {
 
                     SpeedCurve(
                         speeds: speeds,
+                        times: clock.times,
                         progress: progress,
                         tint: Color(hex: 0x5B8CFF),
-                        height: 78
+                        height: 72
                     ) { value in
                         playing = false
                         progress = min(max(value, 0), 1)
@@ -568,30 +570,14 @@ struct RideReplayView: View {
                 }
                 .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
 
-                VStack(spacing: 4) {
-                    HStack(spacing: 0) {
-                        Text(timeText(progress))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .monospacedDigit()
-                        Text(" / \(timeText(1))")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .monospacedDigit()
-                        Spacer(minLength: 0)
-                        if speeds.count > 1 {
-                            Text(String(format: "%.0f km/h", currentSpeed))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color(hex: 0x7DD3FC))
-                                .monospacedDigit()
-                        }
-                    }
-
-                    Slider(value: $progress, in: 0...1) { editing in
-                        if editing { playing = false }
-                    }
-                    .tint(Color(hex: 0x5B8CFF))
-                }
+                ReplayTimeline(
+                    progress: $progress,
+                    playing: $playing,
+                    current: wallClock(progress),
+                    start: wallClock(0),
+                    end: wallClock(1),
+                    speed: speeds.count > 1 ? currentSpeed : nil
+                )
 
                 Button {
                     rate = rate >= 4 ? 1 : rate * 2
@@ -635,6 +621,16 @@ struct RideReplayView: View {
     // MARK: - 工具
 
     private func timeText(_ ratio: Double) -> String {
+        wallClock(ratio)
+    }
+
+    private func wallClock(_ ratio: Double) -> String {
+        if let date = ReplayClock.wallDate(track: track, progress: ratio) {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "HH:mm:ss"
+            return formatter.string(from: date)
+        }
         let elapsed = clock.duration * min(max(ratio, 0), 1)
         let total = Int(elapsed.rounded())
         let hours = total / 3600
@@ -801,8 +797,76 @@ private struct RoutePlane {
 // MARK: - 速度曲线
 
 /// 面积 + 折线，峰值处标数值，进度竖线跟着回放走，拖动可定位
+/// 时间轴：墙钟时刻 + 可拖进度，按真实时间戳走
+private struct ReplayTimeline: View {
+    @Binding var progress: Double
+    @Binding var playing: Bool
+    let current: String
+    let start: String
+    let end: String
+    var speed: Double?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 0) {
+                Text(current)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                if let speed {
+                    Text(String(format: "%.0f km/h", speed))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(hex: 0x7DD3FC))
+                        .monospacedDigit()
+                }
+            }
+
+            GeometryReader { geo in
+                let x = geo.size.width * CGFloat(min(max(progress, 0), 1))
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.16))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: 0x5B8CFF), Color(hex: 0x7DD3FC)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(8, x))
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 14, height: 14)
+                        .shadow(color: Color.black.opacity(0.35), radius: 3, y: 1)
+                        .offset(x: min(max(x - 7, 0), geo.size.width - 14))
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            playing = false
+                            progress = min(max(Double(value.location.x / max(geo.size.width, 1)), 0), 1)
+                        }
+                )
+            }
+            .frame(height: 14)
+
+            HStack {
+                Text(start)
+                Spacer(minLength: 0)
+                Text(end)
+            }
+            .font(.system(size: 10, weight: .medium, design: .rounded))
+            .foregroundStyle(.white.opacity(0.55))
+            .monospacedDigit()
+        }
+    }
+}
+
 private struct SpeedCurve: View {
     let speeds: [Double]
+    var times: [TimeInterval] = []
     let progress: Double
     var tint: Color = Theme.brand
     var height: CGFloat = 112
@@ -861,13 +925,20 @@ private struct SpeedCurve: View {
         .stroke(Theme.separator.opacity(0.6), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
     }
 
-    /// 顶部留 12pt 给峰值标签
+    /// 顶部留 12pt 给峰值标签；x 按真实时间戳铺，停车段会挤在一起
     private func laid(out size: CGSize) -> [CGPoint] {
         guard speeds.count > 1 else { return [] }
         let top: CGFloat = 14
         let usable = max(1, size.height - top)
+        let duration = max(times.last ?? 0, 1)
+        let useTime = times.count == speeds.count && duration > 0
         return speeds.enumerated().map { index, speed in
-            let x = size.width * CGFloat(index) / CGFloat(speeds.count - 1)
+            let x: CGFloat
+            if useTime {
+                x = size.width * CGFloat(times[index] / duration)
+            } else {
+                x = size.width * CGFloat(index) / CGFloat(speeds.count - 1)
+            }
             let ratio = min(max(speed / maxValue, 0), 1)
             let y = top + usable * (1 - CGFloat(ratio))
             return CGPoint(x: x, y: y)

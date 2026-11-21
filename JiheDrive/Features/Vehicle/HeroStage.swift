@@ -29,6 +29,8 @@ struct HeroStage: View {
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
     var tireFrontBar: Double? = nil
     var tireRearBar: Double? = nil
+    var tireFrontTemp: Double? = nil
+    var tireRearTemp: Double? = nil
     var topInset: CGFloat = 12
     var height: CGFloat = 470
     let onPickVehicle: () -> Void
@@ -446,15 +448,6 @@ struct HeroStage: View {
 
     private var statusRow: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(vehicle.isOnline ? Theme.green : secondaryText.opacity(0.55))
-                    .frame(width: 6, height: 6)
-                Text(vehicle.isOnline ? "在线" : "离线")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(vehicle.isOnline ? Theme.green : secondaryText)
-            }
-
             signalBars
 
             if vehicle.isCharging {
@@ -512,12 +505,12 @@ struct HeroStage: View {
             } label: {
                 HStack(spacing: 0) {
                     if let front {
-                        tireCell(title: "前轮", bar: front)
+                        tireCell(title: "前轮", bar: front, temp: tireFrontTemp)
                     } else {
                         tireUnbound(title: "前轮")
                     }
                     if let rear {
-                        tireCell(title: "后轮", bar: rear)
+                        tireCell(title: "后轮", bar: rear, temp: tireRearTemp)
                     } else {
                         tireUnbound(title: "后轮")
                     }
@@ -544,7 +537,7 @@ struct HeroStage: View {
         return value
     }
 
-    private func tireCell(title: String, bar: Double) -> some View {
+    private func tireCell(title: String, bar: Double, temp: Double?) -> some View {
         VStack(spacing: 1) {
             Text(title)
                 .font(.system(size: 9, weight: .semibold))
@@ -560,6 +553,13 @@ struct HeroStage: View {
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(secondaryText)
                     .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
+                if let temp, temp > -40, temp < 120 {
+                    Text(String(format: "%.0f°", temp))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(secondaryText)
+                        .monospacedDigit()
+                        .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
+                }
             }
         }
         .frame(maxWidth: .infinity)

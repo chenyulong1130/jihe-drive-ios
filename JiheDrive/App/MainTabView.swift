@@ -108,15 +108,12 @@ struct MainTabView: View {
         // travel：该页相对视口的水平偏移，0 表示正中对齐
         let travel: CGFloat = CGFloat(i - index) * width + dragOffset
         let progress: CGFloat = min(1, abs(travel) / width)
-        // 只做轻微淡出，不再 scale——缩放+位移叠在一起最容易抖
-        let fade: CGFloat = 1 - progress * 0.18
-
         pageContent(item)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .frame(width: width)
+            .background(Theme.groupedBackground)
             .clipShape(HorizontalClip())
-            .opacity(fade)
-            .allowsHitTesting(progress < 0.5)
+            .allowsHitTesting(progress < 0.45)
     }
 
     @ViewBuilder
@@ -303,8 +300,8 @@ extension EnvironmentValues {
 }
 
 extension Motion {
-    /// 翻页：高阻尼、几乎无过冲，切菜单不再「一抖」
-    static let page: Animation = .spring(response: 0.32, dampingFraction: 0.92)
-    /// 保留旧名给别处，避免编译炸；阻尼同样抬高
+    /// 翻页：略拉长、高阻尼，跟手结束后更顺，少弹一下
+    static let page: Animation = .interactiveSpring(response: 0.42, dampingFraction: 0.90, blendDuration: 0.12)
+    /// 保留旧名给别处，避免编译炸
     static let liqid: Animation = page
 }
