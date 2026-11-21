@@ -25,6 +25,9 @@ enum WidgetLiveSync {
     static func refresh(existing: Existing? = nil, mode: Mode = .timeline) async -> WidgetSnap {
         hydrateSession()
         guard ZeehoClient.shared.isLoggedIn else {
+            if let cached = WidgetSnapshot.read(), cached.loggedIn {
+                return cached
+            }
             let empty = WidgetSnap()
             WidgetSnapshot.write(empty)
             reload()
@@ -251,6 +254,15 @@ enum WidgetLiveSync {
             }
         }
         if let picked, WidgetSnapshot.sameVin(picked.vinNo, vin) { return picked }
+        if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicle/list") {
+            let list = Vehicle.list(from: res)
+            if let hit = list.first(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) {
+                return (picked ?? hit).merged(with: hit)
+            }
+            if picked == nil, hint == nil, let first = list.first {
+                return first
+            }
+        }
         return WidgetSnapshot.sameVin(hint?.vinNo, vin) ? hint : nil
     }
 

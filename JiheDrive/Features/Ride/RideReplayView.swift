@@ -72,22 +72,7 @@ struct RideReplayView: View {
     // MARK: - 页面
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Theme.groupedBackground.ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    header
-                    routeCard
-                    metricsCard
-                    placeCard
-                    footnote
-                }
-                .padding(.horizontal, Theme.page)
-                .padding(.top, 8)
-                .padding(.bottom, 28)
-            }
-        }
+        fullMap
         .task(id: playing) {
             guard playing else { return }
             if progress >= 1 { progress = 0 }
@@ -107,14 +92,12 @@ struct RideReplayView: View {
                 progress = next
             }
         }
-        .fullScreenCover(isPresented: $showFullMap) { fullMap }
-        .task(id: "\(showFullMap)-\(Int(progress * 40))") {
-            guard showFullMap else { return }
+        .task(id: Int(progress * 40)) {
             await refreshLiveAddress()
         }
     }
 
-    private var cinematic: Bool { prefer3D && (playing || progress > 0.002) }
+    private var cinematic: Bool { prefer3D && replayVehicleImage != nil }
 
     private var replayVehicleImage: UIImage? {
         HeroAssetCache.photo(for: vehicle.vinNo)
@@ -552,7 +535,7 @@ struct RideReplayView: View {
     private var fullMapChrome: some View {
         HStack(spacing: 10) {
             Button {
-                showFullMap = false
+                dismiss()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .bold))

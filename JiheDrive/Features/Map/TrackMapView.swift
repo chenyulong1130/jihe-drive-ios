@@ -23,7 +23,7 @@ struct TrackMapView: View {
                 recenterToken: recenterToken,
                 vehicleImage: vehicleImage ?? ResourceCache.cachedImage(vehicle.imageURL) ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo),
                 vehicleImageURL: vehicle.imageURL,
-                userUsesVehicleModel: true
+                userUsesVehicleModel: false
             )
                 .ignoresSafeArea()
 

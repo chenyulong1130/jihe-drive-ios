@@ -38,13 +38,9 @@ struct SnapshotProvider: TimelineProvider {
         var copy = snap
         copy.imageData = nil
         guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return copy }
-        guard !WidgetSnapshot.sameVin(copy.vin, wanted) else { return copy }
-        copy.vin = wanted
-        copy.soc = 0
-        copy.rangeKm = 0
-        copy.charging = false
-        copy.todayKm = 0
-        copy.todayMin = 0
+        if copy.vin.isEmpty {
+            copy.vin = wanted
+        }
         return copy
     }
 

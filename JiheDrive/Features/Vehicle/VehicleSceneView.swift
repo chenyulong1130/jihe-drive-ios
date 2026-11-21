@@ -9,6 +9,7 @@ struct VehicleSceneView: UIViewRepresentable {
     var interactive: Bool = true
     var autoSpin: Bool = false
     var spinSpeed: Float = 0.22
+    var resetToken: Int = 0
     var onDrag: ((Bool) -> Void)? = nil
 
     func makeUIView(context: Context) -> SCNView {
@@ -25,6 +26,7 @@ struct VehicleSceneView: UIViewRepresentable {
         view.isJitteringEnabled = false
 
         context.coordinator.onDrag = onDrag
+        context.coordinator.resetToken = resetToken
         context.coordinator.attach(view: view, autoSpin: autoSpin, speed: spinSpeed)
         if interactive { context.coordinator.installGestures() }
         return view
@@ -36,6 +38,10 @@ struct VehicleSceneView: UIViewRepresentable {
             view.scene = scene
             context.coordinator.attach(view: view, autoSpin: autoSpin, speed: spinSpeed)
             if interactive { context.coordinator.installGestures() }
+        }
+        if context.coordinator.resetToken != resetToken {
+            context.coordinator.resetToken = resetToken
+            context.coordinator.resetHome()
         }
     }
 
@@ -49,6 +55,7 @@ struct VehicleSceneView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         var onDrag: ((Bool) -> Void)?
+        var resetToken = 0
         private weak var view: SCNView?
         private var orbit: SCNNode?
         private var rig: SCNNode?
@@ -57,6 +64,9 @@ struct VehicleSceneView: UIViewRepresentable {
         private var azimuth: Float = 0
         private var elevation: Float = 0.15
         private var distance: Float = 2.5
+        private var homeAzimuth: Float = 0
+        private var homeElevation: Float = 0.15
+        private var homeDistance: Float = 2.5
         private var autoSpin = false
         private var spinSpeed: Float = 0.22
         private var idleUntil: CFTimeInterval = 0
@@ -68,6 +78,9 @@ struct VehicleSceneView: UIViewRepresentable {
             orbit = view.scene?.rootNode.childNode(withName: "orbit", recursively: true)
             rig = orbit?.childNode(withName: "rig", recursively: false)
             azimuth = (orbit?.eulerAngles.y ?? 0) + 0.18
+            homeAzimuth = azimuth
+            homeElevation = elevation
+            homeDistance = distance
             apply()
             if autoSpin {
                 start()
@@ -76,6 +89,13 @@ struct VehicleSceneView: UIViewRepresentable {
                 view.rendersContinuously = false
                 view.preferredFramesPerSecond = 30
             }
+        }
+
+        func resetHome() {
+            azimuth = homeAzimuth
+            elevation = homeElevation
+            distance = homeDistance
+            apply()
         }
 
         func installGestures() {

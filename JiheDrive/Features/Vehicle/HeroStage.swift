@@ -52,8 +52,11 @@ struct HeroStage: View {
     var onInteract: ((Bool) -> Void)? = nil
     /// 多车才显示左上角切换箭头
     var canSwitchVehicle: Bool = true
+    /// 递增后 3D 回到初始角度并重新显示胎压标注
+    var cameraReset: Int = 0
 
     @State private var glbRevealed = false
+    @State private var modelRotated = false
     private var glbVisible: Bool { glbRevealed || modelGLBCached }
 
     private var onDark: Bool { !selection.isDefault || videoURL != nil }
@@ -67,11 +70,11 @@ struct HeroStage: View {
                 .allowsHitTesting(false)
                 .overlay(alignment: .bottom) {
                     LinearGradient(
-                        colors: [Color.clear, Theme.groupedBackground.opacity(0.35), Theme.groupedBackground],
+                        colors: [Color.clear, Theme.groupedBackground.opacity(0.28), Theme.groupedBackground],
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: hasTire ? 110 : 36)
+                    .frame(height: 36)
                     .allowsHitTesting(false)
                 }
 
@@ -83,17 +86,19 @@ struct HeroStage: View {
                     .padding(.top, 10)
                 statusRow
                     .padding(.top, 10)
-                Spacer(minLength: hasTire ? 12 : 0)
+                Spacer(minLength: 0)
                     .allowsHitTesting(false)
-                tireStrip
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
-            .padding(.bottom, hasTire ? 10 : 4)
+            .padding(.bottom, 4)
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
         .clipped()
+        .onChange(of: cameraReset) { _, _ in
+            modelRotated = false
+        }
     }
 
     // MARK: - 背景
@@ -221,10 +226,9 @@ struct HeroStage: View {
 
     /// 车图顶距：躲开顶栏 + 电量，把车往下压，吃掉底部空白
     private var carTopPad: CGFloat { topInset + 96 }
-    /// 有胎压时把车图抬高，避免压在读数上
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
-    /// 模型和胎压重叠一段，靠底部虚化过渡，不再硬切开
-    private var carBottomPad: CGFloat { hasTire ? 6 : 0 }
+    private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
+    private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
 
     @ViewBuilder
     private var carLayer: some View {
@@ -240,16 +244,22 @@ struct HeroStage: View {
                                     glbFile: modelGLBFile,
                                     interactive: true,
                                     autoRotate: false,
-                                    onDrag: onInteract,
+                                    resetToken: cameraReset,
+                                    onDrag: { dragging in
+                                        if dragging { modelRotated = true }
+                                        onInteract?(dragging)
+                                    },
+                                    onOrbitChanged: { rotated in
+                                        modelRotated = rotated
+                                    },
                                     onReady: { glbRevealed = true }
                                 )
                                 .opacity(glbVisible ? 1 : 0)
                             }
                         }
                         .padding(.top, carTopPad)
-                        .padding(.bottom, carBottomPad)
                         .mask(carFadeMask)
-                        .overlay(alignment: .bottom) { tireBlend }
+                        .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
                         .onAppear { if modelGLBCached { glbRevealed = true } }
                         .onChange(of: modelGLBFile) { _, _ in
@@ -263,24 +273,25 @@ struct HeroStage: View {
                             interactive: true,
                             autoSpin: false,
                             spinSpeed: 0,
-                            onDrag: onInteract
+                            resetToken: cameraReset,
+                            onDrag: { dragging in
+                                if dragging { modelRotated = true }
+                                onInteract?(dragging)
+                            }
                         )
                     }
                     .padding(.top, carTopPad)
-                    .padding(.bottom, carBottomPad)
                     .mask(carFadeMask)
-                    .overlay(alignment: .bottom) { tireBlend }
+                    .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
-                        .padding(.bottom, carBottomPad)
                         .mask(carFadeMask)
-                        .overlay(alignment: .bottom) { tireBlend }
+                        .overlay { tireMarks }
                         .allowsHitTesting(false)
                 }
             }
-            .offset(x: -28)
 
             // 坐垫：叠在车图右上（对齐 Flutter / 小程序），不进顶栏
             Button(action: onOpenCushion) {
@@ -510,14 +521,12 @@ struct HeroStage: View {
 
     // MARK: - 胎压
 
-    /// 车身底部虚化，和胎压条叠在一起
     private var carFadeMask: some View {
         LinearGradient(
             stops: [
                 .init(color: .black, location: 0),
-                .init(color: .black, location: hasTire ? 0.58 : 0.9),
-                .init(color: .black.opacity(0.45), location: hasTire ? 0.78 : 0.96),
-                .init(color: .black.opacity(0.12), location: hasTire ? 0.9 : 0.99),
+                .init(color: .black, location: 0.9),
+                .init(color: .black.opacity(0.4), location: 0.97),
                 .init(color: .clear, location: 1)
             ],
             startPoint: .top,
@@ -525,59 +534,50 @@ struct HeroStage: View {
         )
     }
 
-    /// 模型底部再铺一层背景色渐隐，做出和胎压的虚化过渡
+    /// 直接标在车轮上，无底栏。转动 3D 时隐藏。
     @ViewBuilder
-    private var tireBlend: some View {
-        if hasTire {
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: Theme.groupedBackground.opacity(0.25), location: 0.4),
-                    .init(color: Theme.groupedBackground.opacity(0.72), location: 0.78),
-                    .init(color: Theme.groupedBackground, location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 64)
-            .allowsHitTesting(false)
+    private var tireMarks: some View {
+        if showTireMarks {
+            GeometryReader { geo in
+                ZStack {
+                    if let front = validBar(frontBar) {
+                        Button {
+                            onOpenTire?()
+                        } label: {
+                            TirePin(
+                                text: tireCaption(bar: front, temp: tireFrontTemp),
+                                tint: tireTint(front),
+                                leader: .trailing
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .position(x: geo.size.width * 0.20, y: geo.size.height * 0.62)
+                    }
+                    if let rear = validBar(rearBar) {
+                        Button {
+                            onOpenTire?()
+                        } label: {
+                            TirePin(
+                                text: tireCaption(bar: rear, temp: tireRearTemp),
+                                tint: tireTint(rear),
+                                leader: .leading
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .position(x: geo.size.width * 0.80, y: geo.size.height * 0.58)
+                    }
+                }
+            }
+            .transition(.opacity)
+            .allowsHitTesting(onOpenTire != nil)
         }
     }
 
-    @ViewBuilder
-    private var tireStrip: some View {
-        let front = validBar(frontBar)
-        let rear = validBar(rearBar)
-
-        // 无数据整条不展示；有一侧读数时另一侧显示「未绑定」
-        if front != nil || rear != nil {
-            Button {
-                onOpenTire?()
-            } label: {
-                HStack(spacing: 0) {
-                    if let front {
-                        tireCell(title: "前轮", bar: front, temp: tireFrontTemp)
-                    } else {
-                        tireUnbound(title: "前轮")
-                    }
-                    if let rear {
-                        tireCell(title: "后轮", bar: rear, temp: tireRearTemp)
-                    } else {
-                        tireUnbound(title: "后轮")
-                    }
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 8)
-                .background {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .opacity(0.72)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
-            .disabled(onOpenTire == nil)
+    private func tireCaption(bar: Double, temp: Double?) -> String {
+        if let temp, temp > -40, temp < 120 {
+            return String(format: "%.1fbar %.0f°C", bar, temp)
         }
+        return String(format: "%.1fbar", bar)
     }
 
     private var frontBar: Double? {
@@ -594,60 +594,59 @@ struct HeroStage: View {
         return value
     }
 
-    private func tireCell(title: String, bar: Double, temp: Double?) -> some View {
-        VStack(spacing: 1) {
-            Text(title)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(secondaryText)
-                .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(String(format: "%.1f", bar))
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(tireTint(bar))
-                    .monospacedDigit()
-                    .shadow(color: Color.black.opacity(onDark ? 0.65 : 0.22), radius: 3, y: 1)
-                Text("bar")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(secondaryText)
-                    .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
-                if let temp, temp > -40, temp < 120 {
-                    Text(String(format: "%.0f°", temp))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(secondaryText)
-                        .monospacedDigit()
-                        .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .multilineTextAlignment(.center)
-    }
-
-    private func tireUnbound(title: String) -> some View {
-        VStack(spacing: 1) {
-            Text(title)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(secondaryText)
-                .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
-            Text("未绑定")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(secondaryText.opacity(0.9))
-                .shadow(color: Color.black.opacity(onDark ? 0.55 : 0.18), radius: 2, y: 1)
-        }
-        .frame(maxWidth: .infinity)
-        .multilineTextAlignment(.center)
-    }
-
     private func tireTint(_ bar: Double) -> Color {
         if bar < 1.8 { return Theme.red }
         if bar < 2.1 || bar > 2.9 { return Theme.orange }
-        return Theme.green
+        return Color(hex: 0x1AA7B8)
     }
 
     private var heroDrag: some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { _ in onInteract?(true) }
             .onEnded { _ in onInteract?(false) }
+    }
+}
+
+/// 贴在轮胎旁的标注：白底描边 + 指引线，无整条背景层
+private struct TirePin: View {
+    enum Leader { case leading, trailing }
+
+    let text: String
+    var tint: Color = Color(hex: 0x1AA7B8)
+    var leader: Leader = .trailing
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if leader == .leading { stem }
+            Text(text)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.white.opacity(0.94))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(tint, lineWidth: 1.4)
+                )
+            if leader == .trailing { stem }
+        }
+        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
+    }
+
+    private var stem: some View {
+        HStack(spacing: 0) {
+            if leader == .leading {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Rectangle().fill(tint).frame(width: 18, height: 1.5)
+            } else {
+                Rectangle().fill(tint).frame(width: 18, height: 1.5)
+                Circle().fill(tint).frame(width: 7, height: 7)
+            }
+        }
     }
 }
 

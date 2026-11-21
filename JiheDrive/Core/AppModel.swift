@@ -196,7 +196,10 @@ final class AppModel: ObservableObject {
     func loadTire(vin: String) async {
         let reading = await TireService.fetch(vin: vin)
         guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
-        tire = reading
+        // 接口失败时保留旧读数，避免下拉刷新把胎压刷没
+        if let reading {
+            tire = reading
+        }
     }
 
     /// 车辆首页接口：胎压、电压、温度、3D 模型这类细节只有这里带

@@ -34,6 +34,8 @@ struct VehicleView: View {
     @State private var showReplay = false
     @State private var showMessages = false
     @State private var pinningHero = false
+    @State private var cameraReset = 0
+    @State private var didResetForScroll = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -44,9 +46,26 @@ struct VehicleView: View {
                     ScrollView(showsIndicators: false) {
                         content(vehicle)
                             .padding(.bottom, 128)
+                            .background {
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: VehicleScrollOffsetKey.self,
+                                        value: geo.frame(in: .named("vehicleHome")).minY
+                                    )
+                                }
+                            }
                     }
+                    .coordinateSpace(name: "vehicleHome")
                     .scrollDisabled(pinningHero)
                     .refreshable { await reloadPage() }
+                    .onPreferenceChange(VehicleScrollOffsetKey.self) { y in
+                        if y < -36, !didResetForScroll {
+                            didResetForScroll = true
+                            cameraReset += 1
+                        } else if y > -8 {
+                            didResetForScroll = false
+                        }
+                    }
                 } else if model.loading {
                     loadingState
                 } else {
@@ -153,6 +172,11 @@ struct VehicleView: View {
         .onChange(of: model.selectedVehicle?.longitude) { _, _ in
             Task { await resolveAddressIfNeeded() }
         }
+        .onChange(of: activeMainTab) { _, tab in
+            if tab == .vehicle {
+                cameraReset += 1
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             // 回前台轻量刷新，不整页重载 3D/视频，避免闪白
@@ -188,8 +212,7 @@ struct VehicleView: View {
             tireFrontTemp: model.tire?.frontTemp,
             tireRearTemp: model.tire?.rearTemp,
             topInset: bar + 8,
-            height: max(390, fullHeight * 0.46)
-                + ((model.tire?.hasData == true) ? 42 : 0),
+            height: max(390, fullHeight * 0.46),
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -220,7 +243,8 @@ struct VehicleView: View {
                 showBattery = true
             },
             onInteract: { pinningHero = $0 },
-            canSwitchVehicle: model.vehicles.count > 1
+            canSwitchVehicle: model.vehicles.count > 1,
+            cameraReset: cameraReset
         )
     }
 
@@ -317,15 +341,18 @@ struct VehicleView: View {
     }
 
     private func reloadPage() async {
-        // 只刷车辆数据，不重载主题 / 3D / 视频
-        await model.refreshQuiet()
+        await model.loadVehicles()
         guard let vin = model.selectedVehicle?.vinNo else { return }
-        await model.loadTire(vin: vin)
+        async let battery: Void = model.loadBattery(vin: vin, quiet: true)
+        async let detail: Void = model.loadDetail(vin: vin)
+        async let tire: Void = model.loadTire(vin: vin)
+        _ = await (battery, detail, tire)
         await loadRideSummary(vin: vin)
         await resolveAddressIfNeeded()
         await signin.syncWidget(model: model, ride: rideExtra)
         await messages.refresh()
         syncChargeIsland()
+        cameraReset += 1
     }
 
     private func syncChargeIsland() {
@@ -978,6 +1005,13 @@ struct VehicleView: View {
             try? await Task.sleep(nanoseconds: 2_200_000_000)
             withAnimation(Motion.quick) { toast = nil }
         }
+    }
+}
+
+private struct VehicleScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

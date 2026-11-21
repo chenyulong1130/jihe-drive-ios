@@ -8,12 +8,15 @@ struct ModelViewerWebView: UIViewRepresentable {
     let glbFile: URL
     var interactive: Bool = true
     var autoRotate: Bool = false
+    var resetToken: Int = 0
     var onDrag: ((Bool) -> Void)? = nil
+    var onOrbitChanged: ((Bool) -> Void)? = nil
     var onReady: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
+        configuration.userContentController.add(context.coordinator, name: "orbit")
         configuration.setURLSchemeHandler(context.coordinator.scheme, forURLScheme: ModelSchemeHandler.scheme)
 
         let view = WKWebView(frame: .zero, configuration: configuration)
@@ -33,7 +36,9 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.addGestureRecognizer(pan)
 
         context.coordinator.onDrag = onDrag
+        context.coordinator.onOrbitChanged = onOrbitChanged
         context.coordinator.onReady = onReady
+        context.coordinator.resetToken = resetToken
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
         return view
     }
@@ -41,18 +46,31 @@ struct ModelViewerWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {
         view.isUserInteractionEnabled = interactive
         context.coordinator.onDrag = onDrag
+        context.coordinator.onOrbitChanged = onOrbitChanged
         context.coordinator.onReady = onReady
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
+        if context.coordinator.resetToken != resetToken {
+            context.coordinator.resetToken = resetToken
+            view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()") { _, _ in
+                DispatchQueue.main.async { context.coordinator.onOrbitChanged?(false) }
+            }
+        }
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "orbit")
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler {
         let scheme = ModelSchemeHandler()
         var onDrag: ((Bool) -> Void)?
+        var onOrbitChanged: ((Bool) -> Void)?
         var onReady: (() -> Void)?
+        var resetToken = 0
         private var loadedFile: URL?
 
         private var loadedInteractive: Bool?
@@ -92,6 +110,21 @@ struct ModelViewerWebView: UIViewRepresentable {
                 self?.onReady?()
             }
         }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "orbit" else { return }
+            let rotated: Bool
+            if let flag = message.body as? Bool {
+                rotated = flag
+            } else if let map = message.body as? [String: Any], let flag = map["rotated"] as? Bool {
+                rotated = flag
+            } else {
+                rotated = true
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.onOrbitChanged?(rotated)
+            }
+        }
     }
 }
 
@@ -112,8 +145,8 @@ enum ModelViewerAsset {
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
         let orbit = "-6.5deg 83.06deg 3.086m"
-        // 相机看向车身偏右一点，模型在画面里略靠左
-        let target = "0.08m auto auto"
+        // 只把 3D 稍微往左一点，2D 车图保持居中
+        let target = "0.03m auto auto"
         // 可拖拽时放宽方位角；仰角仍锁在约 83°，避免翻车底
         let minOrbit = interactive ? "auto 70deg 2.2m" : "auto 83.06deg 2.53m"
         let maxOrbit = interactive ? "auto 95deg 4.2m" : "auto 83.06deg 3.86m"
@@ -163,9 +196,25 @@ enum ModelViewerAsset {
         </model-viewer>
         <script>
           const viewer = document.getElementById('viewer');
+          const DEFAULT_ORBIT = '\(orbit)';
+          const DEFAULT_TARGET = '\(target)';
           viewer.addEventListener('load', () => {
             if (!viewer.hasAttribute('auto-rotate') && viewer.pause) viewer.pause();
           });
+          viewer.addEventListener('camera-change', (ev) => {
+            const source = ev && ev.detail && ev.detail.source;
+            if (source === 'user-interaction' && window.webkit && window.webkit.messageHandlers.orbit) {
+              window.webkit.messageHandlers.orbit.postMessage({ rotated: true });
+            }
+          });
+          window.jhResetOrbit = () => {
+            viewer.cameraOrbit = DEFAULT_ORBIT;
+            viewer.cameraTarget = DEFAULT_TARGET;
+            if (viewer.jumpCameraToGoal) viewer.jumpCameraToGoal();
+            if (window.webkit && window.webkit.messageHandlers.orbit) {
+              window.webkit.messageHandlers.orbit.postMessage({ rotated: false });
+            }
+          };
         </script>
         </body>
         </html>

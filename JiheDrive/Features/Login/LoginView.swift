@@ -1,8 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 弹窗式登录：轻遮罩 + 居中偏上的浮动卡片，卡片整体在键盘上方。
-/// 输入框用 UIKit（LoginKitField），不走 SwiftUI TextField，避免整页被键盘顶没。
+/// 整页登录：顶部品牌区 + 白色表单卡。输入框用 UIKit，避免键盘把页面顶没。
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
 
@@ -34,32 +33,49 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Theme.groupedBackground
-                .ignoresSafeArea()
+            loginBackdrop
                 .onTapGesture { hideKeyboard() }
 
-            Color.black.opacity(0.12)
-                .ignoresSafeArea()
-                .onTapGesture { hideKeyboard() }
+            VStack(spacing: 0) {
+                header
+                    .padding(.top, 28)
+                    .padding(.bottom, 26)
 
-            dialog
-                .padding(.horizontal, 26)
-                .padding(.bottom, 200)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                dialog
+                    .padding(.horizontal, 22)
+
+                Spacer(minLength: 16)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, 36)
         }
         .locksKeyboardAvoidance()
         .onAppear { KeyboardAvoidance.setKeyboardRegion(false) }
         .onDisappear { KeyboardAvoidance.setKeyboardRegion(true) }
     }
 
-    // MARK: - 弹窗卡片
+    private var loginBackdrop: some View {
+        ZStack(alignment: .top) {
+            Theme.groupedBackground
+            LinearGradient(
+                colors: [
+                    Theme.brand.opacity(0.18),
+                    Theme.brand.opacity(0.05),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 340)
+        }
+        .ignoresSafeArea()
+    }
+
+    // MARK: - 表单卡
 
     private var dialog: some View {
         VStack(spacing: 0) {
-            header
-
             modeSwitch
-                .padding(.top, 18)
 
             Group {
                 if mode == .phone {
@@ -88,34 +104,38 @@ struct LoginView: View {
             }
             .padding(.top, 16)
         }
-        .padding(18)
-        .frame(maxWidth: 380)
+        .padding(20)
+        .frame(maxWidth: 400)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Theme.surface)
-                .shadow(color: Theme.softShadow, radius: 28, x: 0, y: 10)
+                .shadow(color: Theme.softShadow, radius: 32, x: 0, y: 14)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Theme.separator.opacity(0.7), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.7), lineWidth: 0.8)
         )
     }
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                Circle()
+                    .fill(Theme.surface)
+                    .frame(width: 86, height: 86)
+                    .shadow(color: Theme.cardShadow, radius: 22, y: 6)
+                Circle()
                     .fill(Theme.brand.opacity(0.12))
-                    .frame(width: 48, height: 48)
+                    .frame(width: 62, height: 62)
                 Image(systemName: "bolt.car.fill")
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(Theme.brand)
             }
             Text("极核智行")
-                .font(.system(size: 20, weight: .bold))
+                .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(Theme.label)
             Text("验证手机号，或粘贴 Token 进入")
-                .font(.system(size: 12.5, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.secondary)
         }
         .frame(maxWidth: .infinity)
