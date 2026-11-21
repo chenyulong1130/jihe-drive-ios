@@ -74,7 +74,7 @@ final class AppearanceStore: ObservableObject {
         let canvas = dark ? Self.darkCanvas : Self.lightCanvas
         UIView.performWithoutAnimation {
             for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
-                for window in scene.windows {
+                for window in scene.windows where window.rootViewController != nil {
                     Self.paint(window, style: style, canvas: canvas, setStyle: setStyle)
                 }
             }

@@ -22,6 +22,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
+        .keyboardAvoidanceLogin(!model.isLoggedIn)
         .environmentObject(model)
         .environmentObject(themeStore)
         .environmentObject(wallpaperStore)
@@ -42,11 +43,11 @@ struct RootView: View {
         }
         .onAppear {
             appearance.applyToWindows(setStyle: true)
-            LocationPermissionRequester.shared.request()
-            messages.requestPermission()
         }
         .task(id: model.isLoggedIn) {
             guard model.isLoggedIn else { return }
+            LocationPermissionRequester.shared.request()
+            messages.requestPermission()
             await messages.refresh()
             // 前台约 2 分钟轮询消息（对齐几何面板 10 分钟偏慢，收件箱要更勤）
             while !Task.isCancelled {
@@ -65,7 +66,15 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 appearance.applyToWindows(setStyle: false)
+                if !model.isLoggedIn {
+                    KeyboardAvoidance.recoverLogin()
+                }
+            } else if !model.isLoggedIn {
+                KeyboardAvoidance.dismiss()
             }
+        }
+        .onChange(of: model.isLoggedIn) { _, loggedIn in
+            KeyboardAvoidance.setLoginMode(!loggedIn)
         }
         .animation(nil, value: scenePhase)
     }

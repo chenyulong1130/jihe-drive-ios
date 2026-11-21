@@ -3,6 +3,7 @@ import UIKit
 
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     private enum Mode: String, CaseIterable, Identifiable {
         case phone
@@ -44,63 +45,67 @@ struct LoginView: View {
         ZStack {
             AmbientBackground()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 40)
+            VStack(spacing: 0) {
+                emblem.staggerIn(0)
 
-                    emblem.staggerIn(0)
+                Text("极核智行")
+                    .font(Theme.largeTitle)
+                    .foregroundStyle(Theme.label)
+                    .padding(.top, 20)
+                    .staggerIn(1)
 
-                    Text("极核智行")
-                        .font(Theme.largeTitle)
-                        .foregroundStyle(Theme.label)
-                        .padding(.top, 20)
-                        .staggerIn(1)
+                modeSwitch
+                    .padding(.top, 26)
+                    .staggerIn(2)
 
-                    modeSwitch
-                        .padding(.top, 26)
-                        .staggerIn(2)
-
-                    Group {
-                        if mode == .phone {
-                            phoneForm
-                        } else {
-                            tokenForm
-                        }
+                Group {
+                    if mode == .phone {
+                        phoneForm
+                    } else {
+                        tokenForm
                     }
-                    .padding(.top, 12)
-                    .staggerIn(3)
-
-                    if let message {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.circle.fill")
-                                .font(.system(size: 11))
-                            Text(message)
-                                .font(.system(size: 12, weight: .medium))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundStyle(Theme.red)
-                        .padding(.top, 12)
-                        .transition(.opacity)
-                    }
-
-                    PrimaryButton(
-                        label: buttonTitle,
-                        icon: submitting ? nil : "arrow.right",
-                        enabled: canSubmit,
-                        loading: submitting
-                    ) {
-                        submit()
-                    }
-                    .padding(.top, 18)
-                    .staggerIn(4)
-
-                    Spacer(minLength: 40)
                 }
-                .padding(.horizontal, 22)
+                .padding(.top, 12)
+                .staggerIn(3)
+
+                if let message {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 11))
+                        Text(message)
+                            .font(.system(size: 12, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.red)
+                    .padding(.top, 12)
+                    .transition(.opacity)
+                }
+
+                PrimaryButton(
+                    label: buttonTitle,
+                    icon: submitting ? nil : "arrow.right",
+                    enabled: canSubmit,
+                    loading: submitting
+                ) {
+                    submit()
+                }
+                .padding(.top, 18)
+                .staggerIn(4)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 36)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .ignoresSafeArea(.keyboard)
+        .onTapGesture { focus = nil }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                focus = nil
             }
         }
-        .onTapGesture { focus = nil }
     }
 
     private var buttonTitle: String {
@@ -173,7 +178,8 @@ struct LoginView: View {
 
                 TextField("手机号", text: $phone)
                     .keyboardType(.numberPad)
-                    .textContentType(.telephoneNumber)
+                    .textContentType(.none)
+                    .autocorrectionDisabled()
                     .focused($focus, equals: .phone)
                     .font(.system(size: 17))
                     .foregroundStyle(Theme.label)
@@ -208,6 +214,8 @@ struct LoginView: View {
 
                 TextField("短信验证码", text: $code)
                     .keyboardType(.numberPad)
+                    .textContentType(.none)
+                    .autocorrectionDisabled()
                     .focused($focus, equals: .code)
                     .font(.system(size: 17))
                     .foregroundStyle(Theme.label)
