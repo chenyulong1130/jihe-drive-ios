@@ -26,27 +26,16 @@ final class LockController: UIViewController {
         view.backgroundColor = .clear
 
         let center = NotificationCenter.default
-        observers.append(center.addObserver(
-            forName: UIResponder.keyboardWillChangeFrameNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.pin()
-        })
-        observers.append(center.addObserver(
-            forName: UIResponder.keyboardWillShowNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.pin()
-        })
-        observers.append(center.addObserver(
-            forName: UIResponder.keyboardDidShowNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.pin()
-        })
+        let names: [Notification.Name] = [
+            UIResponder.keyboardWillChangeFrameNotification,
+            UIResponder.keyboardWillShowNotification,
+            UIResponder.keyboardDidShowNotification,
+        ]
+        for name in names {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.pin()
+            })
+        }
     }
 
     deinit {
@@ -72,13 +61,9 @@ final class LockController: UIViewController {
         var node: UIViewController? = self
         while let current = node {
             current.additionalSafeAreaInsets.bottom = 0
-            if #available(iOS 16.4, *) {
-                current.safeAreaRegions = .container
-            }
+            disableKeyboardRegion(on: current)
             reset(current.view)
-            if let parentView = current.parent?.view {
-                reset(parentView)
-            }
+            reset(current.parent?.view)
             node = current.parent
         }
         if let window = view.window {
@@ -87,15 +72,24 @@ final class LockController: UIViewController {
         }
     }
 
+    private func disableKeyboardRegion(on vc: UIViewController) {
+        // UIHostingController.safeAreaRegions（iOS 16.4+），普通 VC 没有这个属性
+        let sel = NSSelectorFromString("setSafeAreaRegions:")
+        guard vc.responds(to: sel) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, UInt) -> Void
+        let imp = class_getMethodImplementation(object_getClass(vc), sel)
+        guard let imp else { return }
+        let setter = unsafeBitCast(imp, to: Setter.self)
+        // UISafeAreaRegions.container == 1，去掉 .keyboard
+        setter(vc, sel, 1)
+    }
+
     private func reset(_ view: UIView?) {
         guard let view else { return }
         if view.transform != .identity {
             view.transform = .identity
         }
         if abs(view.frame.origin.y) > 0.5 {
-            view.frame.origin.y = 0
-        }
-        if let layerY = view.layer.presentation()?.frame.origin.y, abs(layerY) > 0.5 {
             view.layer.removeAllAnimations()
             view.frame.origin.y = 0
         }
