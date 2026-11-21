@@ -22,6 +22,7 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
+        .ignoresSafeArea(model.isLoggedIn ? [] : .keyboard)
         .environmentObject(model)
         .environmentObject(themeStore)
         .environmentObject(wallpaperStore)
