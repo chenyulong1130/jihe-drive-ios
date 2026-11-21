@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 弹窗式登录：遮罩 + 浮动卡片。
 /// 卡片放在 ScrollView 里，键盘弹出时系统只压缩滚动区（必要时自动滚动到焦点），页面本身不动，
@@ -27,6 +28,9 @@ struct LoginView: View {
     @State private var countdownTask: Task<Void, Never>?
     @FocusState private var focus: Field?
     @Namespace private var modePill
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var cardFrame: CGRect = .zero
+    @State private var pageSize: CGSize = .zero
 
     private var phoneValid: Bool { phone.count == 11 && phone.hasPrefix("1") }
     private var canSendCode: Bool { phoneValid && countdown == 0 && !sending }
@@ -51,12 +55,33 @@ struct LoginView: View {
                     Color.clear.frame(height: 110)
                     dialog
                         .padding(.horizontal, 26)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: CardFrameKey.self, value: geo.frame(in: .global))
+                            }
+                        )
                     Color.clear.frame(height: 40)
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+
+            LoginProbe(cardFrame: cardFrame, pageSize: pageSize, keyboardHeight: keyboardHeight)
+                .frame(maxHeight: .infinity, alignment: .top)
         }
         .onTapGesture { focus = nil }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { pageSize = geo.size }
+                    .onChange(of: geo.size) { _, size in pageSize = size }
+            }
+        )
+        .onPreferenceChange(CardFrameKey.self) { cardFrame = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let screenHeight = UIScreen.main.bounds.height
+            keyboardHeight = max(0, screenHeight - frame.minY)
+        }
     }
 
     // MARK: - 弹窗卡片
@@ -291,5 +316,12 @@ struct LoginView: View {
             }
             submitting = false
         }
+    }
+}
+
+private struct CardFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
