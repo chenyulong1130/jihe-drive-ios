@@ -43,12 +43,13 @@ enum MapAppearance {
 /// 轨迹速度配色图例（低蓝 → 高红）
 struct TrackSpeedLegend: View {
     var compact: Bool = false
+    var onDark: Bool = true
 
     var body: some View {
         HStack(spacing: compact ? 4 : 6) {
             Text("慢")
                 .font(.system(size: compact ? 9 : 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(onDark ? Color.white.opacity(0.9) : Theme.secondary)
             HStack(spacing: 0) {
                 ForEach(Array(Self.colors.enumerated()), id: \.offset) { _, color in
                     Rectangle().fill(color)
@@ -56,14 +57,14 @@ struct TrackSpeedLegend: View {
             }
             .frame(width: compact ? 72 : 88, height: compact ? 6 : 7)
             .clipShape(Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.6))
+            .overlay(Capsule().strokeBorder((onDark ? Color.white : Color.black).opacity(0.18), lineWidth: 0.6))
             Text("快")
                 .font(.system(size: compact ? 9 : 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(onDark ? Color.white.opacity(0.9) : Theme.secondary)
         }
         .padding(.horizontal, compact ? 8 : 10)
         .padding(.vertical, compact ? 5 : 6)
-        .background(Capsule(style: .continuous).fill(Color.black.opacity(0.48)))
+        .background(Capsule(style: .continuous).fill(onDark ? Color.black.opacity(0.48) : Color.white.opacity(0.92)))
         .accessibilityLabel("速度图例，从慢到快")
     }
 

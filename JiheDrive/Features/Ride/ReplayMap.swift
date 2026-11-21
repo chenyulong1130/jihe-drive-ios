@@ -194,12 +194,14 @@ struct ReplayMap: UIViewRepresentable {
             let pose = applyPose(progress: progress, on: map)
 
             if !follow {
-                if progress < 0.01 {
-                    didZoomFollow = false
-                }
                 followEnabled = false
                 progressVelocity = 0
                 stopLink()
+                if progress < 0.02, didZoomFollow {
+                    didZoomFollow = false
+                    didFit = false
+                    fit(map: map, points: allPoints)
+                }
                 return
             }
 
@@ -234,7 +236,7 @@ struct ReplayMap: UIViewRepresentable {
             if let marker, let view = map.view(for: marker) as? ReplayCursorView {
                 view.apply(
                     speed: marker.speed,
-                    vehicleImage: cinematic ? vehicleImage : nil,
+                    vehicleImage: vehicleImage,
                     cinematic: cinematic
                 )
             }
@@ -263,7 +265,7 @@ struct ReplayMap: UIViewRepresentable {
             if let marker, let view = map.view(for: marker) as? ReplayCursorView {
                 view.apply(
                     speed: sample.speed,
-                    vehicleImage: cinematicEnabled ? vehicleImage : nil,
+                    vehicleImage: vehicleImage,
                     cinematic: cinematicEnabled
                 )
             }
@@ -408,7 +410,7 @@ struct ReplayMap: UIViewRepresentable {
                 view.annotation = cursor
                 view.apply(
                     speed: cursor.speed,
-                    vehicleImage: cinematicEnabled ? vehicleImage : nil,
+                    vehicleImage: vehicleImage,
                     cinematic: cinematicEnabled
                 )
                 return view
@@ -581,7 +583,7 @@ final class ReplayCursorView: MKAnnotationView {
         let textSize = bubble.sizeThatFits(CGSize(width: 120, height: 20))
         let width = max(44, textSize.width + 14)
 
-        let useModel = cinematic && vehicleImage != nil
+        let useModel = vehicleImage != nil
         model.image = vehicleImage
         model.isHidden = !useModel
         dot.isHidden = useModel

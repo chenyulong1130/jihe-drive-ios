@@ -6,6 +6,7 @@ import WebKit
 /// GLB 通过自定义 scheme 提供，避免 file:// 的跨域限制。
 struct ModelViewerWebView: UIViewRepresentable {
     let glbFile: URL
+    var reuseKey: String = ""
     var interactive: Bool = true
     var autoRotate: Bool = false
     var resetToken: Int = 0
@@ -14,6 +15,24 @@ struct ModelViewerWebView: UIViewRepresentable {
     var onReady: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> WKWebView {
+        context.coordinator.reuseKey = reuseKey
+        context.coordinator.onDrag = onDrag
+        context.coordinator.onOrbitChanged = onOrbitChanged
+        context.coordinator.onReady = onReady
+        context.coordinator.resetToken = resetToken
+
+        if let pooled = ModelViewerPool.view(for: reuseKey) {
+            pooled.removeFromSuperview()
+            bind(pooled, context: context)
+            if pooled.url != nil {
+                context.coordinator.markLoaded(glbFile, interactive: interactive)
+                DispatchQueue.main.async { context.coordinator.onReady?() }
+            } else {
+                context.coordinator.load(into: pooled, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
+            }
+            return pooled
+        }
+
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.userContentController.add(context.coordinator, name: "orbit")
@@ -29,26 +48,23 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.scrollView.canCancelContentTouches = false
         view.isUserInteractionEnabled = interactive
         view.navigationDelegate = context.coordinator
-
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleOuterPan(_:)))
-        pan.cancelsTouchesInView = false
-        pan.delegate = context.coordinator
-        view.addGestureRecognizer(pan)
-
-        context.coordinator.onDrag = onDrag
-        context.coordinator.onOrbitChanged = onOrbitChanged
-        context.coordinator.onReady = onReady
-        context.coordinator.resetToken = resetToken
+        installGestures(on: view, coordinator: context.coordinator)
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
+        ModelViewerPool.store(view, for: reuseKey)
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         view.isUserInteractionEnabled = interactive
+        context.coordinator.reuseKey = reuseKey
         context.coordinator.onDrag = onDrag
         context.coordinator.onOrbitChanged = onOrbitChanged
         context.coordinator.onReady = onReady
-        context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
+        if view.url == nil {
+            context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
+        } else {
+            context.coordinator.markLoaded(glbFile, interactive: interactive)
+        }
         if context.coordinator.resetToken != resetToken {
             context.coordinator.resetToken = resetToken
             view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()") { _, _ in
@@ -58,7 +74,34 @@ struct ModelViewerWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
-        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "orbit")
+        uiView.removeFromSuperview()
+        ModelViewerPool.store(uiView, for: coordinator.reuseKey)
+    }
+
+    private func bind(_ view: WKWebView, context: Context) {
+        view.configuration.userContentController.removeScriptMessageHandler(forName: "orbit")
+        view.configuration.userContentController.add(context.coordinator, name: "orbit")
+        view.navigationDelegate = context.coordinator
+        view.isUserInteractionEnabled = interactive
+        installGestures(on: view, coordinator: context.coordinator)
+    }
+
+    private func installGestures(on view: WKWebView, coordinator: Coordinator) {
+        view.gestureRecognizers?.forEach { rec in
+            if rec is UIPanGestureRecognizer || rec is UITapGestureRecognizer {
+                view.removeGestureRecognizer(rec)
+            }
+        }
+        let pan = UIPanGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleOuterPan(_:)))
+        pan.cancelsTouchesInView = false
+        pan.delegate = coordinator
+        view.addGestureRecognizer(pan)
+
+        let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        tap.numberOfTapsRequired = 2
+        tap.cancelsTouchesInView = false
+        tap.delegate = coordinator
+        view.addGestureRecognizer(tap)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -71,9 +114,15 @@ struct ModelViewerWebView: UIViewRepresentable {
         var onOrbitChanged: ((Bool) -> Void)?
         var onReady: (() -> Void)?
         var resetToken = 0
+        var reuseKey = ""
         private var loadedFile: URL?
 
         private var loadedInteractive: Bool?
+
+        func markLoaded(_ glbFile: URL, interactive: Bool) {
+            loadedFile = glbFile
+            loadedInteractive = interactive
+        }
 
         @objc func handleOuterPan(_ gesture: UIPanGestureRecognizer) {
             switch gesture.state {
@@ -81,6 +130,13 @@ struct ModelViewerWebView: UIViewRepresentable {
                 onDrag?(true)
             default:
                 onDrag?(false)
+            }
+        }
+
+        @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended, let view = gesture.view as? WKWebView else { return }
+            view.evaluateJavaScript("window.jhResetOrbit && window.jhResetOrbit()") { [weak self] _, _ in
+                DispatchQueue.main.async { self?.onOrbitChanged?(false) }
             }
         }
 
@@ -128,6 +184,21 @@ struct ModelViewerWebView: UIViewRepresentable {
     }
 }
 
+/// 同一 VIN 复用 WKWebView，切页/刷新不再重新解析 GLB
+enum ModelViewerPool {
+    private static var views: [String: WKWebView] = [:]
+
+    static func view(for key: String) -> WKWebView? {
+        guard !key.isEmpty else { return nil }
+        return views[key]
+    }
+
+    static func store(_ view: WKWebView, for key: String) {
+        guard !key.isEmpty else { return }
+        views[key] = view
+    }
+}
+
 // MARK: - 资源
 
 enum ModelViewerAsset {
@@ -144,12 +215,10 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "-6.5deg 83.06deg 3.086m"
-        // 只把 3D 稍微往左一点，2D 车图保持居中
-        let target = "0.03m auto auto"
-        // 可拖拽时放宽方位角；仰角仍锁在约 83°，避免翻车底
-        let minOrbit = interactive ? "auto 70deg 2.2m" : "auto 83.06deg 2.53m"
-        let maxOrbit = interactive ? "auto 95deg 4.2m" : "auto 83.06deg 3.86m"
+        let orbit = "86deg 80deg 4.55m"
+        let target = "0.04m 0.22m 0m"
+        let minOrbit = interactive ? "auto 70deg 3.4m" : "auto 80deg 4.2m"
+        let maxOrbit = interactive ? "auto 95deg 5.6m" : "auto 80deg 5.0m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
         let controls = interactive ? "camera-controls touch-action=\"none\"" : "interaction-prompt=\"none\""
 
@@ -206,6 +275,9 @@ enum ModelViewerAsset {
             if (source === 'user-interaction' && window.webkit && window.webkit.messageHandlers.orbit) {
               window.webkit.messageHandlers.orbit.postMessage({ rotated: true });
             }
+          });
+          viewer.addEventListener('dblclick', () => {
+            if (window.jhResetOrbit) window.jhResetOrbit();
           });
           window.jhResetOrbit = () => {
             viewer.cameraOrbit = DEFAULT_ORBIT;

@@ -42,7 +42,6 @@ struct VehicleView: View {
             VStack(spacing: 0) {
                 if let vehicle = model.selectedVehicle {
                     hero(vehicle, proxy: proxy)
-                        .id(vehicle.vinNo)
                     ScrollView(showsIndicators: false) {
                         content(vehicle)
                             .padding(.bottom, 128)
@@ -136,7 +135,11 @@ struct VehicleView: View {
             async let addr: Void = resolveAddressIfNeeded()
             async let inbox: Void = messages.refresh()
             _ = await (photo, ride, battery, detail, tire, sign, addr, inbox)
-            await loadHeroModel()
+            if readyGLBVins.contains(vin), heroGLB != nil {
+                snapshotMarkerIfNeeded(vin: vin)
+            } else {
+                await loadHeroModel()
+            }
             await signin.syncWidget(model: model, ride: rideExtra)
             syncChargeIsland()
 

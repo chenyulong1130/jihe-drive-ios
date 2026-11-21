@@ -15,7 +15,7 @@ struct RideReplayView: View {
     @State private var rate: Double = 1
     @State private var follow = false
     @State private var showFullMap = false
-    @State private var prefer3D = true
+    @State private var prefer3D = false
     @State private var liveAddress: String?
 
     init(vehicle: Vehicle, track: RideTrack) {
@@ -85,8 +85,8 @@ struct RideReplayView: View {
                 last = now
                 let next = progress + delta * rate / playbackSeconds
                 if next >= 1 {
-                    progress = 1
                     playing = false
+                    progress = 0
                     break
                 }
                 progress = next
@@ -97,7 +97,7 @@ struct RideReplayView: View {
         }
     }
 
-    private var cinematic: Bool { prefer3D && replayVehicleImage != nil }
+    private var cinematic: Bool { prefer3D }
 
     private var replayVehicleImage: UIImage? {
         HeroAssetCache.photo(for: vehicle.vinNo)
@@ -496,29 +496,9 @@ struct RideReplayView: View {
             follow: playing,
             cinematic: cinematic,
             vehicleImage: replayVehicleImage,
-            edgePadding: UIEdgeInsets(top: 100, left: 40, bottom: 260, right: 40)
+            edgePadding: UIEdgeInsets(top: 120, left: 40, bottom: 280, right: 40)
         )
         .ignoresSafeArea()
-        .overlay(alignment: .top) {
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(cinematic ? 0.72 : 0.64),
-                    Color.black.opacity(0.28),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 168)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-        }
-        .overlay(alignment: .bottom) {
-            locationBanner(onMap: true)
-                .padding(.horizontal, 18)
-                .padding(.bottom, 214)
-                .allowsHitTesting(false)
-        }
         .safeAreaInset(edge: .top, spacing: 0) {
             fullMapChrome
         }
@@ -526,54 +506,48 @@ struct RideReplayView: View {
             fullMapBottomPanel
                 .environment(\.colorScheme, .light)
         }
-        .background(
-            (cinematic ? Color(red: 0.07, green: 0.12, blue: 0.14) : Color(red: 0.93, green: 0.94, blue: 0.96))
-                .ignoresSafeArea()
-        )
+        .background(Color(red: 0.93, green: 0.94, blue: 0.96).ignoresSafeArea())
     }
 
     private var fullMapChrome: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.label)
                     .frame(width: 40, height: 40)
-                    .background(Circle().fill(Color.white.opacity(0.2)))
+                    .background(Circle().fill(Color.white.opacity(0.92)))
+                    .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-            .accessibilityLabel("退出全屏")
+            .accessibilityLabel("关闭")
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: "%.1f km · %@", track.mileage, RideTrackService.durationText(track.durationMinutes)))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text(tracks.count > 1 ? "\(tracks.count) 段轨迹" : "按时间回放")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.78))
+            VStack(alignment: .leading, spacing: 6) {
+                placeLine(color: Color(hex: 0x34D399), text: startPlace, onMap: false)
+                placeLine(color: Color(hex: 0xFB923C), text: endPlace, onMap: false)
             }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
 
-            Button {
-                prefer3D.toggle()
-            } label: {
-                Image(systemName: prefer3D ? "cube.fill" : "map")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(Color.white.opacity(prefer3D ? 0.32 : 0.2)))
-            }
-            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-            .accessibilityLabel(prefer3D ? "3D 地图" : "2D 地图")
-
-            TrackSpeedLegend(compact: true)
+            TrackSpeedLegend(compact: true, onDark: false)
         }
         .padding(.horizontal, Theme.page)
         .padding(.top, 4)
         .padding(.bottom, 10)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.93, green: 0.94, blue: 0.96).opacity(0.96),
+                    Color(red: 0.93, green: 0.94, blue: 0.96).opacity(0.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        )
     }
 
     private func locationBanner(onMap: Bool) -> some View {
@@ -622,6 +596,26 @@ struct RideReplayView: View {
     /// 底部：速度折线 + 时间轴，浅色底板，拖曲线或滑条都会联动地图
     private var fullMapBottomPanel: some View {
         VStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(String(format: "%.1f", track.mileage))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                Text("km")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+                if progress > 0.02, progress < 0.995 {
+                    Text(String(format: "已骑 %.1f", traveledKm))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.tertiary)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+                Text(RideTrackService.durationText(track.durationMinutes))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.secondary)
+            }
+
             if speeds.count > 1 {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {

@@ -187,8 +187,8 @@ enum WidgetSnapshot {
         if let vehicle = model.selectedVehicle {
             snap.name = vehicle.name
             snap.vin = vehicle.vinNo
-            snap.soc = vehicle.soc
-            snap.rangeKm = vehicle.rangeKm
+            if vehicle.soc > 0 { snap.soc = vehicle.soc }
+            if vehicle.rangeKm > 0 { snap.rangeKm = vehicle.rangeKm }
             snap.locked = vehicle.isLocked
             snap.online = vehicle.isOnline
             snap.charging = vehicle.isCharging
@@ -236,7 +236,7 @@ enum WidgetSnapshot {
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
         let wanted = selectedVin()
         payload["selectedVin"] = wanted ?? snap.vin
-        if let wanted, !wanted.isEmpty, !sameVin(snap.vin, wanted) {
+        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted) {
             // 过期刷新还在写上一台车，不能覆盖当前选中车辆
             return
         }

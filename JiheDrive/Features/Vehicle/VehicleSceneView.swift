@@ -106,8 +106,11 @@ struct VehicleSceneView: UIViewRepresentable {
             pan.maximumNumberOfTouches = 1
             pan.cancelsTouchesInView = true
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            tap.numberOfTapsRequired = 2
             view.addGestureRecognizer(pan)
             view.addGestureRecognizer(pinch)
+            view.addGestureRecognizer(tap)
         }
 
         func stop() {
@@ -170,6 +173,12 @@ struct VehicleSceneView: UIViewRepresentable {
             default:
                 break
             }
+        }
+
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            resetHome()
+            onDrag?(false)
         }
 
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {

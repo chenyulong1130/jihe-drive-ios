@@ -57,6 +57,7 @@ struct HeroStage: View {
 
     @State private var glbRevealed = false
     @State private var modelRotated = false
+    @State private var localReset = 0
     private var glbVisible: Bool { glbRevealed || modelGLBCached }
 
     private var onDark: Bool { !selection.isDefault || videoURL != nil }
@@ -99,6 +100,11 @@ struct HeroStage: View {
         .onChange(of: cameraReset) { _, _ in
             modelRotated = false
         }
+    }
+
+    private func resetCamera() {
+        modelRotated = false
+        localReset += 1
     }
 
     // MARK: - 背景
@@ -242,9 +248,10 @@ struct HeroStage: View {
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
+                                    reuseKey: "hero-\(vehicle.vinNo)",
                                     interactive: true,
                                     autoRotate: false,
-                                    resetToken: cameraReset,
+                                    resetToken: cameraReset + localReset,
                                     onDrag: { dragging in
                                         if dragging { modelRotated = true }
                                         onInteract?(dragging)
@@ -258,9 +265,11 @@ struct HeroStage: View {
                             }
                         }
                         .padding(.top, carTopPad)
+                        .padding(.horizontal, 26)
                         .mask(carFadeMask)
                         .overlay { tireMarks }
                         .simultaneousGesture(heroDrag)
+                        .onTapGesture(count: 2) { resetCamera() }
                         .onAppear { if modelGLBCached { glbRevealed = true } }
                         .onChange(of: modelGLBFile) { _, _ in
                             glbRevealed = modelGLBCached
@@ -273,7 +282,7 @@ struct HeroStage: View {
                             interactive: true,
                             autoSpin: false,
                             spinSpeed: 0,
-                            resetToken: cameraReset,
+                            resetToken: cameraReset + localReset,
                             onDrag: { dragging in
                                 if dragging { modelRotated = true }
                                 onInteract?(dragging)
@@ -281,9 +290,11 @@ struct HeroStage: View {
                         )
                     }
                     .padding(.top, carTopPad)
+                    .padding(.horizontal, 26)
                     .mask(carFadeMask)
                     .overlay { tireMarks }
                     .simultaneousGesture(heroDrag)
+                    .onTapGesture(count: 2) { resetCamera() }
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
@@ -547,11 +558,11 @@ struct HeroStage: View {
                             TirePin(
                                 text: tireCaption(bar: front, temp: tireFrontTemp),
                                 tint: tireTint(front),
-                                leader: .trailing
+                                leader: .leading
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.20, y: geo.size.height * 0.62)
+                        .position(x: geo.size.width * 0.70, y: geo.size.height * 0.77)
                     }
                     if let rear = validBar(rearBar) {
                         Button {
@@ -560,11 +571,11 @@ struct HeroStage: View {
                             TirePin(
                                 text: tireCaption(bar: rear, temp: tireRearTemp),
                                 tint: tireTint(rear),
-                                leader: .leading
+                                leader: .trailing
                             )
                         }
                         .buttonStyle(.plain)
-                        .position(x: geo.size.width * 0.80, y: geo.size.height * 0.58)
+                        .position(x: geo.size.width * 0.30, y: geo.size.height * 0.73)
                     }
                 }
             }
@@ -616,37 +627,42 @@ private struct TirePin: View {
     var leader: Leader = .trailing
 
     var body: some View {
-        HStack(spacing: 0) {
-            if leader == .leading { stem }
-            Text(text)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
-                .monospacedDigit()
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color.white.opacity(0.94))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .strokeBorder(tint, lineWidth: 1.4)
-                )
-            if leader == .trailing { stem }
-        }
-        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
+        Color.clear
+            .frame(width: 8, height: 8)
+            .overlay(alignment: leader == .trailing ? .trailing : .leading) {
+                HStack(spacing: 0) {
+                    if leader == .trailing { caption; stemLine }
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 8, height: 8)
+                    if leader == .leading { stemLine; caption }
+                }
+                .fixedSize()
+                .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
+            }
     }
 
-    private var stem: some View {
-        HStack(spacing: 0) {
-            if leader == .leading {
-                Circle().fill(tint).frame(width: 7, height: 7)
-                Rectangle().fill(tint).frame(width: 18, height: 1.5)
-            } else {
-                Rectangle().fill(tint).frame(width: 18, height: 1.5)
-                Circle().fill(tint).frame(width: 7, height: 7)
-            }
-        }
+    private var caption: some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundStyle(tint)
+            .monospacedDigit()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.white.opacity(0.94))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(tint, lineWidth: 1.4)
+            )
+    }
+
+    private var stemLine: some View {
+        Rectangle()
+            .fill(tint)
+            .frame(width: 16, height: 1.5)
     }
 }
 
