@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
             tire = nil
             detailVehicle = nil
             WidgetCenter.shared.reloadAllTimelines()
+            Task { await WidgetLiveSync.refresh() }
         }
     }
     @Published var errorMessage: String?
@@ -338,6 +339,18 @@ final class AppModel: ObservableObject {
     private func seedWidgetSnap(for vin: String?) {
         guard let vin, let vehicle = vehicles.first(where: { $0.vinNo == vin }) else { return }
         var snap = WidgetSnapshot.read() ?? WidgetSnap()
+        if !WidgetSnapshot.sameVin(snap.vin, vehicle.vinNo) {
+            snap.todayKm = 0
+            snap.todayMin = 0
+            snap.lastKm = 0
+            snap.lastMin = 0
+            snap.accel = 0
+            snap.brake = 0
+            snap.maxSpeed = 0
+            snap.tireText = ""
+            snap.tireBound = false
+            snap.imageData = WidgetSnapshot.loadImage(vehicle.vinNo)
+        }
         snap.vin = vehicle.vinNo
         snap.name = vehicle.name
         snap.soc = vehicle.soc

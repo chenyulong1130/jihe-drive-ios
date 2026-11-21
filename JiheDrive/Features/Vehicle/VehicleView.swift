@@ -651,6 +651,7 @@ struct VehicleView: View {
     private func mapBody(_ vehicle: Vehicle) -> some View {
         if let coordinate = vehicle.coordinate {
             VehicleMapView(coordinate: coordinate, interactive: false)
+                .id(vehicle.vinNo)
                 .allowsHitTesting(false)
         } else {
             ZStack {
@@ -839,7 +840,8 @@ struct VehicleView: View {
             resolvedAddress = existing
             return
         }
-        if let cached = AmapGeocode.readableAddress(resolvedAddress) {
+        if let cached = AmapGeocode.readableAddress(resolvedAddress),
+           model.selectedVehicle?.vinNo == vehicle.vinNo {
             return
         }
         resolvedAddress = await AmapGeocode.reverse(

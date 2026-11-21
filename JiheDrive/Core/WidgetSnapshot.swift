@@ -110,7 +110,7 @@ struct WidgetSnap: Equatable {
             return text.isEmpty ? "--" : text
         }()
         snap.updatedAt = double(raw["updatedAt"])
-        snap.imageData = WidgetSnapshot.loadImage()
+        snap.imageData = WidgetSnapshot.loadImage(snap.vin)
         return snap
     }
 
@@ -231,7 +231,12 @@ enum WidgetSnapshot {
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
-        payload["selectedVin"] = selectedVin() ?? snap.vin
+        let wanted = selectedVin()
+        payload["selectedVin"] = wanted ?? snap.vin
+        if let wanted, !wanted.isEmpty, !sameVin(snap.vin, wanted) {
+            // 过期刷新还在写上一台车，不能覆盖当前选中车辆
+            return
+        }
 
         if let defaults = suiteDefaults() {
             for (key, value) in payload {
@@ -250,7 +255,7 @@ enum WidgetSnapshot {
             try? data.write(to: url, options: [.atomic])
         }
         if let data = snap.imageData {
-            saveImage(data)
+            saveImage(data, vin: snap.vin)
         }
     }
 
@@ -264,14 +269,14 @@ enum WidgetSnapshot {
                 }
             }
             var snap = WidgetSnap.from(map)
-            snap.imageData = loadImage()
+            snap.imageData = loadImage(snap.vin)
             return snap
         }
         if let url = snapshotURL(),
            let data = try? Data(contentsOf: url),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             var snap = WidgetSnap.from(json)
-            snap.imageData = loadImage()
+            snap.imageData = loadImage(snap.vin)
             return snap
         }
         return nil
@@ -307,26 +312,50 @@ enum WidgetSnapshot {
     static func persistSelectedVin(_ vin: String?) {
         let value = vin ?? ""
         suiteDefaults()?.set(value, forKey: "selectedVin")
-        suiteDefaults()?.set(value, forKey: "vin")
         suiteDefaults()?.synchronize()
-        UserDefaults.standard.set(value, forKey: "selectedVin")
+        UserDefaults.standard.set(value, forKey: "jihe.selected.vin")
         UserDefaults.standard.set(value, forKey: "widget_selectedVin")
-        UserDefaults.standard.set(value, forKey: "widget_vin")
+        UserDefaults.standard.set(value, forKey: "selectedVin")
         UserDefaults.standard.synchronize()
+        if let url = snapshotURL(),
+           var json = (try? Data(contentsOf: url)).flatMap({
+               try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+           }) {
+            json["selectedVin"] = value
+            if let data = try? JSONSerialization.data(withJSONObject: json) {
+                try? data.write(to: url, options: [.atomic])
+            }
+        }
     }
 
     static func selectedVin() -> String? {
         let candidates: [String?] = [
             suiteDefaults()?.string(forKey: "selectedVin"),
-            suiteDefaults()?.string(forKey: "vin"),
+            snapshotSelectedVin(),
             UserDefaults.standard.string(forKey: "widget_selectedVin"),
-            UserDefaults.standard.string(forKey: "widget_vin"),
+            UserDefaults.standard.string(forKey: "jihe.selected.vin"),
             UserDefaults.standard.string(forKey: "selectedVin")
         ]
         return candidates.compactMap { vin -> String? in
-            guard let vin, !vin.isEmpty else { return nil }
-            return vin
+            let trimmed = vin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
         }.first
+    }
+
+    static func sameVin(_ lhs: String?, _ rhs: String?) -> Bool {
+        let a = lhs?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let b = rhs?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return !a.isEmpty && a == b
+    }
+
+    private static func snapshotSelectedVin() -> String? {
+        guard let url = snapshotURL(),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let vin = "\(json["selectedVin"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+        return vin.isEmpty ? nil : vin
     }
 
     static func tireCaption(_ reading: TireReading?) -> (text: String, bound: Bool) {
@@ -351,31 +380,35 @@ enum WidgetSnapshot {
             .appendingPathComponent(fileName)
     }
 
-    static func imageFileURL() -> URL? {
-        FileManager.default
+    static func imageFileURL(_ vin: String? = nil) -> URL? {
+        let name: String
+        if let vin, !vin.isEmpty {
+            let safe = vin.replacingOccurrences(of: "/", with: "_")
+            name = "widget_vehicle_\(safe).png"
+        } else {
+            name = imageName
+        }
+        return FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: suiteName)?
-            .appendingPathComponent(imageName)
+            .appendingPathComponent(name)
     }
 
-    static func saveImage(_ data: Data) {
+    static func saveImage(_ data: Data, vin: String? = nil) {
+        let targetVin = vin ?? selectedVin()
+        if let url = imageFileURL(targetVin) {
+            try? data.write(to: url, options: [.atomic])
+        }
         if let url = imageFileURL() {
             try? data.write(to: url, options: [.atomic])
-            return
-        }
-        let fallback = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent(imageName)
-        if let fallback {
-            try? data.write(to: fallback, options: [.atomic])
         }
     }
 
-    static func loadImage() -> Data? {
-        if let url = imageFileURL(), let data = try? Data(contentsOf: url), !data.isEmpty {
+    static func loadImage(_ vin: String? = nil) -> Data? {
+        let targetVin = vin ?? selectedVin()
+        if let url = imageFileURL(targetVin), let data = try? Data(contentsOf: url), !data.isEmpty {
             return data
         }
-        let fallback = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
-            .appendingPathComponent(imageName)
-        if let fallback, let data = try? Data(contentsOf: fallback), !data.isEmpty {
+        if let url = imageFileURL(), let data = try? Data(contentsOf: url), !data.isEmpty {
             return data
         }
         return nil

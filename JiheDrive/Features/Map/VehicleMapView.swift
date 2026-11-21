@@ -34,7 +34,8 @@ struct VehicleMapView: UIViewRepresentable {
         map.isScrollEnabled = interactive
         map.isZoomEnabled = interactive
 
-        if coordinator.lastSource != coordinate {
+        let sourceChanged = coordinator.lastSource != coordinate
+        if sourceChanged {
             coordinator.lastSource = coordinate
             coordinator.reloadVehicle(on: map, coordinate: coordinate)
         }
@@ -44,7 +45,7 @@ struct VehicleMapView: UIViewRepresentable {
             coordinator.reloadTrack(on: map, track: track)
         }
 
-        if !coordinator.didFocus || coordinator.lastRecenter != recenterToken {
+        if !coordinator.didFocus || coordinator.lastRecenter != recenterToken || sourceChanged {
             coordinator.lastRecenter = recenterToken
             coordinator.focus(
                 on: map,

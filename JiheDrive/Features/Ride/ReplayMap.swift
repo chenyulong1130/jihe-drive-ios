@@ -23,6 +23,7 @@ struct ReplayMap: UIViewRepresentable {
         map.isRotateEnabled = false
         map.isPitchEnabled = false
         map.backgroundColor = UIColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
+        map.register(ReplayCursorView.self, forAnnotationViewWithReuseIdentifier: ReplayCursorView.reuseID)
         context.coordinator.edgePadding = edgePadding
         context.coordinator.times = times
         context.coordinator.duration = duration
@@ -55,7 +56,7 @@ struct ReplayMap: UIViewRepresentable {
         private var maxSpeed: Double = 40
         private var lineColors: [ObjectIdentifier: UIColor] = [:]
         private var lineWidths: [ObjectIdentifier: CGFloat] = [:]
-        private var marker: MKPointAnnotation?
+        private var marker: ReplayCursorAnnotation?
         private var didFit = false
         private var didZoomFollow = false
         private var followEnabled = false
@@ -107,9 +108,9 @@ struct ReplayMap: UIViewRepresentable {
                 map.addAnnotation(end)
             }
 
-            let current = MKPointAnnotation()
+            let current = ReplayCursorAnnotation()
             current.coordinate = points[0]
-            current.title = "车"
+            current.speed = speeds.first ?? 0
             marker = current
             map.addAnnotation(current)
 
@@ -174,6 +175,10 @@ struct ReplayMap: UIViewRepresentable {
                 longitude: sample.point.longitude
             )
             marker?.coordinate = current
+            marker?.speed = sample.speed
+            if let marker, let view = map.view(for: marker) as? ReplayCursorView {
+                view.apply(speed: sample.speed)
+            }
             cameraTarget = current
 
             followEnabled = follow
@@ -253,6 +258,16 @@ struct ReplayMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let cursor = annotation as? ReplayCursorAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: ReplayCursorView.reuseID,
+                    for: cursor
+                ) as? ReplayCursorView
+                    ?? ReplayCursorView(annotation: cursor, reuseIdentifier: ReplayCursorView.reuseID)
+                view.annotation = cursor
+                view.apply(speed: cursor.speed)
+                return view
+            }
             guard let point = annotation as? MKPointAnnotation else { return nil }
             let kind = point.title ?? ""
             let identifier = "replay-\(kind)"
@@ -261,15 +276,14 @@ struct ReplayMap: UIViewRepresentable {
             view.annotation = point
             view.canShowCallout = false
             view.image = markerImage(for: kind)
-            view.centerOffset = CGPoint(x: 0, y: kind == "车" ? 0 : -14)
-            // 只有 min / max；中间优先级用 rawValue
-            view.zPriority = kind == "车" ? .max : MKAnnotationViewZPriority(rawValue: 750)
+            view.centerOffset = CGPoint(x: 0, y: -14)
+            view.zPriority = MKAnnotationViewZPriority(rawValue: 750)
             return view
         }
 
         func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
             for (index, view) in views.enumerated() {
-                guard (view.annotation as? MKPointAnnotation)?.title != "车" else { continue }
+                guard !(view.annotation is ReplayCursorAnnotation) else { continue }
                 let end = view.frame
                 view.frame.origin.y -= 36
                 view.alpha = 0
@@ -357,5 +371,59 @@ struct ReplayMap: UIViewRepresentable {
                 cg.fillEllipse(in: CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5))
             }
         }
+    }
+}
+
+// MARK: - 回放光标：速度气泡，0 显示「静止」
+
+final class ReplayCursorAnnotation: MKPointAnnotation {
+    var speed: Double = 0
+}
+
+final class ReplayCursorView: MKAnnotationView {
+    static let reuseID = "replay-cursor"
+
+    private let bubble = UILabel()
+    private let dot = UIView()
+
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+        canShowCallout = false
+        zPriority = .max
+        frame = CGRect(x: 0, y: 0, width: 92, height: 42)
+        centerOffset = CGPoint(x: 0, y: -18)
+
+        bubble.font = .systemFont(ofSize: 11, weight: .bold)
+        bubble.textColor = .white
+        bubble.textAlignment = .center
+        bubble.layer.cornerRadius = 8
+        bubble.layer.masksToBounds = true
+
+        dot.backgroundColor = UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 1)
+        dot.layer.cornerRadius = 7
+        dot.layer.borderWidth = 2.5
+        dot.layer.borderColor = UIColor.white.cgColor
+
+        addSubview(bubble)
+        addSubview(dot)
+        apply(speed: 0)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(speed: Double) {
+        let idle = speed < 0.5
+        bubble.text = idle ? "静止" : String(format: "%.0f km/h", speed)
+        bubble.backgroundColor = idle
+            ? UIColor(red: 0.39, green: 0.45, blue: 0.53, alpha: 0.94)
+            : UIColor(red: 0.12, green: 0.48, blue: 1.0, alpha: 0.94)
+        let textSize = bubble.sizeThatFits(CGSize(width: 120, height: 20))
+        let width = max(44, textSize.width + 14)
+        frame = CGRect(x: 0, y: 0, width: width, height: 42)
+        bubble.frame = CGRect(x: 0, y: 0, width: width, height: 20)
+        dot.frame = CGRect(x: (width - 14) / 2, y: 24, width: 14, height: 14)
+        centerOffset = CGPoint(x: 0, y: -18)
     }
 }

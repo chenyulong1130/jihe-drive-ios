@@ -38,12 +38,18 @@ enum WidgetLiveSync {
         let vehicle: Vehicle?
         let tire: TireReading?
         let ride: RideTrackService.RideExtra?
-        if mode == .reuse, existing?.vehicle != nil {
-            vehicle = existing?.vehicle
+        if mode == .reuse, let existingVehicle = existing?.vehicle,
+           WidgetSnapshot.selectedVin().map({ WidgetSnapshot.sameVin(existingVehicle.vinNo, $0) }) != false {
+            vehicle = existingVehicle
             tire = existing?.tire
             ride = existing?.ride
         } else {
-            vehicle = await fetchVehicle(hint: existing?.vehicle) ?? existing?.vehicle
+            vehicle = await fetchVehicle(hint: existing?.vehicle)
+            if vehicle == nil,
+               let hint = existing?.vehicle,
+               WidgetSnapshot.selectedVin().map({ WidgetSnapshot.sameVin(hint.vinNo, $0) }) != false {
+                vehicle = hint
+            }
             async let tireTask = fetchTire(vin: vehicle?.vinNo)
             async let rideTask = fetchRide(vin: vehicle?.vinNo)
             tire = await tireTask ?? existing?.tire
@@ -134,14 +140,23 @@ enum WidgetLiveSync {
         }
 
         applyVehicle(&snap, vehicle: vehicle, tire: tire, ride: ride)
-        let vinChanged = cachedSnap?.vin != vehicle?.vinNo
+        if let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty,
+           !WidgetSnapshot.sameVin(snap.vin, wanted) {
+            if let disk = WidgetSnapshot.read(), WidgetSnapshot.sameVin(disk.vin, wanted) {
+                snap = disk
+                snap.loggedIn = true
+            } else if let vehicle, WidgetSnapshot.sameVin(vehicle.vinNo, wanted) {
+                applyVehicle(&snap, vehicle: vehicle, tire: tire, ride: ride)
+            }
+        }
+        let vinChanged = !WidgetSnapshot.sameVin(cachedSnap?.vin, vehicle?.vinNo)
         if (mode == .timeline || vinChanged), let url = vehicle?.imageURL {
             snap.imageData = await downloadImage(url)
             if let data = snap.imageData {
-                WidgetSnapshot.saveImage(data)
+                WidgetSnapshot.saveImage(data, vin: vehicle?.vinNo)
             }
         } else {
-            snap.imageData = WidgetSnapshot.loadImage()
+            snap.imageData = WidgetSnapshot.loadImage(vehicle?.vinNo ?? snap.vin)
         }
 
         WidgetSnapshot.write(snap)
@@ -179,7 +194,6 @@ enum WidgetLiveSync {
     private static func fetchVehicle(hint: Vehicle?) async -> Vehicle? {
         let wanted = WidgetSnapshot.selectedVin()
             ?? hint?.vinNo
-            ?? WidgetSnapshot.read()?.vin
         var list: [Vehicle] = []
         if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicle/list") {
             let code = ZeehoClient.codeString(res["code"])
@@ -187,15 +201,15 @@ enum WidgetLiveSync {
                 list = Vehicle.list(from: res)
             }
         }
-        if list.isEmpty { return hint }
-        let pickedVin = wanted?.trimmingCharacters(in: .whitespacesAndNewlines)
-        var picked = list.first(where: { $0.vinNo == pickedVin })
-            ?? list.first(where: { $0.vinNo == hint?.vinNo })
-            ?? (pickedVin?.isEmpty == false ? nil : list.first)
-        if picked == nil, pickedVin?.isEmpty == false {
-            return hint
+        var picked: Vehicle?
+        if let wanted, !wanted.isEmpty {
+            picked = list.first(where: { WidgetSnapshot.sameVin($0.vinNo, wanted) })
+                ?? (WidgetSnapshot.sameVin(hint?.vinNo, wanted) ? hint : nil)
+        } else {
+            picked = hint ?? list.first
         }
-        guard let vin = picked?.vinNo else { return hint }
+        let vin = picked?.vinNo ?? wanted
+        guard let vin, !vin.isEmpty else { return hint }
         if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)") {
             let code = ZeehoClient.codeString(res["code"])
             if code.isEmpty || code == "10000",
@@ -204,10 +218,13 @@ enum WidgetLiveSync {
                 if let nested = json["vehicleInfo"] as? [String: Any] {
                     json.merge(nested) { current, _ in current }
                 }
-                if let parsed = Vehicle(json: json), let current = picked {
-                    picked = current.merged(with: parsed)
+                if let parsed = Vehicle(json: json) {
+                    picked = (picked ?? parsed).merged(with: parsed)
                 }
             }
+        }
+        if let picked, let wanted, !wanted.isEmpty, !WidgetSnapshot.sameVin(picked.vinNo, wanted) {
+            return nil
         }
         return picked ?? hint
     }
@@ -236,7 +253,8 @@ enum WidgetLiveSync {
         ride: RideTrackService.RideExtra?
     ) {
         guard let vehicle else { return }
-        if let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty, vehicle.vinNo != wanted {
+        if let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty,
+           !WidgetSnapshot.sameVin(vehicle.vinNo, wanted) {
             return
         }
         snap.name = vehicle.name

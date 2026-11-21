@@ -86,7 +86,7 @@ struct JiheDriveWidgetEntryView: View {
 
     private var medium: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("今日骑行")
                         .font(.system(size: 15, weight: .bold))
@@ -97,12 +97,7 @@ struct JiheDriveWidgetEntryView: View {
                         .monospacedDigit()
                 }
                 Spacer(minLength: 8)
-                pointsHeadline
-                signPill
-                Text(timeText)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color(hex: 0x94A3B8))
-                    .monospacedDigit()
+                pointsCorner
             }
 
             HStack(alignment: .bottom, spacing: 8) {
@@ -130,18 +125,12 @@ struct JiheDriveWidgetEntryView: View {
                 VStack(spacing: 4) {
                     vehicleImage
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    HStack {
-                        Text(snap.name.isEmpty ? "未绑定" : snap.name)
+                    if !tireLabel.isEmpty {
+                        Text(tireLabel)
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(Color(hex: 0x94A3B8))
                             .lineLimit(1)
-                        Spacer(minLength: 4)
-                        if !tireLabel.isEmpty {
-                            Text(tireLabel)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(Color(hex: 0x94A3B8))
-                                .lineLimit(1)
-                        }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
                 .frame(width: 168)
@@ -277,18 +266,33 @@ struct JiheDriveWidgetEntryView: View {
         return String(format: "%.1f", value)
     }
 
-    private var pointsHeadline: some View {
-        HStack(spacing: 0) {
-            Text("积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
-                .foregroundStyle(Color(hex: 0x0F172A))
-            Text("  今日 +\(snap.pointsToday)")
-                .foregroundStyle(Color(hex: 0x22C55E))
-            Text("  连签 \(snap.continueDays) 天")
-                .foregroundStyle(Color(hex: 0x3B82F6))
+    /// 右上角两行：社区/签到/时间，下面积分数据
+    private var pointsCorner: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            HStack(spacing: 5) {
+                pill(
+                    snap.communityDone ? "社区已做" : "社区未做",
+                    bg: snap.communityDone ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
+                    fg: snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C)
+                )
+                signPill
+                Text(timeText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color(hex: 0x94A3B8))
+                    .monospacedDigit()
+            }
+            HStack(spacing: 0) {
+                Text("积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
+                    .foregroundStyle(Color(hex: 0x0F172A))
+                Text("  今日 +\(snap.pointsToday)")
+                    .foregroundStyle(Color(hex: 0x22C55E))
+                Text("  连签 \(snap.continueDays) 天")
+                    .foregroundStyle(Color(hex: 0x3B82F6))
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
         }
-        .font(.system(size: 10, weight: .semibold))
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
     }
 
     private var signPill: some View {

@@ -483,9 +483,9 @@ struct RideReplayView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             fullMapBottomPanel
+                .environment(\.colorScheme, .light)
         }
-        .preferredColorScheme(.dark)
-        .background(Color.black.ignoresSafeArea())
+        .background(Color(red: 0.93, green: 0.94, blue: 0.96).ignoresSafeArea())
     }
 
     private var fullMapChrome: some View {
@@ -603,10 +603,11 @@ struct RideReplayView: View {
                 topTrailingRadius: 22,
                 style: .continuous
             )
-            .fill(Theme.surface)
+            .fill(Color.white)
             .shadow(color: Color.black.opacity(0.12), radius: 16, y: -4)
             .ignoresSafeArea(edges: .bottom)
         }
+        .preferredColorScheme(.light)
     }
 
     // MARK: - 工具
