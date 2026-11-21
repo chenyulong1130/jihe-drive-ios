@@ -75,12 +75,12 @@ struct LargeTitle<Trailing: View>: View {
                 Text(text)
                     .font(Theme.largeTitle)
                     .foregroundStyle(Theme.label)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let subtitle {
                     Text(subtitle)
                         .font(.system(size: 15))
                         .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 8)
@@ -375,7 +375,7 @@ struct MetricChip: View {
                 Text(title)
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 2) {
@@ -597,8 +597,8 @@ struct InfoRow: View {
             Text(value)
                 .font(.system(size: 15, weight: .medium, design: mono ? .monospaced : .default))
                 .foregroundStyle(valueColor)
-                .lineLimit(1)
-                .truncationMode(.middle)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -620,12 +620,12 @@ struct SheetHeader: View {
                     Text(title)
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let subtitle {
                         Text(subtitle)
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.secondary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 

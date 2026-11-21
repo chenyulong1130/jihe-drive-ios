@@ -14,6 +14,9 @@ enum BackdropSelection: Equatable {
         if case .theme(let theme) = self { return theme.isDefault }
         return false
     }
+
+    /// 视频 / 壁纸主题需要和下方页面做渐隐，默认灰底不用
+    var blendsIntoPage: Bool { !isDefault }
 }
 
 /// 车辆主视觉：左右贴边铺满，背景走 `.background` 不参与布局测量
@@ -65,12 +68,24 @@ struct HeroStage: View {
     private var primary: Color { onDark ? .white : Theme.label }
     private var secondaryText: Color { onDark ? Color.white.opacity(0.78) : Theme.secondary }
 
+    /// 主题底边伸进内容区的渐隐高度
+    static let pageBlend: CGFloat = 96
+
     var body: some View {
-        ZStack {
+        let tail = selection.blendsIntoPage ? Self.pageBlend : 0
+        return ZStack(alignment: .top) {
             backdrop
+                .frame(height: height + tail)
+                .mask(alignment: .top) { backdropMask(total: height + tail) }
+                .allowsHitTesting(false)
+
+            bottomWash(tail: tail)
+                .frame(height: height + tail, alignment: .bottom)
                 .allowsHitTesting(false)
 
             carLayer
+                .frame(height: height)
+                .clipped()
 
             VStack(spacing: 0) {
                 topRow
@@ -81,16 +96,17 @@ struct HeroStage: View {
                 Spacer(minLength: 0)
                     .allowsHitTesting(false)
                 tireBar
-                    .padding(.bottom, 10)
+                    .padding(.bottom, selection.blendsIntoPage ? 18 : 10)
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
             .background(Color.clear)
+            .frame(height: height)
+            .clipped()
             .allowsHitTesting(true)
         }
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-        .clipped()
+        .frame(height: height + tail, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private func resetCamera() {
@@ -138,6 +154,43 @@ struct HeroStage: View {
         .clipped()
     }
 
+    private func backdropMask(total: CGFloat) -> some View {
+        let fadeStart = total > 1 ? min(0.94, max(0.62, height / total)) : 1
+        return LinearGradient(
+            stops: selection.blendsIntoPage
+                ? [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: fadeStart),
+                    .init(color: Color.black.opacity(0.4), location: min(1, fadeStart + 0.2)),
+                    .init(color: .clear, location: 1)
+                ]
+                : [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 1)
+                ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    @ViewBuilder
+    private func bottomWash(tail: CGFloat) -> some View {
+        if tail > 0 {
+            LinearGradient(
+                stops: [
+                    .init(color: Theme.groupedBackground.opacity(0), location: 0),
+                    .init(color: Theme.groupedBackground.opacity(0.28), location: 0.45),
+                    .init(color: Theme.groupedBackground.opacity(0.72), location: 0.78),
+                    .init(color: Theme.groupedBackground.opacity(0.92), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: tail + 36)
+            .allowsHitTesting(false)
+        }
+    }
+
     private enum PosterSource {
         case none
         case image(UIImage)
@@ -164,7 +217,7 @@ struct HeroStage: View {
                     Color(hex: 0x0B1A16)
                 }
 
-                CachedLoopingVideo(url: url)
+                CachedLoopingVideo(url: url, fadeBottom: selection.blendsIntoPage)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                     .allowsHitTesting(false)
@@ -243,7 +296,7 @@ struct HeroStage: View {
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
-                                    reuseKey: "hero-\(vehicle.vinNo)-down2",
+                                    reuseKey: "hero-\(vehicle.vinNo)-lift1",
                                     interactive: true,
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,
@@ -351,7 +404,7 @@ struct HeroStage: View {
                         .font(.system(size: 19, weight: .heavy))
                         .foregroundStyle(primary)
                         .shadow(color: onDark ? Color.black.opacity(0.2) : .clear, radius: 8)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     if canSwitchVehicle {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 12, weight: .bold))
@@ -520,11 +573,10 @@ struct HeroStage: View {
             } label: {
                 HStack(spacing: 0) {
                     tireColumn(title: "前轮", bar: validBar(frontBar), temp: tireFrontTemp)
-                    Spacer(minLength: 12)
                     tireColumn(title: "后轮", bar: validBar(rearBar), temp: tireRearTemp)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
             .disabled(onOpenTire == nil)
@@ -533,27 +585,26 @@ struct HeroStage: View {
 
     private func tireColumn(title: String, bar: Double?, temp: Double?) -> some View {
         let tint = tireTint(bar)
-        let label = onDark ? Color.white.opacity(0.82) : Theme.secondary
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(spacing: 2) {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(label)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(tint)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(bar.map { String(format: "%.1f", $0) } ?? "--")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(tint)
                     .monospacedDigit()
                 Text("bar")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(tint.opacity(0.85))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(tint.opacity(0.9))
                 if let temp, temp > -40, temp < 120 {
                     Text(String(format: "%.0f°", temp))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(tint.opacity(0.85))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(tint.opacity(0.9))
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var frontBar: Double? {

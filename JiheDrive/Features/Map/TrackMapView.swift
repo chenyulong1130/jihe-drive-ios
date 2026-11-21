@@ -104,17 +104,17 @@ struct TrackMapView: View {
                 Text(vehicle.name)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(Theme.label)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(placeText)
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(reportText)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.tertiary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 6)

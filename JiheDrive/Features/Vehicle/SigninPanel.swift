@@ -516,7 +516,7 @@ struct SigninDetailSheet: View {
                     Text(prize.name)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                     if !prize.createDate.isEmpty {
                         Text(prize.createDate)
                             .font(.system(size: 11))

@@ -184,7 +184,7 @@ final class VehicleModelLoader: ObservableObject {
         root.rootNode.addChildNode(VehicleSceneBuilder.lightRig())
 
         let orbit = VehicleSceneBuilder.cameraOrbit()
-        orbit.position = SCNVector3(0, 0.82, 0)
+        orbit.position = SCNVector3(0, 0.56, 0)
         root.rootNode.addChildNode(orbit)
         return root
     }

@@ -42,7 +42,7 @@ struct VehiclePickerSheet: View {
                         Text(vehicle.name)
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(Theme.label)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                         if vehicle.isShared {
                             Text("共享")
                                 .font(.system(size: 10, weight: .bold))
@@ -57,7 +57,7 @@ struct VehiclePickerSheet: View {
                         Text(modelName)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.secondary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else {
                         Text(vehicle.isCarMaster ? "我的车辆" : "共享车辆")
                             .font(.system(size: 12, weight: .medium))

@@ -153,7 +153,7 @@ struct RideReplayView: View {
                 Text(subtitle)
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
@@ -220,11 +220,11 @@ struct RideReplayView: View {
 
                 Spacer(minLength: 0)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    TrackSpeedLegend(compact: true)
+                HStack(alignment: .bottom) {
                     chip(text: String(format: "%.1f km", track.mileage), icon: "point.topleft.down.curvedto.point.bottomright.up", tint: .white)
+                    Spacer(minLength: 0)
+                    TrackSpeedLegend(compact: true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(12)
         }
@@ -399,7 +399,6 @@ struct RideReplayView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.label)
                 .multilineTextAlignment(.trailing)
-                .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -503,10 +502,12 @@ struct RideReplayView: View {
             fullMapChrome
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            fullMapBottomPanel
-                .environment(\.colorScheme, .light)
+            VStack(alignment: .trailing, spacing: 8) {
+                TrackSpeedLegend(compact: true, onDark: true)
+                    .padding(.trailing, 16)
+                fullMapBottomPanel
+            }
         }
-        .background(Color(red: 0.93, green: 0.94, blue: 0.96).ignoresSafeArea())
     }
 
     private var fullMapChrome: some View {
@@ -587,36 +588,34 @@ struct RideReplayView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(onMap ? Color.white.opacity(0.92) : Theme.label)
                 .shadow(color: onMap ? Color.black.opacity(0.4) : .clear, radius: 6, y: 1)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// 底部：速度折线 + 时间轴，浅色底板，拖曲线或滑条都会联动地图
+    /// 底部：速度折线 + 时间轴，玻璃底板；图例单独叠在地图右下角
     private var fullMapBottomPanel: some View {
-        VStack(spacing: 10) {
-            HStack {
-                TrackSpeedLegend(compact: true, onDark: false)
-                Spacer(minLength: 0)
-            }
-
+        let ink: Color = cinematic ? .white : Theme.label
+        let mute: Color = cinematic ? Color.white.opacity(0.72) : Theme.secondary
+        let faint: Color = cinematic ? Color.white.opacity(0.55) : Theme.tertiary
+        return VStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(String(format: "%.1f", track.mileage))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.label)
+                    .foregroundStyle(ink)
                     .monospacedDigit()
                 Text("km")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
+                    .foregroundStyle(mute)
                 if progress > 0.02, progress < 0.995 {
                     Text(String(format: "已骑 %.1f", traveledKm))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.tertiary)
+                        .foregroundStyle(faint)
                         .monospacedDigit()
                 }
                 Spacer(minLength: 0)
                 Text(RideTrackService.durationText(track.durationMinutes))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
+                    .foregroundStyle(mute)
             }
 
             if speeds.count > 1 {
@@ -624,11 +623,11 @@ struct RideReplayView: View {
                     HStack {
                         Text("速度")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
+                            .foregroundStyle(mute)
                         Spacer(minLength: 0)
                         Text(String(format: "峰值 %.0f km/h", maxSpeedValue))
                             .font(.system(size: 11))
-                            .foregroundStyle(Theme.tertiary)
+                            .foregroundStyle(faint)
                             .monospacedDigit()
                     }
 
@@ -637,8 +636,9 @@ struct RideReplayView: View {
                         times: clock.times,
                         duration: clock.duration,
                         progress: progress,
-                        tint: Theme.brand,
-                        height: 72
+                        tint: cinematic ? Color(hex: 0x7DD3FC) : Theme.brand,
+                        height: 72,
+                        onDark: cinematic
                     ) { value in
                         playing = false
                         progress = min(max(value, 0), 1)
@@ -674,7 +674,7 @@ struct RideReplayView: View {
                     start: wallClock(0),
                     end: wallClock(1),
                     speed: speeds.count > 1 ? currentSpeed : nil,
-                    onDark: false
+                    onDark: cinematic
                 )
 
                 Button {
@@ -682,9 +682,9 @@ struct RideReplayView: View {
                 } label: {
                     Text("\(Int(rate))x")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.label)
+                        .foregroundStyle(ink)
                         .frame(width: 40, height: 32)
-                        .background(Capsule().fill(Theme.surfaceAlt))
+                        .background(Capsule().fill(.ultraThinMaterial))
                 }
                 .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
             }
@@ -700,11 +700,29 @@ struct RideReplayView: View {
                 topTrailingRadius: 22,
                 style: .continuous
             )
-            .fill(Color.white)
-            .shadow(color: Color.black.opacity(0.12), radius: 16, y: -4)
+            .fill(.thinMaterial)
+            .overlay {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 22,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 22,
+                    style: .continuous
+                )
+                .fill(cinematic ? Color.white.opacity(0.06) : Color.white.opacity(0.18))
+            }
+            .overlay {
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 22,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: 22,
+                    style: .continuous
+                )
+                .strokeBorder(Color.white.opacity(cinematic ? 0.22 : 0.45), lineWidth: 0.7)
+            }
             .ignoresSafeArea(edges: .bottom)
         }
-        .preferredColorScheme(.light)
     }
 
     // MARK: - 工具
@@ -961,6 +979,7 @@ private struct SpeedCurve: View {
     let progress: Double
     var tint: Color = Theme.brand
     var height: CGFloat = 112
+    var onDark: Bool = false
     let onScrub: (Double) -> Void
 
     private var maxValue: Double { max(1, speeds.max() ?? 1) }
@@ -1015,7 +1034,10 @@ private struct SpeedCurve: View {
                 path.addLine(to: CGPoint(x: size.width, y: y))
             }
         }
-        .stroke(Theme.separator.opacity(0.6), style: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+        .stroke(
+            (onDark ? Color.white : Theme.separator).opacity(onDark ? 0.22 : 0.6),
+            style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])
+        )
     }
 
     /// 顶部留空给峰值标签；x 和回放 progress 共用同一段墙钟时长

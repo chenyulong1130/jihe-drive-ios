@@ -374,7 +374,7 @@ struct RideHomeView: View {
             Text(text)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Theme.label)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

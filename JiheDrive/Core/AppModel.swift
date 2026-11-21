@@ -370,26 +370,42 @@ final class AppModel: ObservableObject {
 
     private func seedWidgetSnap(for vin: String?) {
         guard let vin, let vehicle = vehicles.first(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) else { return }
-        var snap = WidgetSnapshot.read() ?? WidgetSnap()
-        if !WidgetSnapshot.sameVin(snap.vin, vehicle.vinNo) {
-            snap.todayKm = 0
-            snap.todayMin = 0
-            snap.lastKm = 0
-            snap.lastMin = 0
-            snap.accel = 0
-            snap.brake = 0
-            snap.maxSpeed = 0
-            snap.tireText = ""
-            snap.tireBound = false
+        let previous = WidgetSnapshot.readVin(vin)
+        let account = WidgetSnapshot.read()
+        var snap = WidgetSnap()
+        snap.loggedIn = true
+        if let account {
+            snap.pointsTotal = account.pointsTotal
+            snap.pointsToday = account.pointsToday
+            snap.signedToday = account.signedToday
+            snap.communityDone = account.communityDone
+            snap.continueDays = account.continueDays
+            snap.totalSignCount = account.totalSignCount
+            snap.todaySignScore = account.todaySignScore
+            snap.lotteryLeft = account.lotteryLeft
+            snap.lotteryText = account.lotteryText
+            snap.lotteryClaimed = account.lotteryClaimed
+            snap.lotteryScore = account.lotteryScore
+        }
+        if let previous {
+            snap.todayKm = previous.todayKm
+            snap.todayMin = previous.todayMin
+            snap.lastKm = previous.lastKm
+            snap.lastMin = previous.lastMin
+            snap.accel = previous.accel
+            snap.brake = previous.brake
+            snap.maxSpeed = previous.maxSpeed
+            snap.tireText = previous.tireText
+            snap.tireBound = previous.tireBound
         }
         snap.vin = vehicle.vinNo
         snap.name = vehicle.name
-        if vehicle.soc > 0 { snap.soc = vehicle.soc }
-        if vehicle.rangeKm > 0 { snap.rangeKm = vehicle.rangeKm }
+        snap.soc = vehicle.soc
+        snap.rangeKm = vehicle.rangeKm
         snap.charging = vehicle.isCharging
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline
-        snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+        snap.imageURL = vehicle.imageURL?.absoluteString ?? previous?.imageURL ?? ""
         snap.imageData = nil
         persistVehicleImage(vehicle)
         snap.updatedAt = Date().timeIntervalSince1970

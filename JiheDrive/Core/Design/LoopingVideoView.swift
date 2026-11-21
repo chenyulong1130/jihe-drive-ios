@@ -6,14 +6,17 @@ import UIKit
 struct LoopingVideoView: UIViewRepresentable {
     let url: URL
     var muted: Bool = true
+    var fadeBottom: Bool = false
 
     func makeUIView(context: Context) -> LoopingPlayerView {
         let view = LoopingPlayerView()
+        view.fadeBottom = fadeBottom
         view.load(url: url, muted: muted)
         return view
     }
 
     func updateUIView(_ view: LoopingPlayerView, context: Context) {
+        view.fadeBottom = fadeBottom
         view.load(url: url, muted: muted)
     }
 
@@ -28,25 +31,25 @@ struct LoopingVideoView: UIViewRepresentable {
 
 final class LoopingPlayerView: UIView {
     private let playerLayer = AVPlayerLayer()
+    private let fadeMask = CAGradientLayer()
     private var player: AVPlayer?
     private var loadedURL: URL?
     private var shouldPlay = true
     private var endObserver: NSObjectProtocol?
     private var appObservers: [NSObjectProtocol] = []
+    var fadeBottom = false {
+        didSet { applyFade() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        let canvas = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
-        backgroundColor = canvas
-        isOpaque = true
         isUserInteractionEnabled = false
         clipsToBounds = true
         playerLayer.videoGravity = .resizeAspectFill
-        playerLayer.isOpaque = true
-        playerLayer.backgroundColor = canvas.cgColor
-        layer.isOpaque = true
-        layer.backgroundColor = canvas.cgColor
+        fadeMask.startPoint = CGPoint(x: 0.5, y: 0)
+        fadeMask.endPoint = CGPoint(x: 0.5, y: 1)
         layer.addSublayer(playerLayer)
+        applyFade()
         Self.activateAudio()
 
         let center = NotificationCenter.default
@@ -95,8 +98,38 @@ final class LoopingPlayerView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         playerLayer.frame = bounds
+        fadeMask.frame = bounds
         CATransaction.commit()
         resumeIfNeeded()
+    }
+
+    private func applyFade() {
+        let canvas = UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
+        if fadeBottom {
+            isOpaque = false
+            backgroundColor = .clear
+            layer.isOpaque = false
+            layer.backgroundColor = UIColor.clear.cgColor
+            playerLayer.isOpaque = false
+            playerLayer.backgroundColor = UIColor.clear.cgColor
+            fadeMask.colors = [
+                UIColor.black.cgColor,
+                UIColor.black.cgColor,
+                UIColor.black.withAlphaComponent(0.35).cgColor,
+                UIColor.clear.cgColor
+            ]
+            fadeMask.locations = [0, 0.78, 0.90, 1]
+            layer.mask = fadeMask
+        } else {
+            isOpaque = true
+            backgroundColor = canvas
+            layer.isOpaque = true
+            layer.backgroundColor = canvas.cgColor
+            playerLayer.isOpaque = true
+            playerLayer.backgroundColor = canvas.cgColor
+            layer.mask = nil
+        }
+        setNeedsLayout()
     }
 
     override func didMoveToWindow() {

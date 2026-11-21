@@ -55,7 +55,7 @@ struct VehicleDetailView: View {
                     Text(vehicle.name)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Theme.label)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 4) {
                         Circle()
@@ -90,8 +90,7 @@ struct VehicleDetailView: View {
                 Text(vehicle.vinNo)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -204,7 +203,7 @@ struct VehicleDetailView: View {
                     Text(vehicle.address?.isEmpty == false ? vehicle.address! : "已上报坐标")
                         .font(.system(size: 14.5, weight: .medium))
                         .foregroundStyle(Theme.label)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Text(String(format: "%.5f, %.5f", coordinate.latitude, coordinate.longitude))
                         .font(.system(size: 11.5, design: .monospaced))

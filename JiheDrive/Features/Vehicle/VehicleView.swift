@@ -54,6 +54,7 @@ struct VehicleView: View {
                                 }
                             }
                     }
+                    .padding(.top, themeStore.selection.blendsIntoPage ? -HeroStage.pageBlend : 0)
                     .coordinateSpace(name: "vehicleHome")
                     .scrollDisabled(pinningHero)
                     .refreshable { await reloadPage() }
@@ -388,10 +389,31 @@ struct VehicleView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 4)
+        .padding(.top, themeStore.selection.blendsIntoPage ? 8 : 4)
         .padding(.bottom, 8)
-        // 对齐小程序：内容区直角，靠英雄区底部渐隐过渡，不要圆角「盖」在视频上
-        .background(Theme.groupedBackground)
+        .background(alignment: .top) { contentBackdrop }
+    }
+
+    @ViewBuilder
+    private var contentBackdrop: some View {
+        if themeStore.selection.blendsIntoPage {
+            VStack(spacing: 0) {
+                LinearGradient(
+                    stops: [
+                        .init(color: Theme.groupedBackground.opacity(0), location: 0),
+                        .init(color: Theme.groupedBackground.opacity(0.35), location: 0.4),
+                        .init(color: Theme.groupedBackground.opacity(0.82), location: 0.78),
+                        .init(color: Theme.groupedBackground, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: HeroStage.pageBlend + 20)
+                Theme.groupedBackground
+            }
+        } else {
+            Theme.groupedBackground
+        }
     }
 
     // MARK: - 寻车 / 解锁 / 设置
@@ -511,7 +533,8 @@ struct VehicleView: View {
                     Text(online ? (locked ? "车辆已关机" : "车辆已开机") : "离线 · 指令将排队")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -596,7 +619,6 @@ struct VehicleView: View {
                 Text(locationLabel(vehicle))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 if !locationTimeLabel(vehicle).isEmpty {
                     Text(locationTimeLabel(vehicle))

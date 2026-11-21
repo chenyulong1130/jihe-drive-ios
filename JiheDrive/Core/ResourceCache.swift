@@ -174,9 +174,14 @@ struct CachedRemoteImage: View {
 
 struct CachedLoopingVideo: View {
     let url: URL
+    var fadeBottom: Bool = false
 
     var body: some View {
-        LoopingVideoView(url: ResourceCache.existingFile(for: url, folder: "videos") ?? url, muted: true)
+        LoopingVideoView(
+            url: ResourceCache.existingFile(for: url, folder: "videos") ?? url,
+            muted: true,
+            fadeBottom: fadeBottom
+        )
             .task(id: url.absoluteString) {
                 guard !url.isFileURL else { return }
                 _ = await ResourceCache.file(for: url, folder: "videos")

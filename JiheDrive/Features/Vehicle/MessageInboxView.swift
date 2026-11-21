@@ -34,7 +34,7 @@ struct MessageInboxView: View {
                     empty
                 } else {
                     ScrollView(showsIndicators: false) {
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: 10) {
                             ForEach(filtered) { item in
                                 Button {
                                     store.open(item)
@@ -42,7 +42,7 @@ struct MessageInboxView: View {
                                 } label: {
                                     MessageCard(item: item)
                                 }
-                                .buttonStyle(PressableStyle(scale: 0.98, brightness: 0))
+                                .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
                             }
                         }
                         .padding(.horizontal, Theme.page)
@@ -75,10 +75,10 @@ struct MessageInboxView: View {
             filter = kind
         } label: {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(on ? Color.white : Theme.label)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
                 .background(Capsule().fill(on ? Theme.brand : Theme.surface))
         }
         .buttonStyle(.plain)
@@ -96,6 +96,7 @@ struct MessageInboxView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -107,94 +108,86 @@ private struct MessageCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                icon
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(item.title)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(Theme.label)
-                            .lineLimit(1)
-                        if item.unread {
-                            Circle()
-                                .fill(Theme.brand)
-                                .frame(width: 7, height: 7)
-                        }
-                        Spacer(minLength: 6)
-                        Text(item.kindLabel)
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(accent)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(accent.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(item.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if item.unread {
+                        Circle()
+                            .fill(Color(hex: 0x3B82F6))
+                            .frame(width: 7, height: 7)
+                            .padding(.top, 7)
                     }
-                    if !item.content.isEmpty, item.content != item.title {
-                        Text(item.content)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
-                    HStack(spacing: 8) {
-                        if !item.carInfo.isEmpty {
-                            Label(item.carInfo, systemImage: "scooter")
-                        }
-                        Spacer(minLength: 0)
-                        Text(item.timeText)
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.tertiary)
-                    .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(item.kindLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(accent.opacity(0.12)))
                 }
+
+                if !item.content.isEmpty, item.content != item.title {
+                    Text(item.content)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(alignment: .top, spacing: 8) {
+                    if !item.carInfo.isEmpty {
+                        HStack(alignment: .top, spacing: 4) {
+                            Image(systemName: "scooter")
+                                .font(.system(size: 11, weight: .medium))
+                            Text(item.carInfo)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Text(item.timeText)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, item.imageURL == nil ? 12 : 10)
 
             if let url = item.imageURL {
                 CachedRemoteImage(url: url, contentMode: .fill)
-                    .frame(height: 118)
+                    .frame(height: 132)
                     .clipped()
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
+        .shadow(color: Color.black.opacity(0.04), radius: 8, y: 3)
         .overlay(alignment: .leading) {
-            if item.unread {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 16)
-            }
+            UnevenRoundedRectangle(
+                topLeadingRadius: 16,
+                bottomLeadingRadius: 16,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+            .fill(accent)
+            .frame(width: 3)
         }
     }
 
     private var accent: Color {
         switch item.kind {
-        case 2: return Theme.orange
+        case 2: return Color(hex: 0xE08A2C)
         case 1: return Theme.indigo
         default: return Theme.brand
         }
-    }
-
-    private var icon: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(accent.opacity(0.14))
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(accent)
-        }
-        .frame(width: 42, height: 42)
-    }
-
-    private var symbol: String {
-        let title = item.title
-        if title.contains("震动") { return "waveform.path.ecg" }
-        if title.contains("推动") || title.contains("移动") { return "arrow.left.arrow.right" }
-        if title.contains("充电") { return "bolt.fill" }
-        if item.kind == 1 { return "gift.fill" }
-        if item.kind == 2 { return "exclamationmark.triangle.fill" }
-        return "bell.fill"
     }
 }
 
@@ -216,6 +209,7 @@ struct MessageDetailView: View {
                         Text(item.title)
                             .font(.system(size: 22, weight: .bold))
                             .foregroundStyle(Theme.label)
+                            .fixedSize(horizontal: false, vertical: true)
                         if !item.content.isEmpty {
                             Text(item.content)
                                 .font(.system(size: 15))

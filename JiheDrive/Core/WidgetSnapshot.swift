@@ -237,19 +237,19 @@ enum WidgetSnapshot {
 
     static func write(_ snap: WidgetSnap) {
         var snap = snap
-        if snap.loggedIn, let old = read() {
-            let sameCar = sameVin(snap.vin, old.vin)
-            if sameCar, snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
-            if sameCar, snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
+        if snap.loggedIn, let old = readVin(snap.vin) {
+            if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
+            if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
             if snap.vin.isEmpty { snap.vin = old.vin }
-            if snap.name.isEmpty, sameCar || snap.vin.isEmpty { snap.name = old.name }
-            if snap.imageURL.isEmpty, sameCar { snap.imageURL = old.imageURL }
+            if snap.name.isEmpty { snap.name = old.name }
+            if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
         }
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
         let wanted = selectedVin()
         payload["selectedVin"] = wanted ?? snap.vin
+        writeVinFile(snap, payload: payload)
         if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted) {
             return
         }
@@ -276,37 +276,35 @@ enum WidgetSnapshot {
     }
 
     static func read() -> WidgetSnap? {
-        var fromDefaults: WidgetSnap?
-        if let defaults = suiteDefaults(),
-           defaults.object(forKey: "updatedAt") != nil {
-            var map: [String: Any] = [:]
-            for key in defaults.dictionaryRepresentation().keys {
-                if let value = defaults.object(forKey: key) {
-                    map[key] = value
-                }
-            }
-            fromDefaults = WidgetSnap.from(map)
-        }
-        var fromFile: WidgetSnap?
-        if let url = snapshotURL(),
-           let data = try? Data(contentsOf: url),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            fromFile = WidgetSnap.from(json)
-        }
         let wanted = selectedVin()
-        switch (fromDefaults, fromFile) {
-        case let (a?, b?):
-            if let wanted, !wanted.isEmpty {
-                let aHit = sameVin(a.vin, wanted)
-                let bHit = sameVin(b.vin, wanted)
-                if aHit && !bHit { return a }
-                if bHit && !aHit { return b }
-            }
-            return a.updatedAt >= b.updatedAt ? a : b
-        case let (a?, nil): return a
-        case let (nil, b?): return b
-        default: return nil
+        if let wanted, let per = readVin(wanted) {
+            return per
         }
+        let candidates = [readSuite(), readFile(), readStandard()].compactMap { $0 }
+        if let wanted, !wanted.isEmpty {
+            if let hit = candidates.first(where: { sameVin($0.vin, wanted) }) {
+                return hit
+            }
+            if let acc = newest(candidates) {
+                var stub = WidgetSnap()
+                stub.loggedIn = acc.loggedIn
+                stub.vin = wanted
+                stub.pointsTotal = acc.pointsTotal
+                stub.pointsToday = acc.pointsToday
+                stub.signedToday = acc.signedToday
+                stub.communityDone = acc.communityDone
+                stub.continueDays = acc.continueDays
+                stub.totalSignCount = acc.totalSignCount
+                stub.todaySignScore = acc.todaySignScore
+                stub.lotteryLeft = acc.lotteryLeft
+                stub.lotteryText = acc.lotteryText
+                stub.lotteryClaimed = acc.lotteryClaimed
+                stub.lotteryScore = acc.lotteryScore
+                return stub
+            }
+            return nil
+        }
+        return newest(candidates)
     }
 
     static func sessionToken() -> String? {
@@ -422,9 +420,66 @@ enum WidgetSnapshot {
     }
 
     static func snapshotURL() -> URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: suiteName)?
-            .appendingPathComponent(fileName)
+        sharedDir()?.appendingPathComponent(fileName)
+    }
+
+    static func readVin(_ vin: String?) -> WidgetSnap? {
+        guard let url = vinSnapshotURL(vin),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return WidgetSnap.from(json)
+    }
+
+    private static func vinSnapshotURL(_ vin: String?) -> URL? {
+        guard let key = imageKey(vin) else { return nil }
+        return sharedDir()?.appendingPathComponent("widget_snapshot_\(key).json")
+    }
+
+    private static func writeVinFile(_ snap: WidgetSnap, payload: [String: Any]) {
+        guard let url = vinSnapshotURL(snap.vin),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        try? data.write(to: url, options: [.atomic])
+    }
+
+    private static func sharedDir() -> URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: suiteName)
+    }
+
+    private static func readSuite() -> WidgetSnap? {
+        guard let defaults = suiteDefaults(),
+              defaults.object(forKey: "updatedAt") != nil else { return nil }
+        var map: [String: Any] = [:]
+        for key in defaults.dictionaryRepresentation().keys {
+            if let value = defaults.object(forKey: key) {
+                map[key] = value
+            }
+        }
+        return WidgetSnap.from(map)
+    }
+
+    private static func readFile() -> WidgetSnap? {
+        guard let url = snapshotURL(),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return WidgetSnap.from(json)
+    }
+
+    private static func readStandard() -> WidgetSnap? {
+        let standard = UserDefaults.standard
+        var map: [String: Any] = [:]
+        for (key, value) in standard.dictionaryRepresentation() where key.hasPrefix("widget_") {
+            map[String(key.dropFirst("widget_".count))] = value
+        }
+        guard map["updatedAt"] != nil else { return nil }
+        return WidgetSnap.from(map)
+    }
+
+    private static func newest(_ snaps: [WidgetSnap]) -> WidgetSnap? {
+        snaps.max { $0.updatedAt < $1.updatedAt }
     }
 
     static func imageFileURL(_ vin: String? = nil) -> URL? {

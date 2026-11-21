@@ -81,6 +81,7 @@ final class MessageStore: ObservableObject {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index].unread = false
         }
+        applyBadge()
         Task { await postRead(item.id) }
     }
 
@@ -135,11 +136,55 @@ final class MessageStore: ObservableObject {
         }
     }
 
+    /// 官方 list_v2 的 messageId 是数字；unread=1 表示已读。
+    /// 先走与列表同前缀的 GET/POST，避免只改本地、刷新后又变未读。
     private func postRead(_ id: String) async {
-        _ = try? await ZeehoClient.shared.post(
+        await hydrateUserId()
+        let uid = ZeehoClient.shared.userId ?? ""
+        var query = ["messageId": id, "unread": "1"]
+        if !uid.isEmpty { query["userId"] = uid }
+
+        let getPaths = [
+            "/v1.0/mine/cfmotoservermine/app/Message/read_v2",
             "/v1.0/mine/cfmotoservermine/app/Message/read",
-            body: ["messageId": id, "id": id]
-        )
+            "/v1.0/mine/cfmotoservermine/app/Message/readMessage"
+        ]
+        for path in getPaths {
+            if await accepted(try? await ZeehoClient.shared.get(path, query: query)) { return }
+        }
+
+        var body: [String: Any] = [
+            "messageId": Int(id) ?? id,
+            "unread": 1
+        ]
+        if !uid.isEmpty { body["userId"] = uid }
+        let postPaths = [
+            "/v1.0/mine/cfmotoservermine/app/Message/read_v2",
+            "/v1.0/mine/cfmotoservermine/app/Message/read",
+            "/v1.0/mine/cfmotoservermine/app/Message/readMessage"
+        ]
+        for path in postPaths {
+            if await accepted(try? await ZeehoClient.shared.post(path, body: body)) { return }
+        }
+
+        body["messageIds"] = [Int(id) ?? id]
+        if await accepted(try? await ZeehoClient.shared.post(
+            "/v1.0/mine/cfmotoservermine/app/Message/read_v2",
+            body: body
+        )) { return }
+
+        var h5Query = H5Client.mineQuery
+        h5Query.merge(query) { _, new in new }
+        _ = try? await H5Client.post("/cfmotoservermine/app/Message/read_v2", query: h5Query, body: body)
+        applyBadge()
+    }
+
+    private func accepted(_ response: [String: Any]?) async -> Bool {
+        guard let response else { return false }
+        let code = ZeehoClient.codeString(response["code"])
+        guard code.isEmpty || code == "10000" else { return false }
+        applyBadge()
+        return true
     }
 
     // MARK: - Seen / notify

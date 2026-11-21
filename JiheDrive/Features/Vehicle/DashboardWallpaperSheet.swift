@@ -163,7 +163,7 @@ struct DashboardWallpaperSheet: View {
                 Text(item.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.label)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(item.isLive ? "仪表使用中" : "云端已保存")
                     .font(.system(size: 11))
                     .foregroundStyle(item.isLive ? Theme.green : Theme.tertiary)

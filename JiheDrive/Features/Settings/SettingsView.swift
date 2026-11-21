@@ -148,11 +148,11 @@ struct SettingsView: View {
                         Text(profile?.nickName.isEmpty == false ? profile!.nickName : "极核骑手")
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(profileSubtitle(profile))
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer(minLength: 0)
@@ -406,7 +406,8 @@ struct SettingsView: View {
                 Text(detail)
                     .font(.system(size: 15))
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
@@ -438,7 +439,8 @@ struct SettingsView: View {
             Text(detail)
                 .font(.system(size: 15))
                 .foregroundStyle(Theme.secondary)
-                .lineLimit(1)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minHeight: 48)
     }

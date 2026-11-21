@@ -47,21 +47,20 @@ struct SnapshotProvider: TimelineProvider {
                 if snap.soc <= 0, disk.soc > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.soc = disk.soc }
                 if snap.rangeKm <= 0, disk.rangeKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.rangeKm = disk.rangeKm }
                 if snap.vin.isEmpty { snap.vin = wanted ?? disk.vin }
-                if snap.name.isEmpty { snap.name = disk.name }
+                if snap.name.isEmpty, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.name = disk.name }
                 if snap.todayKm == 0, disk.todayKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.todayKm = disk.todayKm }
                 if snap.todayMin == 0, disk.todayMin > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.todayMin = disk.todayMin }
             }
-            if let wanted, !wanted.isEmpty { snap.vin = wanted }
             let next = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
             completion(Timeline(entries: [.from(matchingSelected(snap))], policy: .after(next)))
         }
     }
 
     private func matchingSelected(_ snap: WidgetSnap) -> WidgetSnap {
-        var copy = snap
-        guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return copy }
-        copy.vin = wanted
-        return copy
+        guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return snap }
+        if WidgetSnapshot.sameVin(snap.vin, wanted) { return snap }
+        if let per = WidgetSnapshot.readVin(wanted) { return per }
+        return snap
     }
 
     /// 预览用，对齐 Scriptable 参考图

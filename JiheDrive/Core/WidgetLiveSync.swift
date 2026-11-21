@@ -41,20 +41,27 @@ enum WidgetLiveSync {
         var snap = cachedSnap ?? WidgetSnap()
         snap.loggedIn = true
         if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
+            let sameExisting = WidgetSnapshot.sameVin(existing?.vehicle?.vinNo, wantedVin)
+            let stored = WidgetSnapshot.readVin(wantedVin)
             snap.vin = wantedVin
-            snap.name = existing?.vehicle?.name ?? ""
-            snap.soc = existing?.vehicle?.soc ?? 0
-            snap.rangeKm = existing?.vehicle?.rangeKm ?? 0
-            snap.charging = existing?.vehicle?.isCharging ?? false
-            snap.locked = existing?.vehicle?.isLocked ?? true
-            snap.online = existing?.vehicle?.isOnline ?? false
-            snap.imageURL = existing?.vehicle?.imageURL?.absoluteString ?? ""
-            snap.todayKm = 0
-            snap.todayMin = 0
-            snap.lastKm = 0
-            snap.lastMin = 0
-            snap.tireText = ""
-            snap.tireBound = false
+            snap.name = sameExisting ? (existing?.vehicle?.name ?? "") : (stored?.name ?? "")
+            snap.soc = sameExisting ? (existing?.vehicle?.soc ?? 0) : (stored?.soc ?? 0)
+            snap.rangeKm = sameExisting ? (existing?.vehicle?.rangeKm ?? 0) : (stored?.rangeKm ?? 0)
+            snap.charging = sameExisting ? (existing?.vehicle?.isCharging ?? false) : (stored?.charging ?? false)
+            snap.locked = sameExisting ? (existing?.vehicle?.isLocked ?? true) : (stored?.locked ?? true)
+            snap.online = sameExisting ? (existing?.vehicle?.isOnline ?? false) : (stored?.online ?? false)
+            snap.imageURL = sameExisting
+                ? (existing?.vehicle?.imageURL?.absoluteString ?? "")
+                : (stored?.imageURL ?? "")
+            snap.todayKm = stored?.todayKm ?? 0
+            snap.todayMin = stored?.todayMin ?? 0
+            snap.lastKm = stored?.lastKm ?? 0
+            snap.lastMin = stored?.lastMin ?? 0
+            snap.accel = stored?.accel ?? 0
+            snap.brake = stored?.brake ?? 0
+            snap.maxSpeed = stored?.maxSpeed ?? 0
+            snap.tireText = stored?.tireText ?? ""
+            snap.tireBound = stored?.tireBound ?? false
         }
 
         var vehicle: Vehicle?
@@ -172,7 +179,8 @@ enum WidgetLiveSync {
             if battery.range > 0 { snap.rangeKm = battery.range }
             snap.charging = battery.charging || snap.charging
         }
-        if snap.soc <= 0, let cached = cachedSnap, cached.soc > 0 {
+        if snap.soc <= 0, let cached = cachedSnap, cached.soc > 0,
+           WidgetSnapshot.sameVin(cached.vin, snap.vin) {
             snap.soc = cached.soc
             if snap.rangeKm <= 0 { snap.rangeKm = cached.rangeKm }
         }
@@ -298,8 +306,8 @@ enum WidgetLiveSync {
         }
         snap.name = vehicle.name
         snap.vin = vehicle.vinNo
-        if vehicle.soc > 0 { snap.soc = vehicle.soc }
-        if vehicle.rangeKm > 0 { snap.rangeKm = vehicle.rangeKm }
+        snap.soc = vehicle.soc
+        snap.rangeKm = vehicle.rangeKm
         snap.charging = vehicle.isCharging
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline

@@ -168,7 +168,7 @@ struct ThemeSheet: View {
                 Text(detail)
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
@@ -293,7 +293,7 @@ struct ThemeSheet: View {
             Text(name)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(selected ? Theme.brand : Theme.secondary)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
