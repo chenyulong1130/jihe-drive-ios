@@ -354,23 +354,6 @@ struct SoftBanner: View {
     }
 }
 
-struct ToastView: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(Theme.label)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(.regularMaterial)
-            )
-            .shadow(color: Color.black.opacity(0.08), radius: 20, x: 0, y: 6)
-    }
-}
-
 // MARK: - 数据小件
 
 /// 指标块：弱填充底 + 次要色标题 + 主标签数值，颜色只用于图标
