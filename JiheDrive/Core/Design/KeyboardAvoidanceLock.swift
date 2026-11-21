@@ -1,51 +1,46 @@
-import SwiftUI
 import UIKit
 
+/// 登录时关掉窗口宿主的键盘安全区，登入后再打开。
+/// 只处理 SwiftUI 宿主窗口，不碰键盘自己的 UITextEffectsWindow。
 enum KeyboardAvoidance {
-    static func dismiss() {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
+    private static var enabled = true
+    private static var observers: [NSObjectProtocol] = []
+
+    static func setKeyboardRegion(_ enabled: Bool) {
+        self.enabled = enabled
+        applyAll(raw: enabled ? 3 : 1)
+        if enabled {
+            removeObservers()
+        } else {
+            installObservers()
+        }
     }
 
-    static func setLoginMode(_ login: Bool) {
-        let raw: UInt = login ? 1 : 3
+    private static func hostingWindows() -> [UIWindow] {
+        var result: [UIWindow] = []
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene else { continue }
-            for window in windowScene.windows where window.rootViewController != nil {
-                if login, window.frame.origin != .zero {
-                    window.frame.origin = .zero
+            for window in windowScene.windows {
+                let sel = NSSelectorFromString("setSafeAreaRegions:")
+                if let root = window.rootViewController, root.responds(to: sel) {
+                    result.append(window)
                 }
-                walk(window.rootViewController, raw: raw, resetFrame: login)
             }
         }
+        return result
     }
 
-    static func recoverLogin() {
-        dismiss()
-        setLoginMode(true)
-    }
-
-    private static func walk(_ vc: UIViewController?, raw: UInt, resetFrame: Bool) {
-        guard let vc else { return }
-        if vc.additionalSafeAreaInsets.bottom != 0 {
-            vc.additionalSafeAreaInsets.bottom = 0
+    private static func applyAll(raw: UInt) {
+        func walk(_ vc: UIViewController?) {
+            guard let vc else { return }
+            apply(raw, to: vc)
+            vc.children.forEach { walk($0) }
+            walk(vc.presentedViewController)
         }
-        apply(raw, to: vc)
-        if resetFrame, let view = vc.viewIfLoaded {
-            if view.transform != .identity {
-                view.transform = .identity
-            }
-            if abs(view.frame.origin.y) > 0.5 {
-                view.layer.removeAllAnimations()
-                view.frame.origin.y = 0
-            }
+        for window in hostingWindows() {
+            walk(window.rootViewController)
+            window.frame.origin = .zero
         }
-        vc.children.forEach { walk($0, raw: raw, resetFrame: resetFrame) }
-        walk(vc.presentedViewController, raw: raw, resetFrame: resetFrame)
     }
 
     private static func apply(_ raw: UInt, to vc: UIViewController) {
@@ -53,111 +48,60 @@ enum KeyboardAvoidance {
         guard vc.responds(to: sel), let imp = vc.method(for: sel) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, UInt) -> Void
         unsafeBitCast(imp, to: Setter.self)(vc, sel, raw)
-    }
-}
-
-struct KeyboardAvoidanceGate: UIViewControllerRepresentable {
-    var loginMode: Bool
-
-    func makeUIViewController(context: Context) -> GateController {
-        GateController()
+        vc.additionalSafeAreaInsets.bottom = 0
     }
 
-    func updateUIViewController(_ vc: GateController, context: Context) {
-        vc.loginMode = loginMode
-        vc.apply()
+    private static func pinLiftedViews() {
+        for window in hostingWindows() {
+            window.frame.origin = .zero
+            reset(window.rootViewController?.view)
+            var stack: [UIViewController] = []
+            if let root = window.rootViewController { stack.append(root) }
+            while let vc = stack.popLast() {
+                reset(vc.view)
+                stack.append(contentsOf: vc.children)
+                if let presented = vc.presentedViewController { stack.append(presented) }
+            }
+        }
     }
-}
 
-final class GateController: UIViewController {
-    var loginMode = true
-    private var link: CADisplayLink?
-    private var observers: [NSObjectProtocol] = []
+    private static func reset(_ view: UIView?) {
+        guard let view else { return }
+        if view.transform != .identity { view.transform = .identity }
+        if view.frame.origin.y < -0.5 {
+            view.layer.removeAllAnimations()
+            view.frame.origin.y = 0
+        }
+    }
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.isUserInteractionEnabled = false
-        view.backgroundColor = .clear
-
+    private static func installObservers() {
+        guard observers.isEmpty else { return }
         let center = NotificationCenter.default
         let names: [Notification.Name] = [
-            UIApplication.willResignActiveNotification,
-            UIApplication.didBecomeActiveNotification,
             UIResponder.keyboardWillChangeFrameNotification,
             UIResponder.keyboardWillShowNotification,
             UIResponder.keyboardDidShowNotification,
-            UIResponder.keyboardWillHideNotification,
         ]
         for name in names {
-            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                self?.handle(note)
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in
+                guard !enabled else { return }
+                applyAll(raw: 1)
+                pinLiftedViews()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    guard !enabled else { return }
+                    pinLiftedViews()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    guard !enabled else { return }
+                    pinLiftedViews()
+                }
             })
         }
     }
 
-    deinit {
-        link?.invalidate()
+    private static func removeObservers() {
+        guard !observers.isEmpty else { return }
         observers.forEach(NotificationCenter.default.removeObserver)
-    }
-
-    override func didMove(toParent parent: UIViewController?) {
-        super.didMove(toParent: parent)
-        apply()
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        apply()
-        startPinningIfNeeded()
-    }
-
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        stopPinning()
-    }
-
-    func apply() {
-        KeyboardAvoidance.setLoginMode(loginMode)
-        if loginMode {
-            startPinningIfNeeded()
-        } else {
-            stopPinning()
-        }
-    }
-
-    private func handle(_ note: Notification) {
-        guard loginMode else { return }
-        switch note.name {
-        case UIApplication.willResignActiveNotification:
-            KeyboardAvoidance.dismiss()
-        case UIApplication.didBecomeActiveNotification:
-            KeyboardAvoidance.recoverLogin()
-        default:
-            KeyboardAvoidance.setLoginMode(true)
-        }
-    }
-
-    private func startPinningIfNeeded() {
-        guard loginMode, link == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(tick))
-        link.add(to: .main, forMode: .common)
-        self.link = link
-    }
-
-    private func stopPinning() {
-        link?.invalidate()
-        link = nil
-    }
-
-    @objc private func tick() {
-        guard loginMode else { return }
-        KeyboardAvoidance.setLoginMode(true)
-    }
-}
-
-extension View {
-    func keyboardAvoidanceLogin(_ login: Bool) -> some View {
-        background(KeyboardAvoidanceGate(loginMode: login))
-            .ignoresSafeArea(login ? .keyboard : [])
+        observers.removeAll()
     }
 }

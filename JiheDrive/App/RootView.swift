@@ -19,10 +19,10 @@ struct RootView: View {
                     .transition(.opacity)
             } else {
                 LoginView()
+                    .ignoresSafeArea(.keyboard)
                     .transition(.opacity)
             }
         }
-        .keyboardAvoidanceLogin(!model.isLoggedIn)
         .environmentObject(model)
         .environmentObject(themeStore)
         .environmentObject(wallpaperStore)
@@ -43,6 +43,10 @@ struct RootView: View {
         }
         .onAppear {
             appearance.applyToWindows(setStyle: true)
+            KeyboardAvoidance.setKeyboardRegion(!model.isLoggedIn)
+        }
+        .onChange(of: model.isLoggedIn) { _, loggedIn in
+            KeyboardAvoidance.setKeyboardRegion(!loggedIn)
         }
         .task(id: model.isLoggedIn) {
             guard model.isLoggedIn else { return }
@@ -66,15 +70,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 appearance.applyToWindows(setStyle: false)
-                if !model.isLoggedIn {
-                    KeyboardAvoidance.recoverLogin()
-                }
-            } else if !model.isLoggedIn {
-                KeyboardAvoidance.dismiss()
             }
-        }
-        .onChange(of: model.isLoggedIn) { _, loggedIn in
-            KeyboardAvoidance.setLoginMode(!loggedIn)
         }
         .animation(nil, value: scenePhase)
     }

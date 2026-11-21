@@ -1,22 +1,15 @@
 import SwiftUI
 import UIKit
 
+/// 弹窗式登录：轻遮罩 + 居中偏上的浮动卡片，卡片整体在键盘上方。
+/// 输入框用 UIKit（LoginKitField），不走 SwiftUI TextField，避免整页被键盘顶没。
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.scenePhase) private var scenePhase
 
     private enum Mode: String, CaseIterable, Identifiable {
-        case phone
-        case token
-
+        case phone, token
         var id: String { rawValue }
         var title: String { self == .phone ? "手机号" : "Token" }
-    }
-
-    private enum Field: Hashable {
-        case phone
-        case code
-        case token
     }
 
     @State private var mode: Mode = .phone
@@ -28,8 +21,6 @@ struct LoginView: View {
     @State private var submitting = false
     @State private var message: String?
     @State private var countdownTask: Task<Void, Never>?
-
-    @FocusState private var focus: Field?
     @Namespace private var modePill
 
     private var phoneValid: Bool { phone.count == 11 && phone.hasPrefix("1") }
@@ -43,117 +34,111 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            AmbientBackground()
+            Theme.groupedBackground
+                .ignoresSafeArea()
+                .onTapGesture { hideKeyboard() }
 
-            VStack(spacing: 0) {
-                emblem.staggerIn(0)
+            Color.black.opacity(0.12)
+                .ignoresSafeArea()
+                .onTapGesture { hideKeyboard() }
 
-                Text("极核智行")
-                    .font(Theme.largeTitle)
-                    .foregroundStyle(Theme.label)
-                    .padding(.top, 20)
-                    .staggerIn(1)
-
-                modeSwitch
-                    .padding(.top, 26)
-                    .staggerIn(2)
-
-                Group {
-                    if mode == .phone {
-                        phoneForm
-                    } else {
-                        tokenForm
-                    }
-                }
-                .padding(.top, 12)
-                .staggerIn(3)
-
-                if let message {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 11))
-                        Text(message)
-                            .font(.system(size: 12, weight: .medium))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(Theme.red)
-                    .padding(.top, 12)
-                    .transition(.opacity)
-                }
-
-                PrimaryButton(
-                    label: buttonTitle,
-                    icon: submitting ? nil : "arrow.right",
-                    enabled: canSubmit,
-                    loading: submitting
-                ) {
-                    submit()
-                }
-                .padding(.top, 18)
-                .staggerIn(4)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 36)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            dialog
+                .padding(.horizontal, 26)
+                .padding(.bottom, 200)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea(.keyboard)
-        .onTapGesture { focus = nil }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
-                focus = nil
+        .onAppear { KeyboardAvoidance.setKeyboardRegion(false) }
+        .onDisappear { KeyboardAvoidance.setKeyboardRegion(true) }
+    }
+
+    // MARK: - 弹窗卡片
+
+    private var dialog: some View {
+        VStack(spacing: 0) {
+            header
+
+            modeSwitch
+                .padding(.top, 18)
+
+            Group {
+                if mode == .phone {
+                    phoneRows
+                } else {
+                    tokenRow
+                }
             }
+            .padding(.top, 14)
+
+            if let message {
+                Text(message)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
+            }
+
+            PrimaryButton(
+                label: submitting ? "登录中" : (mode == .phone ? "登录" : "用 Token 进入"),
+                icon: submitting ? nil : "arrow.right",
+                enabled: canSubmit,
+                loading: submitting
+            ) {
+                submit()
+            }
+            .padding(.top, 16)
         }
-    }
-
-    private var buttonTitle: String {
-        if submitting { return "登录中" }
-        return mode == .phone ? "登录" : "用 Token 登录"
-    }
-
-    // MARK: - 徽标
-
-    private var emblem: some View {
-        ZStack {
-            Circle()
+        .padding(18)
+        .frame(maxWidth: 380)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Theme.surface)
-                .frame(width: 88, height: 88)
-                .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
-
-            Circle()
-                .fill(Theme.brand.opacity(0.10))
-                .frame(width: 60, height: 60)
-
-            Image(systemName: "bolt.car.fill")
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(Theme.brand)
-        }
+                .shadow(color: Theme.softShadow, radius: 28, x: 0, y: 10)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Theme.separator.opacity(0.7), lineWidth: 0.5)
+        )
     }
 
-    // MARK: - 方式切换
+    private var header: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Theme.brand.opacity(0.12))
+                    .frame(width: 48, height: 48)
+                Image(systemName: "bolt.car.fill")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(Theme.brand)
+            }
+            Text("极核智行")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Theme.label)
+            Text("验证手机号，或粘贴 Token 进入")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Theme.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
 
     private var modeSwitch: some View {
         HStack(spacing: 4) {
             ForEach(Mode.allCases) { item in
                 Button {
-                    withAnimation(Motion.liqid) {
+                    withAnimation(Motion.spring) {
                         mode = item
                         message = nil
-                        focus = nil
                     }
                 } label: {
                     Text(item.title)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(mode == item ? Theme.label : Theme.secondary)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 38)
+                        .frame(height: 36)
                         .background {
                             if mode == item {
                                 Capsule(style: .continuous)
-                                    .fill(Theme.surface)
-                                    .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+                                    .fill(Theme.surfaceAlt)
                                     .matchedGeometryEffect(id: "login-mode", in: modePill)
                             }
                         }
@@ -163,31 +148,34 @@ struct LoginView: View {
             }
         }
         .padding(4)
-        .background(Capsule(style: .continuous).fill(Theme.surfaceAlt.opacity(0.7)))
+        .background(Capsule(style: .continuous).fill(Theme.surfaceAlt.opacity(0.6)))
     }
 
-    // MARK: - 手机号
+    // MARK: - 表单行
 
-    private var phoneForm: some View {
+    private var phoneRows: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "iphone")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(focus == .phone ? Theme.brand : Theme.tertiary)
+                    .foregroundStyle(Theme.tertiary)
                     .frame(width: 20)
+                LoginKitField(text: $phone, placeholder: "手机号", keyboard: .numberPad)
+                    .frame(height: 22)
+            }
+            .padding(.horizontal, 4)
+            .frame(height: 48)
 
-                TextField("手机号", text: $phone)
-                    .keyboardType(.numberPad)
-                    .textContentType(.none)
-                    .autocorrectionDisabled()
-                    .focused($focus, equals: .phone)
-                    .font(.system(size: 17))
-                    .foregroundStyle(Theme.label)
-                    .tint(Theme.brand)
+            HairLine(inset: 4)
 
-                Button {
-                    sendCode()
-                } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.rotation")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+                    .frame(width: 20)
+                LoginKitField(text: $code, placeholder: "短信验证码", keyboard: .numberPad)
+                    .frame(height: 22)
+                Button(action: sendCode) {
                     Text(countdown > 0 ? "\(countdown)s" : (sending ? "发送中" : "获取验证码"))
                         .font(.system(size: 12.5, weight: .bold))
                         .foregroundStyle(canSendCode ? Theme.brand : Theme.tertiary)
@@ -201,99 +189,31 @@ struct LoginView: View {
                 .buttonStyle(PressableStyle(scale: 0.93))
                 .disabled(!canSendCode)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 56)
-
-            HairLine(inset: 44)
-
-            HStack(spacing: 10) {
-                Image(systemName: "lock.rotation")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(focus == .code ? Theme.brand : Theme.tertiary)
-                    .frame(width: 20)
-
-                TextField("短信验证码", text: $code)
-                    .keyboardType(.numberPad)
-                    .textContentType(.none)
-                    .autocorrectionDisabled()
-                    .focused($focus, equals: .code)
-                    .font(.system(size: 17))
-                    .foregroundStyle(Theme.label)
-                    .tint(Theme.brand)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 56)
+            .padding(.horizontal, 4)
+            .frame(height: 48)
         }
-        .background(cardBackground)
-        .overlay(cardBorder)
-        .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
-        .animation(Motion.quick, value: focus)
     }
 
-    // MARK: - Token
-
-    private var tokenForm: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "key.horizontal.fill")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(focus == .token ? Theme.brand : Theme.tertiary)
-                    .frame(width: 20)
-
-                TextField("粘贴 access token", text: $token, axis: .vertical)
-                    .lineLimit(2...4)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused($focus, equals: .token)
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundStyle(Theme.label)
-                    .tint(Theme.brand)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
-
-            if !token.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 11))
-                    Text("已输入 \(token.trimmingCharacters(in: .whitespacesAndNewlines).count) 个字符")
-                        .font(.system(size: 11.5, weight: .medium))
-                    Spacer(minLength: 0)
-                    Button("清空") {
-                        token = ""
-                    }
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Theme.brand)
-                }
-                .foregroundStyle(Theme.secondary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-            }
+    private var tokenRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "key.horizontal.fill")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
+                .frame(width: 20)
+                .padding(.top, 14)
+            LoginKitArea(text: $token, placeholder: "粘贴 access token")
+                .frame(height: 84)
         }
-        .background(cardBackground)
-        .overlay(cardBorder)
-        .shadow(color: Theme.cardShadow, radius: 24, x: 0, y: 4)
-        .animation(Motion.quick, value: focus)
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-            .fill(Theme.surface)
-    }
-
-    private var cardBorder: some View {
-        RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-            .strokeBorder(
-                focus == nil ? Color.clear : Theme.brand.opacity(0.6),
-                lineWidth: focus == nil ? 0 : 1.5
-            )
     }
 
     // MARK: - 动作
 
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     private func sendCode() {
         guard canSendCode else { return }
-        focus = .code
         sending = true
         withAnimation(Motion.quick) { message = nil }
         Task {
@@ -321,7 +241,7 @@ struct LoginView: View {
 
     private func submit() {
         guard canSubmit else { return }
-        focus = nil
+        hideKeyboard()
         submitting = true
         withAnimation(Motion.quick) { message = nil }
         Task {
@@ -337,6 +257,115 @@ struct LoginView: View {
                 withAnimation(Motion.quick) { message = error.localizedDescription }
             }
             submitting = false
+        }
+    }
+}
+
+private struct LoginKitField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var keyboard: UIKeyboardType
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.placeholder = placeholder
+        field.keyboardType = keyboard
+        field.font = .systemFont(ofSize: 17)
+        field.textColor = .label
+        field.tintColor = .systemBlue
+        field.borderStyle = .none
+        field.autocorrectionType = .no
+        field.spellCheckingType = .no
+        field.smartDashesType = .no
+        field.smartQuotesType = .no
+        field.textContentType = .none
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed), for: .editingChanged)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.text = $text
+        if field.text != text { field.text = text }
+        field.placeholder = placeholder
+        field.keyboardType = keyboard
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        @objc func changed(_ sender: UITextField) {
+            text.wrappedValue = sender.text ?? ""
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            guard textField.keyboardType == .numberPad else { return true }
+            let current = textField.text ?? ""
+            let next = (current as NSString).replacingCharacters(in: range, with: string)
+            return next.count <= 11 && next.allSatisfy(\.isNumber)
+        }
+    }
+}
+
+private struct LoginKitArea: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        view.textColor = .label
+        view.tintColor = .systemBlue
+        view.backgroundColor = .clear
+        view.textContainerInset = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
+        view.autocorrectionType = .no
+        view.spellCheckingType = .no
+        view.smartDashesType = .no
+        view.smartQuotesType = .no
+        view.textContentType = .none
+        view.delegate = context.coordinator
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        context.coordinator.placeholder.text = placeholder
+        view.addSubview(context.coordinator.placeholder)
+        context.coordinator.placeholder.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            context.coordinator.placeholder.topAnchor.constraint(equalTo: view.topAnchor, constant: 14),
+            context.coordinator.placeholder.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4)
+        ])
+        context.coordinator.syncPlaceholder(view)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.placeholder.text = placeholder
+        if view.text != text { view.text = text }
+        context.coordinator.syncPlaceholder(view)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var text: Binding<String>
+        let placeholder = UILabel()
+        init(text: Binding<String>) {
+            self.text = text
+            super.init()
+            placeholder.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+            placeholder.textColor = .placeholderText
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text.wrappedValue = textView.text
+            syncPlaceholder(textView)
+        }
+
+        func syncPlaceholder(_ textView: UITextView) {
+            placeholder.isHidden = !textView.text.isEmpty
         }
     }
 }
