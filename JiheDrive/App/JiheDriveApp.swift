@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct JiheDriveApp: App {
@@ -8,7 +9,16 @@ struct JiheDriveApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootHost()
+                .ignoresSafeArea()
         }
     }
+}
+
+private struct RootHost: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> LockedHosting {
+        LockedHosting(rootView: RootView())
+    }
+
+    func updateUIViewController(_ uiViewController: LockedHosting, context: Context) {}
 }

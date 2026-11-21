@@ -19,10 +19,10 @@ struct RootView: View {
                     .transition(.opacity)
             } else {
                 LoginView()
+                    .ignoresSafeArea(.keyboard)
                     .transition(.opacity)
             }
         }
-        .ignoresSafeArea(model.isLoggedIn ? [] : .keyboard)
         .environmentObject(model)
         .environmentObject(themeStore)
         .environmentObject(wallpaperStore)
@@ -45,6 +45,10 @@ struct RootView: View {
             appearance.applyToWindows(setStyle: true)
             LocationPermissionRequester.shared.request()
             messages.requestPermission()
+            KeyboardAvoidance.setKeyboardRegion(!model.isLoggedIn)
+        }
+        .onChange(of: model.isLoggedIn) { _, loggedIn in
+            KeyboardAvoidance.setKeyboardRegion(!loggedIn)
         }
         .task(id: model.isLoggedIn) {
             guard model.isLoggedIn else { return }
