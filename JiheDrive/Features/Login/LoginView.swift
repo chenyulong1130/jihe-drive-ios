@@ -308,7 +308,7 @@ final class LoginViewController: UIViewController, UITextFieldDelegate, UITextVi
 
     private func buildSubmit() {
         var config = UIButton.Configuration.filled()
-        config.cornerStyle = .continuous
+        config.cornerStyle = .medium
         config.baseBackgroundColor = .systemBlue
         config.baseForegroundColor = .white
         config.title = "登录"
