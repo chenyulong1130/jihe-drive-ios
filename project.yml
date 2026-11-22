@@ -112,9 +112,9 @@ targets:
         excludes:
           - "Info.plist"
           - "JiheDriveMirror.entitlements"
-      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorIdentity.swift
-      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorFrames.swift
-      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorSockets.swift
+      - path: JiheDrive/Core/ZeehoMirror/ZeehoMirrorIdentity.swift
+      - path: JiheDrive/Core/ZeehoMirror/ZeehoMirrorFrames.swift
+      - path: JiheDrive/Core/ZeehoMirror/ZeehoMirrorSockets.swift
       - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorLink.swift
       - path: JiheDrive/Core/CarPlayMirror/CPVideoTranscoder.swift
       - path: JiheDrive/Core/CarPlayMirror/CPFrame.swift
