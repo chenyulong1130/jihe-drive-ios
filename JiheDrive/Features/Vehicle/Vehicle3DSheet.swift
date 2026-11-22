@@ -88,12 +88,7 @@ struct Vehicle3DSheet: View {
         } else {
             switch loader.state {
             case .loading:
-                VStack(spacing: 10) {
-                    ProgressView().tint(.white)
-                    Text("正在加载车辆模型")
-                        .font(Theme.footnote)
-                        .foregroundStyle(.white.opacity(0.75))
-                }
+                ModelLoadingSkeleton(scale: 1.2)
             case .failed(let message):
                 VStack(spacing: 10) {
                     Image(systemName: "cube.transparent")
@@ -135,12 +130,7 @@ struct Vehicle3DSheet: View {
             }
             .foregroundStyle(.white.opacity(0.9))
         } else {
-            VStack(spacing: 10) {
-                ProgressView().tint(.white)
-                Text("正在下载车辆模型")
-                    .font(Theme.footnote)
-                    .foregroundStyle(.white.opacity(0.75))
-            }
+            ModelLoadingSkeleton(scale: 1.2)
         }
     }
 

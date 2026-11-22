@@ -298,29 +298,37 @@ struct HeroStage: View {
         ZStack(alignment: .topTrailing) {
             Group {
                 if let modelGLBFile {
-                    Color.clear
-                        .overlay {
-                            ModelViewerWebView(
-                                glbFile: modelGLBFile,
-                                reuseKey: "hero-\(vehicle.vinNo)-flat2",
-                                interactive: true,
-                                autoRotate: false,
-                                resetToken: cameraReset + localReset,
-                                onDrag: { dragging in
-                                    if dragging { modelRotated = true }
-                                    onInteract?(dragging)
-                                },
-                                onOrbitChanged: { rotated in
-                                    modelRotated = rotated
-                                },
-                                onReady: { glbRevealed = true }
-                            )
-                            .id(vehicle.vinNo)
+                    ZStack {
+                        // 模型渲染前先垫骨架，避免空窗
+                        ModelLoadingSkeleton(scale: 0.8)
+                            .opacity(glbVisible ? 0 : 1)
                             .padding(.top, glbTopPad)
                             .padding(.bottom, carBottomPad)
-                            .opacity(glbVisible ? 1 : 0)
-                        }
-                        .simultaneousGesture(heroDrag)
+
+                        Color.clear
+                            .overlay {
+                                ModelViewerWebView(
+                                    glbFile: modelGLBFile,
+                                    reuseKey: "hero-\(vehicle.vinNo)-flat2",
+                                    interactive: true,
+                                    autoRotate: false,
+                                    resetToken: cameraReset + localReset,
+                                    onDrag: { dragging in
+                                        if dragging { modelRotated = true }
+                                        onInteract?(dragging)
+                                    },
+                                    onOrbitChanged: { rotated in
+                                        modelRotated = rotated
+                                    },
+                                    onReady: { glbRevealed = true }
+                                )
+                                .id(vehicle.vinNo)
+                                .padding(.top, glbTopPad)
+                                .padding(.bottom, carBottomPad)
+                                .opacity(glbVisible ? 1 : 0)
+                            }
+                    }
+                    .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
                         .onAppear { if modelGLBCached { glbRevealed = true } }
                         .onChange(of: vehicle.vinNo) { _, _ in
@@ -347,7 +355,9 @@ struct HeroStage: View {
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else if prefers3D {
-                    Color.clear
+                    ModelLoadingSkeleton(scale: 0.8)
+                        .padding(.top, glbTopPad)
+                        .padding(.bottom, carBottomPad)
                         .allowsHitTesting(false)
                 } else {
                     twoDCar
