@@ -18,7 +18,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
     private var dashboardIP = "192.168.0.1"
     private var localIP: String?
 
-    override func broadcastStarted(setupInfo: [String: Any]?) {
+    override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         // 用户在主 App 里点过「开始投屏」才有广播入口；配置从 App Group 读取
         let group = UserDefaults(suiteName: MirrorLogStore.appGroupID)
         dashboardIP = group?.string(forKey: "mirror.dashboard.ip").flatMap {
@@ -51,10 +51,6 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
         // 仪表未开投屏页时自动重试连接（最多 60 秒）
         scheduleRetryLoop()
-    }
-
-    override func broadcastAnounced() {
-        // 广播已宣告给接收方
     }
 
     override func broadcastFinished() {
@@ -120,7 +116,9 @@ final class SampleHandler: RPBroadcastSampleHandler {
                 attempts += 1
                 guard attempts <= 20 else {
                     self.writeStatus("仪表连接失败：请打开仪表投屏页后重新发起广播")
-                    self.finishBroadcast(withError: nil)
+                    self.finishBroadcastWithError(NSError(
+                        domain: "com.liruixin.jihedrive.mirror", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "仪表连接失败，请打开仪表投屏页后重试"]))
                     return
                 }
                 self.writeStatus("第 \(attempts) 次重试连接仪表…")

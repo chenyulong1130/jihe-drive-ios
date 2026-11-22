@@ -350,14 +350,15 @@ final class CPVideoTranscoder {
         let callback: VTCompressionOutputCallback = { refCon, _, status, flags, sampleBuffer in
             guard let refCon, status == noErr, let sampleBuffer else { return }
             Unmanaged<CPVideoTranscoder>.fromOpaque(refCon).takeUnretainedValue()
-                .handleEncoded(sampleBuffer: sampleBuffer.takeUnretainedValue(), flags: flags)
+                .handleEncoded(sampleBuffer: sampleBuffer, flags: flags)
         }
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             width: Int32(width),
             height: Int32(height),
             codecType: kCMVideoCodecType_H264,
-            encoderSpecification: [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true] as CFDictionary,
+            // 硬件加速编码器由系统按 RealTime 属性自动选择（规格常量在扩展内 17.4 才可用）
+            encoderSpecification: nil,
             imageBufferAttributes: [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange] as CFDictionary,
             compressedDataAllocator: nil,
             outputCallback: callback,
