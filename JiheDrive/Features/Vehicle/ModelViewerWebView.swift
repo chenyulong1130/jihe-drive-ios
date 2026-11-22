@@ -482,7 +482,7 @@ enum ModelViewerAsset {
         // 各车型节点命名不一，精确名匹配不到时按关键词兜底（排除转向灯）
         const LAMP_SKIP = ['turn', 'indicator', 'blinker', 'winker', 'direction'];
         function lampHit(name) {
-          const n = String(name || '').toLowerCase().replace(/[\s\-_.]/g, '');
+          const n = String(name || '').toLowerCase().replace(/[\\s\\-_.]/g, '');
           if (!n) return false;
           for (const s of LAMP_SKIP) if (n.indexOf(s) >= 0) return false;
           return ['lowbeam','highbeam','headlight','headlamp','head','beam','taillight','tail','brake','lamp','light']
