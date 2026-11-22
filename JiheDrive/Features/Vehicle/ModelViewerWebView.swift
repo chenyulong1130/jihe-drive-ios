@@ -479,6 +479,22 @@ enum ModelViewerAsset {
           'L-TailLight': [0xff1a00, 5],
           'L-BrakeLight':[0xff1a00, 14]
         };
+        // 各车型节点命名不一，精确名匹配不到时按关键词兜底（排除转向灯）
+        const LAMP_SKIP = ['turn', 'indicator', 'blinker', 'winker', 'direction'];
+        function lampHit(name) {
+          const n = String(name || '').toLowerCase().replace(/[\s\-_.]/g, '');
+          if (!n) return false;
+          for (const s of LAMP_SKIP) if (n.indexOf(s) >= 0) return false;
+          return ['lowbeam','highbeam','headlight','headlamp','head','beam','taillight','tail','brake','lamp','light']
+            .some((k) => n.indexOf(k) >= 0);
+        }
+        function lampSpec(name) {
+          const n = String(name || '').toLowerCase();
+          if (n.indexOf('brake') >= 0) return [0xff1a00, 14];
+          if (n.indexOf('tail') >= 0) return [0xff1a00, 5];
+          if (n.indexOf('high') >= 0) return [0xffffff, 9];
+          return [0xfff2d0, 6];
+        }
         const lampMats = [];
         window.jhSetLights = (on) => {
           for (const m of lampMats) {
@@ -519,6 +535,21 @@ enum ModelViewerAsset {
                 o.material.emissiveIntensity = 0;
                 lampMats.push(o.material);
               }
+            });
+          }
+          // 兜底：精确名没匹配到的模型，按节点/材质名关键词收灯
+          if (lampMats.length === 0) {
+            gltf.scene.traverse((o) => {
+              if (!o.isMesh) return;
+              const spec = LAMP_CONF[o.name] ||
+                ((lampHit(o.name) || lampHit(o.material && o.material.name)) ? lampSpec(o.name + ' ' + ((o.material && o.material.name) || '')) : null);
+              if (!spec) return;
+              o.material.toneMapped = false;
+              o.material.userData.onColor = spec[0];
+              o.material.userData.onInt = spec[1];
+              o.material.emissive.setHex(0x000000);
+              o.material.emissiveIntensity = 0;
+              lampMats.push(o.material);
             });
           }
           // 对齐 model-viewer 的 camera-target auto 语义：把包围盒中心挪到

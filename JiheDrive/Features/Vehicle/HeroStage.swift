@@ -290,10 +290,12 @@ struct HeroStage: View {
 
     /// 车图和顶栏电量之间留空，避免贴在标题下面
     private var carTopPad: CGFloat { topInset + 70 }
-    /// 3D 比 2D 更靠上一点，镜头拉近后不要离顶栏太远；整体再下移 12pt 贴近底部胎压
-    private var glbTopPad: CGFloat { topInset + 56 }
-    /// 底部留量给胎压标注；2D 稍紧，3D 压得更低一点
-    private var carBottomPad: CGFloat { prefers3D ? 16 : 20 }
+    /// 3D 比 2D 更靠上一点，镜头拉近后不要离顶栏太远；下移用 offset，不缩画布
+    private var glbTopPad: CGFloat { topInset + 44 }
+    /// 底部留量给胎压标注；2D 稍紧
+    private var carBottomPad: CGFloat { prefers3D ? 28 : 20 }
+    /// 3D 整体下移，贴近底部胎压标注（画布尺寸不变，车不会被压小）
+    private var glbDropOffset: CGFloat { 14 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { prefers3D || modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -337,6 +339,7 @@ struct HeroStage: View {
                     }
                     .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
+                        .offset(y: glbDropOffset)
                         .onAppear { if modelGLBCached { glbRevealed = true } }
                         .onChange(of: vehicle.vinNo) { _, _ in
                             glbRevealed = modelGLBCached
@@ -360,6 +363,7 @@ struct HeroStage: View {
                     )
                     .padding(.top, glbTopPad)
                     .padding(.bottom, carBottomPad)
+                    .offset(y: glbDropOffset)
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else if prefers3D {
