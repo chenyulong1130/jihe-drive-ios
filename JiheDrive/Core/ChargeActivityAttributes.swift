@@ -11,6 +11,7 @@ struct ChargeActivityAttributes: ActivityAttributes {
         var vehicleName: String
         var batteryName: String
         var currentAmps: Double?
+        var powerWatts: Double?
         var updatedAt: Date
     }
 

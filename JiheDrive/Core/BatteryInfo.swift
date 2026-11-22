@@ -37,12 +37,15 @@ struct BatteryInfo: Identifiable, Hashable {
 
     var hasLiveElectrical: Bool { voltage > 0 || current != nil || power != nil }
 
-    /// 以电池接口实时状态为准，不用车辆列表上的充电标记
+    /// 以电池接口实时状态为准：有实测电流/功率就是充电中；
+    /// 只有"充"状态文案而没有实时电气数据（电池服务过期、数据断流）不算
     var isLiveCharging: Bool {
+        if isPulledOut { return false }
         if stateText.contains("放电") { return false }
-        if stateText.contains("充") { return true }
-        if let current, abs(current) > 0.3, stateText.contains("充") { return true }
-        return isCharging && stateText != "待机"
+        if let current, abs(current) > 0.3 { return true }
+        if let power, power > 10 { return true }
+        guard stateText.contains("充") else { return false }
+        return current != nil || power != nil
     }
 
     var hasChargeInfo: Bool {

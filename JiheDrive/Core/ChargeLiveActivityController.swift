@@ -15,6 +15,10 @@ enum ChargeLiveActivityController {
             let name = liveBattery?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return name.isEmpty ? "动力电池" : name
         }()
+        let powerWatts = liveBattery?.power ?? {
+            guard let amps = liveBattery?.current, let volts = liveBattery?.voltage, volts > 0 else { return nil }
+            return abs(amps) * volts
+        }()
         let state = ChargeActivityAttributes.ContentState(
             soc: soc,
             rangeKm: range,
@@ -23,6 +27,7 @@ enum ChargeLiveActivityController {
             vehicleName: vehicle.name,
             batteryName: batteryName,
             currentAmps: liveBattery?.current,
+            powerWatts: powerWatts,
             updatedAt: Date()
         )
         let stale = Date().addingTimeInterval(45 * 60)
