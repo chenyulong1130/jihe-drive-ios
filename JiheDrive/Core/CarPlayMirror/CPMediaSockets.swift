@@ -204,6 +204,7 @@ final class CPMediaTiming {
             throw CPError.malformed("读取时钟端口失败")
         }
         port = UInt16(bigEndian: local.sin_port)
+        self.remoteAddr = remote
         let send: (Data) -> Void = { [weak self] payload in
             guard let self, self.fd >= 0 else { return }
             payload.withUnsafeBytes { bytes in
@@ -216,7 +217,6 @@ final class CPMediaTiming {
             }
         }
         self.sendFn = send
-        self.remoteAddr = remote
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         self.source = source
         source.setEventHandler { [weak self] in
