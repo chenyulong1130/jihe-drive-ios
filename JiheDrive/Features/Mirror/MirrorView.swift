@@ -542,17 +542,17 @@ struct MirrorView: View {
 
 // MARK: - 系统广播选择器
 
-private struct BroadcastPickerView: UIViewControllerRepresentable {
+private struct BroadcastPickerView: UIViewRepresentable {
     let preferredExtension: String
 
-    func makeUIViewController(context: Context) -> RPSystemBroadcastPickerView {
+    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
         let picker = RPSystemBroadcastPickerView(frame: .zero)
         picker.preferredExtension = preferredExtension
         picker.showsMicrophoneButton = false
         return picker
     }
 
-    func updateUIViewController(_ controller: RPSystemBroadcastPickerView, context: Context) {}
+    func updateUIView(_ picker: RPSystemBroadcastPickerView, context: Context) {}
 }
 
 // MARK: - 分享面板

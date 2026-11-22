@@ -136,7 +136,7 @@ final class AppearanceStore: ObservableObject {
         // iOS 的系统深浅色切换是 Darwin 通知，NotificationCenter.default 收不到，
         // 必须经 CFNotificationCenter 注册，再转成内部 NS 通知给主线程消费。
         CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotificationCenter(),
+            CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque(),
             { _, _, _, _, _ in
                 NotificationCenter.default.post(
@@ -197,7 +197,7 @@ final class AppearanceStore: ObservableObject {
 
     deinit {
         CFNotificationCenterRemoveEveryObserver(
-            CFNotificationCenterGetDarwinNotificationCenter(),
+            CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque()
         )
     }

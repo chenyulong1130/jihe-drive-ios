@@ -218,11 +218,10 @@ enum CPMFiSAP {
         guard !data.isEmpty else { return Data() }
         var cryptor: CCCryptorRef?
         let createStatus = CCCryptorCreateWithMode(
-            CCOperation(kCCEncrypt), mode: CCMode(kCCModeCTR), alg: CCAlgorithm(kCCAlgorithmAES),
-            padding: CCPadding(ccNoPadding), iv: (iv as NSData).bytes,
-            key: (key as NSData).bytes, keyLength: key.count,
-            tweak: nil, tweakLength: 0, numRounds: 0, options: CCModeOptions(0),
-            cryptorRef: &cryptor)
+            CCOperation(kCCEncrypt), CCMode(kCCModeCTR), CCAlgorithm(kCCAlgorithmAES),
+            CCPadding(ccNoPadding), (iv as NSData).bytes,
+            (key as NSData).bytes, key.count,
+            nil, 0, 0, CCModeOptions(0), &cryptor)
         guard createStatus == kCCSuccess, let cryptor else {
             throw CPError.malformed("AES-CTR 初始化失败")
         }
