@@ -584,12 +584,13 @@ enum ModelViewerAsset {
           gltf.scene.position.z += 0 - center.z;
           gltf.scene.position.y += 0.74 - center.y;
           needsRender = true;
-          post({ ready: true }); // 模型真正解析完成才揭掉 loading
+          readyPending = true; // 首帧渲染完成后再上报 ready，避免揭掉 loading 后还有空窗
         });
 
         // ---------- 主循环：按需渲染，静止时不耗 CPU（低配机友好） ----------
         // 页面切走时 jhSetPaused(true)：跳过渲染与动画推进，只留 rAF 空转
         const pausedBox = { value: false };
+        let readyPending = false;
         window.jhSetPaused = (p) => {
           pausedBox.value = !!p;
           if (!pausedBox.value) needsRender = true;
@@ -616,6 +617,7 @@ enum ModelViewerAsset {
           }
           if (needsRender) {
             renderer.render(scene, camera);
+            if (readyPending) { readyPending = false; post({ ready: true }); }
             needsRender = controls.autoRotate; // 自动旋转时持续重绘
           }
         }

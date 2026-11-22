@@ -3,6 +3,7 @@ import UIKit
 
 enum MainTab: String, CaseIterable, Identifiable {
     case vehicle
+    case mirror
     case ride
     case settings
 
@@ -11,6 +12,7 @@ enum MainTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .vehicle: return "车辆"
+        case .mirror: return "投屏"
         case .ride: return "骑行"
         case .settings: return "我的"
         }
@@ -19,6 +21,7 @@ enum MainTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .vehicle: return "bolt.car"
+        case .mirror: return "rectangle.on.rectangle"
         case .ride: return "point.topleft.down.curvedto.point.bottomright.up"
         case .settings: return "person"
         }
@@ -27,6 +30,7 @@ enum MainTab: String, CaseIterable, Identifiable {
     var activeIcon: String {
         switch self {
         case .vehicle: return "bolt.car.fill"
+        case .mirror: return "rectangle.on.rectangle.fill"
         case .ride: return "point.topleft.down.curvedto.point.bottomright.up.fill"
         case .settings: return "person.fill"
         }
@@ -120,6 +124,7 @@ struct MainTabView: View {
     private func pageContent(_ item: MainTab) -> some View {
         switch item {
         case .vehicle: VehicleView()
+        case .mirror: MirrorView()
         case .ride: RideHomeView()
         case .settings: SettingsView()
         }

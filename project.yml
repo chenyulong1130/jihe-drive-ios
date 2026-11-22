@@ -36,6 +36,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - target: JiheDriveWidget
+      - target: JiheDriveMirror
       - sdk: MapKit.framework
       - sdk: CoreLocation.framework
       - sdk: Security.framework
@@ -48,6 +49,11 @@ targets:
       - sdk: WidgetKit.framework
       - sdk: ActivityKit.framework
       - sdk: UserNotifications.framework
+      - sdk: Network.framework
+      - sdk: CoreBluetooth.framework
+      - sdk: VideoToolbox.framework
+      - sdk: CoreMedia.framework
+      - sdk: ExternalAccessory.framework
     entitlements:
       path: JiheDrive/JiheDrive.entitlements
 
@@ -97,6 +103,42 @@ targets:
         CFBundleDisplayName: 极核智行
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  JiheDriveMirror:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: JiheDriveMirror
+        excludes:
+          - "Info.plist"
+          - "JiheDriveMirror.entitlements"
+      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorIdentity.swift
+      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorFrames.swift
+      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorSockets.swift
+      - path: JiheDrive/Core/CarPlayMirror/ZeehoMirrorLink.swift
+      - path: JiheDrive/Core/CarPlayMirror/CPVideoTranscoder.swift
+      - path: JiheDrive/Core/CarPlayMirror/CPFrame.swift
+      - path: JiheDrive/Core/CarPlayMirror/MirrorLogStore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.liruixin.jihedrive.mirror
+        PRODUCT_NAME: JiheDriveMirror
+        INFOPLIST_FILE: JiheDriveMirror/Info.plist
+        CODE_SIGN_ENTITLEMENTS: JiheDriveMirror/JiheDriveMirror.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
+        SKIP_INSTALL: "YES"
+    dependencies:
+      - sdk: ReplayKit.framework
+      - sdk: VideoToolbox.framework
+      - sdk: CoreImage.framework
+      - sdk: CoreMedia.framework
+      - sdk: CoreVideo.framework
+      - sdk: Network.framework
+      - sdk: Security.framework
+      - sdk: UIKit.framework
+    entitlements:
+      path: JiheDriveMirror/JiheDriveMirror.entitlements
 
 schemes:
   JiheDrive:

@@ -10,3 +10,13 @@ xcuserdata/
 
 # WorkBuddy 本地会话与记忆
 .workbuddy/
+
+analysis/carwithin/repo
+analysis/carwithin/identity_files/
+
+# 本地产物（不进仓库）
+tools/gh/
+dist/
+dist_buildlog*/
+analysis/
+demo_seat/
