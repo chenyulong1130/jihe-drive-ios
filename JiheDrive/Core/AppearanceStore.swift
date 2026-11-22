@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreFoundation
 
 /// 外观模式：跟随系统 / 始终浅色 / 始终深色
 enum AppAppearance: String, CaseIterable, Identifiable {

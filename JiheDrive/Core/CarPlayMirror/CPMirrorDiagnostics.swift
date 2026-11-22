@@ -69,7 +69,7 @@ enum CPMirrorDiagnostics {
         guard !ip.isEmpty else {
             return CheckResult(name: "仪表可达", passed: false, detail: "未填写仪表 IP", warning: false)
         }
-        let reachable = await withCheckedContinuation { continuation in
+        let reachable = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             let connection = NWConnection(host: NWEndpoint.Host(ip),
                                           port: NWEndpoint.Port(rawValue: 10930)!,
                                           using: .tcp)
@@ -80,7 +80,7 @@ enum CPMirrorDiagnostics {
                 let already = finished
                 finished = true
                 box.unlock()
-                if !already { continuation.resume(returning: value) }
+                if !already { cont.resume(returning: value) }
             }
             connection.stateUpdateHandler = { state in
                 switch state {

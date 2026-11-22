@@ -168,7 +168,8 @@ final class CPBootstrap {
 
     private func ack() throws {
         try transport.send(CPIAP2.Packet(control: 0x40, sequence: sequence,
-                                         acknowledgement: acknowledgement, session: 0).encoded())
+                                         acknowledgement: acknowledgement, session: 0,
+                                         payload: Data()).encoded())
     }
 
     private func send(_ message: CPIAP2.Message) throws {

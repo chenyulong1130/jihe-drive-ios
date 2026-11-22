@@ -70,9 +70,13 @@ final class CPMirrorController: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var logs: [String] = []
 
+    func clearLogs() {
+        DispatchQueue.main.async { [weak self] in self?.logs.removeAll() }
+    }
+
     private let videoBox = CPFrameBox()
     /// 兼容性重编码管线（与 CarWithin 验证参数一致：1024×480@25fps/2.5Mbps/Baseline）
-    private let transcoder = CPVideoTranscoder()
+    let transcoder = CPVideoTranscoder()
     private var bootstrap: CPBootstrap?
     private var receiver: CPReceiver?
     private var zeehoLink: ZeehoMirrorLink?

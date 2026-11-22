@@ -44,7 +44,7 @@ final class CPPreviewUIView: UIView {
     }
 
     /// 触摸回调：归一化 0…1 坐标 + 按下/移动/抬起。
-    var onTouches: ([(id: Int, x: Double, y: Double, down: Bool)]) -> Void?
+    var onTouches: (([(id: Int, x: Double, y: Double, down: Bool)]) -> Void)?
 
     private var displayLayer: AVSampleBufferDisplayLayer {
         layer as! AVSampleBufferDisplayLayer
@@ -107,7 +107,8 @@ final class CPPreviewUIView: UIView {
             allocator: kCFAllocatorDefault,
             imageBuffer: snapshot.buffer,
             dataReady: true,
-            dataBuffer: nil,
+            makeDataReadyCallback: nil,
+            refcon: nil,
             formatDescription: format,
             sampleTiming: &timing,
             sampleBufferOut: &sampleBuffer)

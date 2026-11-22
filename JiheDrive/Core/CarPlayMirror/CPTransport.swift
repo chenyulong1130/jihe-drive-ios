@@ -41,6 +41,7 @@ final class CPDirectAccessoryTransport {
     private var client: AnyObject?
     private var connection: AnyObject?
     private var endpointUUID: UUID?
+    private var dataOutHandlerBox: Any?
     private(set) var isActive = false
 
     private static var cachedClient: AnyObject?
@@ -49,14 +50,19 @@ final class CPDirectAccessoryTransport {
     private static func acquireClient() throws -> AnyObject {
         if let cached = cachedClient { return cached }
         let frameworkPath = "/System/Library/PrivateFrameworks/CoreAccessories.framework"
-        guard let bundle = Bundle(path: frameworkPath), bundle.load else {
+        guard let bundle = Bundle(path: frameworkPath), bundle.load() else {
             throw TransportError.frameworkUnavailable
         }
         guard let cls = NSClassFromString("ACCTransportClient") else {
             throw TransportError.frameworkUnavailable
         }
         let sharedSelector = NSSelectorFromString("sharedClient")
-        guard let client = cls.perform(sharedSelector)?.takeUnretainedValue() else {
+        typealias SharedFn = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
+        guard let sharedImp = class_getClassMethod(cls, sharedSelector).map({ method_getImplementation($0) }) else {
+            throw TransportError.methodMissing("sharedClient")
+        }
+        let sharedFn = unsafeBitCast(sharedImp, to: SharedFn.self)
+        guard let client = sharedFn(cls, sharedSelector)?.takeUnretainedValue() else {
             throw TransportError.methodMissing("sharedClient")
         }
         cachedClient = client
@@ -95,6 +101,9 @@ final class CPDirectAccessoryTransport {
             guard let self else { return }
             self.onData?(data as Data)
         }
+        // 块对象与 UUID 装箱为 ObjC 对象传入 IMP；同时持有块防释放
+        let handlerObject = unsafeBitCast(dataOutHandler, to: AnyObject.self)
+        self.dataOutHandlerBox = handlerObject
 
         // endpoint = [client createEndpointWithTransportType:2 andProtocol:4 andIdentifier:nil
         //             andDataOutHandler:<block> forConnectionWithUUID:<uuid> publishConnection:YES]
@@ -110,7 +119,7 @@ final class CPDirectAccessoryTransport {
         if let imp = createEndpointMethod.map({ method_getImplementation($0) }) {
             let fn = unsafeBitCast(imp, to: CreateEndpointFn.self)
             endpointObject = fn(client, createEndpointSelector, transportType, 4, NSNull(),
-                                dataOutHandler, generation, true)?.takeUnretainedValue()
+                                handlerObject, generation as NSUUID, true)?.takeUnretainedValue()
         }
         guard let endpoint = endpointObject else {
             throw TransportError.refused("iAP2 endpoint 发布")
@@ -130,7 +139,8 @@ final class CPDirectAccessoryTransport {
         guard client.responds(to: selector) else {
             throw TransportError.methodMissing("processIncomingData:forEndpointWithUUID:")
         }
-        (client as NSObject).perform(selector, with: data, with: endpointUUID)
+        guard let nsClient = client as? NSObject else { throw TransportError.sendFailure }
+        nsClient.perform(selector, with: data, with: endpointUUID)
     }
 
     func stop() {
@@ -153,6 +163,7 @@ final class CPDirectAccessoryTransport {
         client = nil
         connection = nil
         endpointUUID = nil
+        dataOutHandlerBox = nil
         onData = nil
     }
 

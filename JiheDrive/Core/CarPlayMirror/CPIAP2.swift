@@ -30,9 +30,9 @@ enum CPIAP2 {
             }
             return result
         }
-    }
 
-    static func checksum(_ bytes: Data) -> UInt8 { 0 &- bytes.reduce(UInt8(0), &+) }
+        static func checksum(_ bytes: Data) -> UInt8 { 0 &- bytes.reduce(UInt8(0), &+) }
+    }
 
     enum Event: Equatable {
         case presence
@@ -217,12 +217,12 @@ enum CPMFiSAP {
         guard key.count == 16, iv.count == 16 else { throw CPError.malformed("AES 参数") }
         guard !data.isEmpty else { return Data() }
         var cryptor: CCCryptorRef?
-        let createStatus = data.withUnsafeBytes { _ in
-            CCCryptorCreateWithMode(kCCEncrypt, kCCModeCTR, kCCAlgorithmAES,
-                                    kCCModeOptionCTR_BE,
-                                    (iv as NSData).bytes, (key as NSData).bytes, key.count,
-                                    nil, 0, 0, &cryptor)
-        }
+        let createStatus = CCCryptorCreateWithMode(
+            CCOperation(kCCEncrypt), mode: CCMode(kCCModeCTR), alg: CCAlgorithm(kCCAlgorithmAES),
+            padding: CCPadding(ccNoPadding), iv: (iv as NSData).bytes,
+            key: (key as NSData).bytes, keyLength: key.count,
+            tweak: nil, tweakLength: 0, numRounds: 0, options: CCModeOptions(0),
+            cryptorRef: &cryptor)
         guard createStatus == kCCSuccess, let cryptor else {
             throw CPError.malformed("AES-CTR 初始化失败")
         }

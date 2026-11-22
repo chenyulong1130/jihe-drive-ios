@@ -56,7 +56,7 @@ struct CPAccessoryIdentity {
         catch { throw IdentityError.invalid("签名自检失败") }
     }
 
-    convenience init(certificateChain: Data, leafCertificate: Data, privateKeyX963: Data) throws {
+    init(certificateChain: Data, leafCertificate: Data, privateKeyX963: Data) throws {
         guard privateKeyX963.count == 97, privateKeyX963.first == 0x04 else {
             throw IdentityError.invalid("X9.63 私钥编码（应为 97 字节 P-256）")
         }

@@ -18,6 +18,7 @@ struct MirrorView: View {
     @State private var exportURL: URL?
     @State private var timer: Timer?
     @State private var showFullscreen = false
+    @State private var pollTick = 0
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -508,7 +509,7 @@ struct MirrorView: View {
                     }
                     .padding(.trailing, 8)
                     Button {
-                        controller.logs.removeAll()
+                        controller.clearLogs()
                         MirrorLogStore.clearAll()
                     } label: {
                         Image(systemName: "trash")
@@ -533,7 +534,7 @@ struct MirrorView: View {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { _ in
             if mode == "screen" {
-                objectWillChange.send()
+                pollTick += 1
             }
         }
     }
@@ -546,9 +547,8 @@ private struct BroadcastPickerView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> RPSystemBroadcastPickerView {
         let picker = RPSystemBroadcastPickerView(frame: .zero)
-        picker.showsPickerWhenApplicationIsActive = false
         picker.preferredExtension = preferredExtension
-        picker.buttonTintColor = .white
+        picker.showsMicrophoneButton = false
         return picker
     }
 

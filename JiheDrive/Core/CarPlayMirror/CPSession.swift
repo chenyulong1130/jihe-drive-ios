@@ -277,6 +277,10 @@ final class CPMediaSession {
     var onLog: ((String) -> Void)?
     var onVideo: ((Data, CPVideoCodec) -> Void)?
 
+    private func log(_ message: String) {
+        DispatchQueue.main.async { [weak self] in self?.onLog?(message) }
+    }
+
     init(queue: DispatchQueue, secret: SymmetricKey, peerAddress: String) {
         self.queue = queue
         self.secret = secret
@@ -407,6 +411,7 @@ final class CPMediaSession {
 
     private func sendHID(_ uuid: String, _ report: Data, label: String) -> Bool {
         sendCommand(["type": "hidSendReport", "uuid": uuid, "hidReport": report], label: label)
+        return true
     }
 
     private func sendCommand(_ command: [String: Any], label: String) {
