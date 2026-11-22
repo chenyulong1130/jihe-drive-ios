@@ -147,8 +147,10 @@ struct RideReplayView: View {
             return
         }
         guard replayScene == nil, let remote = vehicle.model3DURL, !vehicle.isGLBModel else { return }
-        let local = ResourceCache.existingFile(for: remote, folder: "models")
-            ?? await ResourceCache.file(for: remote, folder: "models")
+        var local = ResourceCache.existingFile(for: remote, folder: "models")
+        if local == nil {
+            local = await ResourceCache.file(for: remote, folder: "models")
+        }
         if let local, let scene = ReplayMapModel.scene(from: local) {
             replayScene = scene
         }
