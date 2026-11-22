@@ -561,8 +561,8 @@ final class ReplayCursorView: MKAnnotationView {
     private static let model3DSize = CGSize(width: 132, height: 96)
     /// 官方车图默认车头朝左（西，270°）
     private static let imageNose: CLLocationDirection = 270
-    /// GLB 默认车头朝右，航向再减 90° 才对准轨迹
-    private static let modelYawBias: CLLocationDirection = -90
+    /// GLB 默认车头朝右；再加 180° 后车头对准行驶方向（上次 -90° 会前后反）
+    private static let modelYawBias: CLLocationDirection = 90
 
     private let bubble = UILabel()
     private let dot = UIView()
