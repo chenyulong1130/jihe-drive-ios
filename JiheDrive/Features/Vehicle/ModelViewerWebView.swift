@@ -432,13 +432,17 @@ enum ModelViewerAsset {
         function resize() {
           const w = host.clientWidth || 1;
           const h = host.clientHeight || 1;
-          renderer.setSize(w, h, false);
-          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          // 先设像素比再 setSize：setSize 默认更新 canvas 的 CSS 尺寸为 w×h，
+          // 否则 canvas 按「属性像素数」显示，3x 屏上被放大 2 倍——车又大又糊
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+          renderer.setSize(w, h);
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
           needsRender = true;
         }
         window.addEventListener('resize', resize);
+        // 容器尺寸变化（弹层档位、首帧布局）也要重排，只靠 window.resize 不够
+        if (window.ResizeObserver) new ResizeObserver(resize).observe(host);
         resize();
 
         // ---------- 坐垫：FR-Seat-T 挂 SeatPivot 铰链节点，0.6s 缓动开合 ----------
@@ -517,6 +521,13 @@ enum ModelViewerAsset {
               }
             });
           }
+          // 对齐 model-viewer 的 camera-target auto 语义：把包围盒中心挪到
+          // 相机 target（0.02, 0.74, 0），模型不再依赖原始坐标摆放
+          const box = new THREE.Box3().setFromObject(gltf.scene);
+          const center = box.getCenter(new THREE.Vector3());
+          gltf.scene.position.x += 0.02 - center.x;
+          gltf.scene.position.z += 0 - center.z;
+          gltf.scene.position.y += 0.74 - center.y;
           needsRender = true;
         });
 
