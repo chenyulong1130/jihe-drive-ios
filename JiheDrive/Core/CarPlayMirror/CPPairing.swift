@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 import Security
-import BigInt
+// BigInt 以源码形式编入 target，无需 import 模块
 
 // MARK: - SRP-6a 服务端（RFC 5054 3072-bit 组，HomeKit/CarPlay 配对风格）
 
