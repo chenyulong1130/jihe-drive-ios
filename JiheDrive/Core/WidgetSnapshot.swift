@@ -182,19 +182,34 @@ enum WidgetSnapshot {
         signin: SigninStore? = nil,
         ride: RideTrackService.RideExtra? = nil
     ) {
-        var snap = read() ?? WidgetSnap()
+        let vehicle = model.selectedVehicle
+        let previous = vehicle.flatMap { readVin($0.vinNo) }
+        var snap = previous ?? WidgetSnap()
+        if previous == nil, let account = readIgnoringVin() {
+            snap.pointsTotal = account.pointsTotal
+            snap.pointsToday = account.pointsToday
+            snap.signedToday = account.signedToday
+            snap.communityDone = account.communityDone
+            snap.continueDays = account.continueDays
+            snap.totalSignCount = account.totalSignCount
+            snap.todaySignScore = account.todaySignScore
+            snap.lotteryLeft = account.lotteryLeft
+            snap.lotteryText = account.lotteryText
+            snap.lotteryClaimed = account.lotteryClaimed
+            snap.lotteryScore = account.lotteryScore
+        }
         snap.loggedIn = ZeehoClient.shared.isLoggedIn
-        if let vehicle = model.selectedVehicle {
+        if let vehicle {
             snap.name = vehicle.name
             snap.vin = vehicle.vinNo
-            if vehicle.soc > 0 { snap.soc = vehicle.soc }
-            if vehicle.rangeKm > 0 { snap.rangeKm = vehicle.rangeKm }
+            snap.soc = vehicle.soc
+            snap.rangeKm = vehicle.rangeKm
             snap.locked = vehicle.isLocked
             snap.online = vehicle.isOnline
             snap.charging = vehicle.isCharging
             snap.totalMile = vehicle.totalMileKm
-            snap.monthMile = vehicle.monthMileage ?? snap.monthMile
-            snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+            snap.monthMile = vehicle.monthMileage ?? "--"
+            snap.imageURL = vehicle.imageURL?.absoluteString ?? ""
             snap.imageData = nil
             if let url = vehicle.imageURL,
                let image = ResourceCache.cachedImage(url),
@@ -249,13 +264,14 @@ enum WidgetSnapshot {
         payload["sessionUserId"] = ZeehoClient.shared.userId ?? ""
         let wanted = selectedVin()
         payload["selectedVin"] = wanted ?? snap.vin
+        payload["userSelectedVin"] = wanted ?? snap.vin
         writeVinFile(snap, payload: payload)
         if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted) {
             return
         }
 
         if let defaults = suiteDefaults() {
-            for (key, value) in payload {
+            for (key, value) in payload where key != "userSelectedVin" {
                 defaults.set(value, forKey: key)
             }
             defaults.synchronize()
@@ -286,25 +302,33 @@ enum WidgetSnapshot {
                 return hit
             }
             if let acc = newest(candidates) {
-                var stub = WidgetSnap()
-                stub.loggedIn = acc.loggedIn
-                stub.vin = wanted
-                stub.pointsTotal = acc.pointsTotal
-                stub.pointsToday = acc.pointsToday
-                stub.signedToday = acc.signedToday
-                stub.communityDone = acc.communityDone
-                stub.continueDays = acc.continueDays
-                stub.totalSignCount = acc.totalSignCount
-                stub.todaySignScore = acc.todaySignScore
-                stub.lotteryLeft = acc.lotteryLeft
-                stub.lotteryText = acc.lotteryText
-                stub.lotteryClaimed = acc.lotteryClaimed
-                stub.lotteryScore = acc.lotteryScore
-                return stub
+                return accountStub(from: acc, vin: wanted)
             }
             return nil
         }
         return newest(candidates)
+    }
+
+    static func readIgnoringVin() -> WidgetSnap? {
+        newest([readSuite(), readFile(), readStandard()].compactMap { $0 })
+    }
+
+    private static func accountStub(from acc: WidgetSnap, vin: String) -> WidgetSnap {
+        var stub = WidgetSnap()
+        stub.loggedIn = acc.loggedIn
+        stub.vin = vin
+        stub.pointsTotal = acc.pointsTotal
+        stub.pointsToday = acc.pointsToday
+        stub.signedToday = acc.signedToday
+        stub.communityDone = acc.communityDone
+        stub.continueDays = acc.continueDays
+        stub.totalSignCount = acc.totalSignCount
+        stub.todaySignScore = acc.todaySignScore
+        stub.lotteryLeft = acc.lotteryLeft
+        stub.lotteryText = acc.lotteryText
+        stub.lotteryClaimed = acc.lotteryClaimed
+        stub.lotteryScore = acc.lotteryScore
+        return stub
     }
 
     static func sessionToken() -> String? {
@@ -336,6 +360,7 @@ enum WidgetSnapshot {
 
     static func persistSelectedVin(_ vin: String?) {
         let value = vin ?? ""
+        suiteDefaults()?.set(value, forKey: "userSelectedVin")
         suiteDefaults()?.set(value, forKey: "selectedVin")
         suiteDefaults()?.synchronize()
         UserDefaults.standard.set(value, forKey: "jihe.selected.vin")
@@ -350,6 +375,7 @@ enum WidgetSnapshot {
                try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
            }) {
             json["selectedVin"] = value
+            json["userSelectedVin"] = value
             if let data = try? JSONSerialization.data(withJSONObject: json) {
                 try? data.write(to: url, options: [.atomic])
             }
@@ -358,6 +384,7 @@ enum WidgetSnapshot {
 
     static func selectedVin() -> String? {
         let candidates: [String?] = [
+            suiteDefaults()?.string(forKey: "userSelectedVin"),
             selectedVinFile(),
             suiteDefaults()?.string(forKey: "selectedVin"),
             snapshotSelectedVin(),
@@ -399,7 +426,8 @@ enum WidgetSnapshot {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        let vin = "\(json["selectedVin"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+        let vin = "\(json["userSelectedVin"] ?? json["selectedVin"] ?? "")"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return vin.isEmpty ? nil : vin
     }
 

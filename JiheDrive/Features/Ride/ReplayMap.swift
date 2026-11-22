@@ -1,6 +1,8 @@
 import MapKit
+import SceneKit
 import SwiftUI
 import UIKit
+import WebKit
 
 /// 轨迹回放地图：按速度分段着色（低蓝 → 高红），无光环。
 /// 标记在两个采样点之间插值，回放时是平滑移动而不是逐点跳。
@@ -14,8 +16,14 @@ struct ReplayMap: UIViewRepresentable {
     let follow: Bool
     /// 回放时切 3D 地形 + 追车相机
     var cinematic: Bool = false
-    /// 当前车 3D/官方图，追车时当车模
+    /// 2D：官方车辆图片；没有图才退回圆点
     var vehicleImage: UIImage? = nil
+    /// SceneKit 立体车模（USDZ / 能转的 GLB）
+    var modelScene: SCNScene? = nil
+    /// GLB 本地文件，SceneKit 吃不了时用 model-viewer 铺到地图上
+    var glbFile: URL? = nil
+    /// true 显示立体车模，false 显示车辆图片
+    var use3D: Bool = false
     /// 全览边距。卡片/全屏都不跟车时用均匀边距，露出整段轨迹。
     var edgePadding: UIEdgeInsets = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
 
@@ -32,6 +40,9 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.times = times
         context.coordinator.duration = duration
         context.coordinator.vehicleImage = vehicleImage
+        context.coordinator.modelScene = modelScene
+        context.coordinator.glbFile = glbFile
+        context.coordinator.use3D = use3D
         context.coordinator.configure(map: map, points: points, speeds: speeds)
         return map
     }
@@ -41,6 +52,9 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.times = times
         context.coordinator.duration = duration
         context.coordinator.vehicleImage = vehicleImage
+        context.coordinator.modelScene = modelScene
+        context.coordinator.glbFile = glbFile
+        context.coordinator.use3D = use3D
         context.coordinator.update(map: map, progress: progress, follow: follow, cinematic: cinematic)
     }
 
@@ -74,6 +88,9 @@ struct ReplayMap: UIViewRepresentable {
         var times: [TimeInterval] = []
         var duration: TimeInterval = 0
         var vehicleImage: UIImage?
+        var modelScene: SCNScene?
+        var glbFile: URL?
+        var use3D = false
         private var modelPoints: [Coordinate] = []
         private var progress: Double = 0
         private var progressVelocity: Double = 0
@@ -177,6 +194,7 @@ struct ReplayMap: UIViewRepresentable {
             map.isZoomEnabled = true
             map.isScrollEnabled = true
             applyStyle(map: map, cinematic: cinematic)
+            refreshCursor(on: map)
             guard allPoints.count > 1 else { return }
 
             let now = CACurrentMediaTime()
@@ -233,14 +251,29 @@ struct ReplayMap: UIViewRepresentable {
                 didFit = false
                 fit(map: map, points: allPoints)
             }
-            if let marker, let view = map.view(for: marker) as? ReplayCursorView {
-                view.apply(
-                    speed: marker.speed,
-                    vehicleImage: vehicleImage,
-                    heading: marker.heading,
-                    mapHeading: map.camera.heading
-                )
-            }
+            refreshCursor(on: map)
+        }
+
+        func refreshCursor(on map: MKMapView) {
+            guard let marker, let view = map.view(for: marker) as? ReplayCursorView else { return }
+            applyCursor(view, speed: marker.speed, heading: marker.heading, map: map)
+        }
+
+        private func applyCursor(
+            _ view: ReplayCursorView,
+            speed: Double,
+            heading: CLLocationDirection,
+            map: MKMapView
+        ) {
+            view.apply(
+                speed: speed,
+                vehicleImage: vehicleImage,
+                modelScene: modelScene,
+                glbFile: glbFile,
+                use3D: use3D,
+                heading: heading,
+                mapHeading: map.camera.heading
+            )
         }
 
         @discardableResult
@@ -264,12 +297,7 @@ struct ReplayMap: UIViewRepresentable {
             marker?.speed = sample.speed
             marker?.heading = heading
             if let marker, let view = map.view(for: marker) as? ReplayCursorView {
-                view.apply(
-                    speed: sample.speed,
-                    vehicleImage: vehicleImage,
-                    heading: heading,
-                    mapHeading: map.camera.heading
-                )
+                applyCursor(view, speed: sample.speed, heading: heading, map: map)
             }
             return current
         }
@@ -410,12 +438,7 @@ struct ReplayMap: UIViewRepresentable {
                 ) as? ReplayCursorView
                     ?? ReplayCursorView(annotation: cursor, reuseIdentifier: ReplayCursorView.reuseID)
                 view.annotation = cursor
-                view.apply(
-                    speed: cursor.speed,
-                    vehicleImage: vehicleImage,
-                    heading: cursor.heading,
-                    mapHeading: mapView.camera.heading
-                )
+                applyCursor(view, speed: cursor.speed, heading: cursor.heading, map: mapView)
                 return view
             }
             guard let point = annotation as? MKPointAnnotation else { return nil }
@@ -534,13 +557,18 @@ final class ReplayCursorAnnotation: MKPointAnnotation {
 final class ReplayCursorView: MKAnnotationView {
     static let reuseID = "replay-cursor"
     private static let dotSize: CGFloat = 14
-    private static let modelSize = CGSize(width: 78, height: 52)
+    private static let photoSize = CGSize(width: 78, height: 52)
+    private static let model3DSize = CGSize(width: 132, height: 96)
     /// 官方车图默认车头朝左（西，270°）
     private static let imageNose: CLLocationDirection = 270
 
     private let bubble = UILabel()
     private let dot = UIView()
     private let model = UIImageView()
+    private let sceneView = SCNView()
+    private var web: ReplayMapGLBView?
+    private var yawNode: SCNNode?
+    private var attachedScene: SCNScene?
     private var shownHeading: CLLocationDirection?
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
@@ -548,6 +576,8 @@ final class ReplayCursorView: MKAnnotationView {
         canShowCallout = false
         clipsToBounds = false
         zPriority = .max
+        displayPriority = .required
+        collisionMode = .none
         frame = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
         centerOffset = .zero
 
@@ -570,9 +600,21 @@ final class ReplayCursorView: MKAnnotationView {
         model.layer.shadowOffset = CGSize(width: 0, height: 3)
         model.isHidden = true
 
-        addSubview(bubble)
+        sceneView.backgroundColor = .clear
+        sceneView.isOpaque = false
+        sceneView.layer.isOpaque = false
+        sceneView.autoenablesDefaultLighting = false
+        sceneView.antialiasingMode = .multisampling2X
+        sceneView.allowsCameraControl = false
+        sceneView.isUserInteractionEnabled = false
+        sceneView.rendersContinuously = true
+        sceneView.preferredFramesPerSecond = 30
+        sceneView.isHidden = true
+
         addSubview(dot)
         addSubview(model)
+        addSubview(sceneView)
+        addSubview(bubble)
         apply(speed: 0, vehicleImage: nil)
     }
 
@@ -583,7 +625,9 @@ final class ReplayCursorView: MKAnnotationView {
     func apply(
         speed: Double,
         vehicleImage: UIImage? = nil,
-        cinematic: Bool = false,
+        modelScene: SCNScene? = nil,
+        glbFile: URL? = nil,
+        use3D: Bool = false,
         heading: CLLocationDirection = 0,
         mapHeading: CLLocationDirection = 0
     ) {
@@ -595,18 +639,48 @@ final class ReplayCursorView: MKAnnotationView {
         let textSize = bubble.sizeThatFits(CGSize(width: 120, height: 20))
         let width = max(44, textSize.width + 14)
 
-        let useModel = vehicleImage != nil
+        let live3D = use3D && (modelScene != nil || glbFile != nil)
+        let showPhoto = !live3D && vehicleImage != nil
         model.image = vehicleImage
-        model.isHidden = !useModel
-        dot.isHidden = useModel
+        model.isHidden = !showPhoto
+        dot.isHidden = live3D || showPhoto
+        sceneView.rendersContinuously = live3D && modelScene != nil
 
-        if useModel {
-            bounds = CGRect(origin: .zero, size: Self.modelSize)
-            model.bounds = CGRect(origin: .zero, size: Self.modelSize)
-            model.center = CGPoint(x: Self.modelSize.width / 2, y: Self.modelSize.height / 2)
-            pointVehicle(heading: heading, mapHeading: mapHeading)
+        if live3D {
+            model.transform = .identity
+            bounds = CGRect(origin: .zero, size: Self.model3DSize)
+            if let modelScene {
+                attachScene(modelScene)
+                sceneView.isHidden = false
+                sceneView.frame = bounds
+                web?.isHidden = true
+                sceneView.isPlaying = true
+                pointScene(heading: heading, mapHeading: mapHeading)
+            } else if let glbFile {
+                sceneView.isHidden = true
+                sceneView.isPlaying = false
+                attachGLB(glbFile)
+                web?.isHidden = false
+                web?.frame = bounds
+                pointGLB(heading: heading, mapHeading: mapHeading)
+            }
             bubble.frame = CGRect(
-                x: (Self.modelSize.width - width) / 2,
+                x: (Self.model3DSize.width - width) / 2,
+                y: -26,
+                width: width,
+                height: 20
+            )
+            centerOffset = CGPoint(x: 0, y: -22)
+        } else if showPhoto {
+            sceneView.isHidden = true
+            sceneView.isPlaying = false
+            web?.isHidden = true
+            bounds = CGRect(origin: .zero, size: Self.photoSize)
+            model.bounds = CGRect(origin: .zero, size: Self.photoSize)
+            model.center = CGPoint(x: Self.photoSize.width / 2, y: Self.photoSize.height / 2)
+            pointPhoto(heading: heading, mapHeading: mapHeading)
+            bubble.frame = CGRect(
+                x: (Self.photoSize.width - width) / 2,
                 y: -26,
                 width: width,
                 height: 20
@@ -615,6 +689,9 @@ final class ReplayCursorView: MKAnnotationView {
         } else {
             shownHeading = nil
             model.transform = .identity
+            sceneView.isHidden = true
+            sceneView.isPlaying = false
+            web?.isHidden = true
             bounds = CGRect(x: 0, y: 0, width: Self.dotSize, height: Self.dotSize)
             dot.frame = bounds
             bubble.frame = CGRect(
@@ -627,8 +704,25 @@ final class ReplayCursorView: MKAnnotationView {
         }
     }
 
-    /// 车头对准轨迹方向；气泡不转。地图旋转时扣掉相机朝向。
-    private func pointVehicle(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
+    private func attachScene(_ scene: SCNScene) {
+        guard attachedScene !== scene else { return }
+        attachedScene = scene
+        sceneView.scene = scene
+        yawNode = scene.rootNode.childNode(withName: "replay-yaw", recursively: false)
+        sceneView.pointOfView = scene.rootNode.childNode(withName: "replay-cam", recursively: false)
+    }
+
+    private func attachGLB(_ file: URL) {
+        if web == nil {
+            let view = ReplayMapGLBView.make()
+            view.isHidden = true
+            insertSubview(view, belowSubview: bubble)
+            web = view
+        }
+        web?.loadGLB(file)
+    }
+
+    private func screenHeading(heading: CLLocationDirection, mapHeading: CLLocationDirection) -> CLLocationDirection {
         var screen = heading - mapHeading
         while screen < 0 { screen += 360 }
         while screen >= 360 { screen -= 360 }
@@ -642,8 +736,74 @@ final class ReplayCursorView: MKAnnotationView {
         while wrapped < 0 { wrapped += 360 }
         while wrapped >= 360 { wrapped -= 360 }
         shownHeading = wrapped
+        return wrapped
+    }
 
+    /// 车头对准轨迹方向；气泡不转。地图旋转时扣掉相机朝向。
+    private func pointPhoto(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
+        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading)
         let radians = (wrapped - Self.imageNose) * .pi / 180
         model.transform = CGAffineTransform(rotationAngle: radians)
+    }
+
+    private func pointScene(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
+        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading)
+        yawNode?.eulerAngles.y = -Float(wrapped * .pi / 180)
+    }
+
+    private func pointGLB(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
+        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading)
+        web?.setYaw(wrapped)
+    }
+}
+
+/// 地图标注里的 GLB 立体车：独立 scheme，不和车辆页 model-viewer 抢缓存。
+final class ReplayMapGLBView: WKWebView {
+    private static let mapScheme = "jhmap3d"
+
+    private let schemeHandler: ModelSchemeHandler
+    private var loadedFile: URL?
+    private var lastYaw = Double.nan
+
+    static func make() -> ReplayMapGLBView {
+        let handler = ModelSchemeHandler()
+        let config = WKWebViewConfiguration()
+        config.setURLSchemeHandler(handler, forURLScheme: mapScheme)
+        return ReplayMapGLBView(handler: handler, configuration: config)
+    }
+
+    private init(handler: ModelSchemeHandler, configuration: WKWebViewConfiguration) {
+        self.schemeHandler = handler
+        super.init(frame: .zero, configuration: configuration)
+        isOpaque = false
+        backgroundColor = .clear
+        underPageBackgroundColor = .clear
+        isUserInteractionEnabled = false
+        scrollView.isScrollEnabled = false
+        scrollView.backgroundColor = .clear
+        scrollView.bounces = false
+        scrollView.contentInsetAdjustmentBehavior = .never
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func loadGLB(_ file: URL) {
+        guard loadedFile != file else { return }
+        guard let data = try? Data(contentsOf: file), data.count > 1024 else { return }
+        guard let script = ModelViewerAsset.shared.scriptData else { return }
+        loadedFile = file
+        lastYaw = .nan
+        schemeHandler.replace(glb: data, script: script)
+        let html = ModelViewerAsset.mapHTML()
+        let base = URL(string: "\(Self.mapScheme)://local/index.html")!
+        loadHTMLString(html, baseURL: base)
+    }
+
+    func setYaw(_ degrees: Double) {
+        guard abs(degrees - lastYaw) > 2 || lastYaw.isNaN else { return }
+        lastYaw = degrees
+        evaluateJavaScript("window.jhSetYaw && window.jhSetYaw(\(degrees))", completionHandler: nil)
     }
 }

@@ -200,8 +200,8 @@ final class MessageStore: ObservableObject {
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
             return
         }
-        let incoming = fresh.filter(\.unread)
-        let notify = incoming.isEmpty ? Array(fresh.prefix(1)) : Array(incoming.prefix(3))
+        let incoming = fresh.filter { $0.unread && !$0.isSocial }
+        let notify = incoming.isEmpty ? [] : Array(incoming.prefix(3))
         for item in notify {
             let content = UNMutableNotificationContent()
             content.title = item.title

@@ -144,11 +144,19 @@ struct VehicleView: View {
             await signin.syncWidget(model: model, ride: rideExtra)
             syncChargeIsland()
 
-            // 前台约 90 秒轻量刷新；离开车辆 Tab 不刷，避免切页抢网
+            // 充电中约 20 秒刷电池；平时约 90 秒。离开车辆 Tab 不刷
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                let charging = model.batteries.first?.isLiveCharging == true
+                try? await Task.sleep(nanoseconds: charging ? 20_000_000_000 : 90_000_000_000)
                 guard !Task.isCancelled else { break }
                 guard scenePhase == .active, activeMainTab == .vehicle else { continue }
+                if charging {
+                    if let vin = model.selectedVehicle?.vinNo {
+                        await model.loadBattery(vin: vin, quiet: true)
+                    }
+                    syncChargeIsland()
+                    continue
+                }
                 await model.refreshQuiet()
                 await messages.refresh()
                 syncChargeIsland()
@@ -217,7 +225,7 @@ struct VehicleView: View {
             tireFrontTemp: model.tire?.frontTemp,
             tireRearTemp: model.tire?.rearTemp,
             topInset: bar + 8,
-            height: max(348, fullHeight * 0.40),
+            height: max(360, fullHeight * 0.42),
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
@@ -258,7 +266,7 @@ struct VehicleView: View {
         let vehicle = model.selectedVehicle
         let remote = vehicle?.model3DURL
         if vehicle?.isGLBModel == true {
-            if let file = HeroAssetCache.glb(for: vin) ?? remote.flatMap({ GLBModelStore.existing(for: $0) }) {
+            if let file = GLBModelStore.cached(vin: vin, remote: remote) {
                 HeroAssetCache.rememberGLB(file, vin: vin)
                 heroGLB = file
                 readyGLBVins.insert(vin)
@@ -301,10 +309,15 @@ struct VehicleView: View {
             return
         }
         if vehicle.isGLBModel {
-            let file = try? await GLBModelStore.localFile(for: url)
+            if let cached = GLBModelStore.cached(vin: vin, remote: url) {
+                readyGLBVins.insert(vin)
+                heroGLB = cached
+                snapshotMarkerIfNeeded(vin: vin)
+                return
+            }
+            let file = try? await GLBModelStore.localFile(for: url, vin: vin)
             guard model.selectedVehicle?.vinNo == vin else { return }
             if let file {
-                HeroAssetCache.rememberGLB(file, vin: vin)
                 readyGLBVins.insert(vin)
                 heroGLB = file
             }

@@ -6,12 +6,13 @@ enum ChargeLiveActivityController {
     static func sync(vehicle: Vehicle, battery: BatteryInfo?) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
-        let charging = battery?.isCharging ?? vehicle.isCharging
-        let soc = min(max(battery?.level ?? vehicle.soc, 0), 100)
-        let range = battery?.rangeKm ?? vehicle.rangeKm
-        let eta = etaText(battery: battery, charging: charging)
+        let liveBattery = battery.flatMap { $0.id.hasPrefix("vehicle-") ? nil : $0 }
+        let charging = liveBattery?.isLiveCharging == true
+        let soc = min(max(liveBattery?.level ?? vehicle.soc, 0), 100)
+        let range = liveBattery?.rangeKm ?? vehicle.rangeKm
+        let eta = etaText(battery: charging ? liveBattery : nil, charging: charging)
         let batteryName = {
-            let name = battery?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let name = liveBattery?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return name.isEmpty ? "动力电池" : name
         }()
         let state = ChargeActivityAttributes.ContentState(
@@ -21,7 +22,7 @@ enum ChargeLiveActivityController {
             etaText: eta,
             vehicleName: vehicle.name,
             batteryName: batteryName,
-            currentAmps: battery?.current,
+            currentAmps: liveBattery?.current,
             updatedAt: Date()
         )
         let stale = Date().addingTimeInterval(45 * 60)
@@ -40,8 +41,8 @@ enum ChargeLiveActivityController {
                 _ = try? Activity.request(attributes: attributes, content: content, pushType: nil)
             }
         } else {
-            for activity in existing {
-                Task { await activity.end(content, dismissalPolicy: .immediate) }
+            for activity in Activity<ChargeActivityAttributes>.activities {
+                Task { await activity.end(nil, dismissalPolicy: .immediate) }
             }
         }
     }

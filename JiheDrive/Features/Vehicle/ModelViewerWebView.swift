@@ -213,10 +213,10 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "-6.5deg 86deg 5.05m"
-        let target = "0.02m 0.74m auto"
-        let minOrbit = interactive ? "auto 78deg 2.8m" : "auto 86deg 4.8m"
-        let maxOrbit = interactive ? "auto 95deg 7.2m" : "auto 86deg 5.4m"
+        let orbit = "-6.5deg 90deg 5.0m"
+        let target = "0.02m 0.70m auto"
+        let minOrbit = interactive ? "auto 84deg 2.8m" : "auto 90deg 4.8m"
+        let maxOrbit = interactive ? "auto 94deg 7.2m" : "auto 90deg 5.4m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
         let controls = interactive ? "camera-controls touch-action=\"none\"" : "interaction-prompt=\"none\""
 
@@ -339,6 +339,70 @@ enum ModelViewerAsset {
         </html>
         """
     }
+
+    /// 轨迹回放地图上的立体车模：略俯视、带接地阴影，靠 orientation 跟着航向转。
+    static func mapHTML() -> String {
+        let orbit = "168deg 70deg 5.6m"
+        let target = "0m 0.40m 0m"
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <script type="module" src="model-viewer.min.js"></script>
+        <style>
+          html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: transparent; overflow: hidden;
+          }
+          model-viewer {
+            width: 100%; height: 100%;
+            background: transparent;
+            --progress-bar-height: 0px;
+            --progress-bar-color: transparent;
+          }
+          model-viewer::part(default-progress-bar) { display: none; }
+        </style>
+        </head>
+        <body>
+        <model-viewer
+          id="viewer"
+          src="model.glb"
+          loading="eager"
+          camera-orbit="\(orbit)"
+          camera-target="\(target)"
+          field-of-view="26deg"
+          shadow-intensity="1.2"
+          shadow-softness="0.75"
+          exposure="1.05"
+          environment-image="neutral"
+          orientation="0deg 0deg 0deg"
+          reveal="auto"
+          interaction-prompt="none"
+          disable-pan
+          disable-tap
+          interpolation-decay="50"
+          minimum-render-scale="0.5">
+        </model-viewer>
+        <script>
+          const viewer = document.getElementById('viewer');
+          viewer.addEventListener('load', () => {
+            if (viewer.pause) viewer.pause();
+          });
+          window.jhSetYaw = (deg) => {
+            if (!viewer) return;
+            let x = Number(deg);
+            if (!isFinite(x)) return;
+            while (x < 0) x += 360;
+            while (x >= 360) x -= 360;
+            viewer.orientation = '0deg 0deg ' + x + 'deg';
+          };
+        </script>
+        </body>
+        </html>
+        """
+    }
 }
 
 // MARK: - 本地资源服务
@@ -402,36 +466,61 @@ enum GLBModelStore {
     /// 缓存名带 strip 版本号，节点清洗规则变更时自动换文件
     private static let stripTag = "s2"
 
+    static func cached(vin: String, remote: URL?) -> URL? {
+        if let file = HeroAssetCache.glb(for: vin) { return file }
+        if let remote, let file = existing(for: remote) {
+            HeroAssetCache.rememberGLB(file, vin: vin)
+            return file
+        }
+        return nil
+    }
+
     static func existing(for remote: URL) -> URL? {
-        let target = destination(for: remote)
-        if let size = try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int,
-           size > 1024 {
-            return target
+        for target in destinations(for: remote) {
+            if let size = try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int,
+               size > 1024 {
+                return target
+            }
         }
         return nil
     }
 
     private static func destination(for remote: URL) -> URL {
-        let dir = ResourceCache.directory.appendingPathComponent("models", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let key = ResourceCache.hash(remote.absoluteString)
-        return dir.appendingPathComponent("\(key)-\(stripTag).glb")
+        destinations(for: remote)[0]
     }
 
-    static func localFile(for remote: URL) async throws -> URL {
-        let target = destination(for: remote)
-        if let size = try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int,
-           size > 1024 {
-            return target
+    private static func destinations(for remote: URL) -> [URL] {
+        let dir = ResourceCache.directory.appendingPathComponent("models", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stable = ResourceCache.hash(ResourceCache.stableIdentity(remote))
+        let full = ResourceCache.hash(remote.absoluteString)
+        var urls = [dir.appendingPathComponent("\(stable)-\(stripTag).glb")]
+        if stable != full {
+            urls.append(dir.appendingPathComponent("\(full)-\(stripTag).glb"))
+        }
+        return urls
+    }
+
+    static func localFile(for remote: URL, vin: String? = nil) async throws -> URL {
+        if let vin, let cached = cached(vin: vin, remote: remote) {
+            return cached
+        }
+        if let hit = existing(for: remote) {
+            if let vin { HeroAssetCache.rememberGLB(hit, vin: vin) }
+            return hit
         }
 
         guard let source = await ResourceCache.file(for: remote, folder: "models") else {
             throw URLError(.cannotOpenFile)
         }
+        let target = destination(for: remote)
         let raw = try Data(contentsOf: source)
         let cleaned = GLBNodeStripper.strip(raw)
         try? FileManager.default.removeItem(at: target)
         try cleaned.write(to: target, options: .atomic)
+        if let vin {
+            HeroAssetCache.rememberGLB(target, vin: vin)
+        }
         return target
     }
 }

@@ -34,10 +34,9 @@ enum WidgetLiveSync {
             return empty
         }
 
-        let cachedSnap = WidgetSnapshot.read()
         let wantedVin = WidgetSnapshot.selectedVin()
-            ?? cachedSnap?.vin
             ?? existing?.vehicle?.vinNo
+        let cachedSnap = WidgetSnapshot.read()
         var snap = cachedSnap ?? WidgetSnap()
         snap.loggedIn = true
         if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
@@ -177,7 +176,7 @@ enum WidgetLiveSync {
         if let battery {
             if battery.soc > 0 { snap.soc = battery.soc }
             if battery.range > 0 { snap.rangeKm = battery.range }
-            snap.charging = battery.charging || snap.charging
+            snap.charging = battery.charging
         }
         if snap.soc <= 0, let cached = cachedSnap, cached.soc > 0,
            WidgetSnapshot.sameVin(cached.vin, snap.vin) {
@@ -246,9 +245,6 @@ enum WidgetLiveSync {
         let wanted = wanted ?? WidgetSnapshot.selectedVin() ?? hint?.vinNo
         if wanted == nil || wanted?.isEmpty == true {
             if let hint { return hint }
-            if let res = try? await ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicle/list") {
-                return Vehicle.list(from: res).first
-            }
             return nil
         }
         guard let vin = wanted, !vin.isEmpty else { return nil }

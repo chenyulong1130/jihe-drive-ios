@@ -25,30 +25,44 @@ enum ResourceCache {
         return dir
     }
 
+    /// 去掉签名参数，同一份模型 / 图片不会因为 query 变了就当新文件再下。
+    static func stableIdentity(_ remote: URL) -> String {
+        var parts = URLComponents(url: remote, resolvingAgainstBaseURL: false)
+        parts?.query = nil
+        parts?.fragment = nil
+        parts?.user = nil
+        parts?.password = nil
+        return parts?.string ?? remote.absoluteString
+    }
+
     static func destination(for remote: URL, folder: String) -> URL {
         let dir = directory.appendingPathComponent(folder, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = remote.pathExtension.isEmpty ? "bin" : remote.pathExtension
-        return dir.appendingPathComponent(hash(remote.absoluteString) + "." + ext)
+        return dir.appendingPathComponent(hash(stableIdentity(remote)) + "." + ext)
     }
 
     static func existingFile(for remote: URL, folder: String) -> URL? {
         if remote.isFileURL { return remote }
-        let dest = destination(for: remote, folder: folder)
-        if let size = try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int,
-           size > 256 {
-            return dest
+        let ext = remote.pathExtension.isEmpty ? "bin" : remote.pathExtension
+        let dir = directory.appendingPathComponent(folder, isDirectory: true)
+        let candidates = [
+            destination(for: remote, folder: folder),
+            dir.appendingPathComponent(hash(remote.absoluteString) + "." + ext)
+        ]
+        for dest in candidates {
+            if let size = try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int,
+               size > 256 {
+                return dest
+            }
         }
         return nil
     }
 
     static func file(for remote: URL, folder: String) async -> URL? {
         if remote.isFileURL { return remote }
+        if let hit = existingFile(for: remote, folder: folder) { return hit }
         let dest = destination(for: remote, folder: folder)
-        if let size = try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int,
-           size > 256 {
-            return dest
-        }
         do {
             var request = URLRequest(url: remote)
             request.cachePolicy = .returnCacheDataElseLoad
@@ -92,16 +106,75 @@ enum ResourceCache {
     }
 }
 
-/// 按 VIN 记住已加载过的车图 / 3D，切回来不再重新下载
+/// 按 VIN 记住已加载过的车图 / 3D，切回来不再重新下载；GLB 路径落盘，杀进程还在。
 enum HeroAssetCache {
     private static var glbFiles: [String: URL] = [:]
     private static var photos: [String: UIImage] = [:]
     private static var snapshots: [String: UIImage] = [:]
+    private static var didLoadIndex = false
 
-    static func glb(for vin: String) -> URL? { glbFiles[vin] }
+    static func glb(for vin: String) -> URL? {
+        loadIndexIfNeeded()
+        if let file = glbFiles[vin], usable(file) { return file }
+        let pinned = vinGLBURL(vin)
+        if usable(pinned) {
+            glbFiles[vin] = pinned
+            return pinned
+        }
+        return nil
+    }
 
     static func rememberGLB(_ file: URL, vin: String) {
-        glbFiles[vin] = file
+        loadIndexIfNeeded()
+        guard usable(file) else { return }
+        let pinned = vinGLBURL(vin)
+        if file.standardizedFileURL != pinned.standardizedFileURL, !usable(pinned) {
+            try? FileManager.default.createDirectory(
+                at: pinned.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? FileManager.default.removeItem(at: pinned)
+            try? FileManager.default.copyItem(at: file, to: pinned)
+        }
+        glbFiles[vin] = usable(pinned) ? pinned : file
+        saveIndex()
+    }
+
+    private static func vinGLBURL(_ vin: String) -> URL {
+        let safe = vin.replacingOccurrences(of: "/", with: "_")
+        return ResourceCache.directory
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("vin-\(safe)-s2.glb")
+    }
+
+    private static func usable(_ file: URL) -> Bool {
+        guard let size = try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int else {
+            return false
+        }
+        return size > 1024
+    }
+
+    private static var indexURL: URL {
+        ResourceCache.directory.appendingPathComponent("hero-glb.json")
+    }
+
+    private static func loadIndexIfNeeded() {
+        guard !didLoadIndex else { return }
+        didLoadIndex = true
+        guard let data = try? Data(contentsOf: indexURL),
+              let map = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return
+        }
+        for (vin, path) in map {
+            let url = URL(fileURLWithPath: path)
+            if usable(url) { glbFiles[vin] = url }
+        }
+    }
+
+    private static func saveIndex() {
+        let map = glbFiles.mapValues(\.path)
+        guard let data = try? JSONSerialization.data(withJSONObject: map) else { return }
+        try? data.write(to: indexURL, options: .atomic)
     }
 
     static func photo(for vin: String) -> UIImage? {

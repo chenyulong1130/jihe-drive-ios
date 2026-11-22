@@ -1,5 +1,6 @@
 import Foundation
 import MapKit
+import SceneKit
 import SwiftUI
 import UIKit
 
@@ -15,17 +16,37 @@ struct RideReplayView: View {
     @State private var rate: Double = 1
     @State private var follow = false
     @State private var showFullMap = false
-    @State private var prefer3D = false
+    @State private var prefer3D: Bool
     @State private var liveAddress: String?
+    @State private var replayPhoto: UIImage?
+    @State private var replayScene: SCNScene?
+    @State private var replayGLB: URL?
 
     init(vehicle: Vehicle, track: RideTrack) {
         self.vehicle = vehicle
         self.tracks = [track]
+        _prefer3D = State(initialValue: vehicle.model3DURL != nil)
+        _replayPhoto = State(initialValue: Self.cachedPhoto(for: vehicle))
+        _replayGLB = State(initialValue: Self.cachedGLB(for: vehicle))
     }
 
     init(vehicle: Vehicle, tracks: [RideTrack]) {
         self.vehicle = vehicle
         self.tracks = tracks
+        _prefer3D = State(initialValue: vehicle.model3DURL != nil)
+        _replayPhoto = State(initialValue: Self.cachedPhoto(for: vehicle))
+        _replayGLB = State(initialValue: Self.cachedGLB(for: vehicle))
+    }
+
+    private static func cachedPhoto(for vehicle: Vehicle) -> UIImage? {
+        HeroAssetCache.photo(for: vehicle.vinNo)
+            ?? ResourceCache.cachedImage(vehicle.imageURL)
+            ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo)
+    }
+
+    private static func cachedGLB(for vehicle: Vehicle) -> URL? {
+        guard vehicle.isGLBModel else { return nil }
+        return GLBModelStore.cached(vin: vehicle.vinNo, remote: vehicle.model3DURL)
     }
 
     private var track: RideTrack { RideTrack.merged(tracks) }
@@ -95,14 +116,42 @@ struct RideReplayView: View {
         .task(id: Int(progress * 40)) {
             await refreshLiveAddress()
         }
+        .task {
+            await loadReplayAssets()
+        }
     }
 
     private var cinematic: Bool { prefer3D }
 
-    private var replayVehicleImage: UIImage? {
-        HeroAssetCache.photo(for: vehicle.vinNo)
-            ?? ResourceCache.cachedImage(vehicle.imageURL)
-            ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo)
+    private var replayVehicleImage: UIImage? { replayPhoto }
+
+    private func loadReplayAssets() async {
+        let vin = vehicle.vinNo
+        if replayPhoto == nil {
+            replayPhoto = Self.cachedPhoto(for: vehicle)
+        }
+        if replayPhoto == nil, let url = vehicle.imageURL, let image = await ResourceCache.image(for: url) {
+            HeroAssetCache.rememberPhoto(image, vin: vin)
+            replayPhoto = image
+        }
+        if replayScene == nil, let cached = VehicleModelLoader.cachedScene(vin: vin) {
+            replayScene = ReplayMapModel.prepared(from: cached)
+        }
+        if replayGLB == nil, vehicle.isGLBModel {
+            if let file = GLBModelStore.cached(vin: vin, remote: vehicle.model3DURL) {
+                replayGLB = file
+                return
+            }
+            guard let remote = vehicle.model3DURL else { return }
+            replayGLB = try? await GLBModelStore.localFile(for: remote, vin: vin)
+            return
+        }
+        guard replayScene == nil, let remote = vehicle.model3DURL, !vehicle.isGLBModel else { return }
+        if let local = ResourceCache.existingFile(for: remote, folder: "models")
+            ?? await ResourceCache.file(for: remote, folder: "models"),
+           let scene = ReplayMapModel.scene(from: local) {
+            replayScene = scene
+        }
     }
 
     private var traveledKm: Double {
@@ -495,6 +544,9 @@ struct RideReplayView: View {
             follow: playing,
             cinematic: cinematic,
             vehicleImage: replayVehicleImage,
+            modelScene: prefer3D ? replayScene : nil,
+            glbFile: prefer3D ? replayGLB : nil,
+            use3D: prefer3D,
             edgePadding: UIEdgeInsets(top: 120, left: 40, bottom: 280, right: 40)
         )
         .ignoresSafeArea()
@@ -531,6 +583,33 @@ struct RideReplayView: View {
             }
 
             Spacer(minLength: 8)
+
+            Button {
+                prefer3D.toggle()
+            } label: {
+                HStack(spacing: 0) {
+                    Text("3D")
+                        .foregroundStyle(prefer3D ? Color.white : Theme.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(prefer3D ? Theme.brand : Color.clear)
+                        )
+                    Text("2D")
+                        .foregroundStyle(!prefer3D ? Color.white : Theme.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(!prefer3D ? Theme.brand : Color.clear)
+                        )
+                }
+                .font(.system(size: 12, weight: .bold))
+                .padding(3)
+                .background(Capsule().fill(Color.white.opacity(0.92)))
+                .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
+            }
+            .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+            .accessibilityLabel(prefer3D ? "切换为车辆图片" : "切换为3D车模")
         }
         .padding(.horizontal, Theme.page)
         .padding(.top, 4)

@@ -42,6 +42,8 @@ targets:
       - sdk: PhotosUI.framework
       - sdk: AVFoundation.framework
       - sdk: SceneKit.framework
+      - sdk: ModelIO.framework
+      - sdk: WebKit.framework
       - sdk: UniformTypeIdentifiers.framework
       - sdk: WidgetKit.framework
       - sdk: ActivityKit.framework

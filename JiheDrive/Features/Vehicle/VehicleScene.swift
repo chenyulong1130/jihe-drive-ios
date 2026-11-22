@@ -147,7 +147,7 @@ enum VehicleSceneBuilder {
 
         let rig = SCNNode()
         rig.name = "rig"
-        rig.position = SCNVector3(0, sin(0.06) * 2.55, cos(0.06) * 2.55)
+        rig.position = SCNVector3(0, 0, 2.6)
         rig.addChildNode(cameraNode)
 
         orbit.addChildNode(rig)

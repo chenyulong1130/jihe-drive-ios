@@ -29,20 +29,29 @@ struct SnapshotProvider: TimelineProvider {
         Task {
             let disk = WidgetSnapshot.read() ?? WidgetSnap()
             let live = await WidgetLiveSync.refresh()
-            let wanted = WidgetSnapshot.selectedVin() ?? (disk.vin.isEmpty ? nil : disk.vin)
+            let wanted = WidgetSnapshot.selectedVin()
             var snap = live
-            let liveMatches = wanted == nil || wanted?.isEmpty == true || WidgetSnapshot.sameVin(live.vin, wanted)
-            let diskMatches = WidgetSnapshot.sameVin(disk.vin, wanted)
-            if !liveMatches, diskMatches {
-                snap = disk
-                snap.pointsTotal = live.pointsTotal
-                snap.pointsToday = live.pointsToday
-                snap.signedToday = live.signedToday
-                snap.communityDone = live.communityDone
-                snap.continueDays = live.continueDays
-                snap.lotteryText = live.lotteryText
-                snap.lotteryLeft = live.lotteryLeft
-                snap.lotteryClaimed = live.lotteryClaimed
+            if let wanted, !wanted.isEmpty, !WidgetSnapshot.sameVin(live.vin, wanted) {
+                if let per = WidgetSnapshot.readVin(wanted) ?? (WidgetSnapshot.sameVin(disk.vin, wanted) ? disk : nil) {
+                    snap = per
+                    snap.pointsTotal = live.pointsTotal
+                    snap.pointsToday = live.pointsToday
+                    snap.signedToday = live.signedToday
+                    snap.communityDone = live.communityDone
+                    snap.continueDays = live.continueDays
+                    snap.lotteryText = live.lotteryText
+                    snap.lotteryLeft = live.lotteryLeft
+                    snap.lotteryClaimed = live.lotteryClaimed
+                } else {
+                    snap.vin = wanted
+                    snap.soc = 0
+                    snap.rangeKm = 0
+                    snap.charging = false
+                    snap.name = ""
+                    snap.imageURL = ""
+                    snap.todayKm = 0
+                    snap.todayMin = 0
+                }
             } else {
                 if snap.soc <= 0, disk.soc > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.soc = disk.soc }
                 if snap.rangeKm <= 0, disk.rangeKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.rangeKm = disk.rangeKm }
@@ -113,9 +122,10 @@ struct JiheDriveWidgetEntryView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("今日骑行")
+                    Text(snap.name.isEmpty ? "今日骑行" : snap.name)
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Color(hex: 0x0F172A))
+                        .lineLimit(1)
                     Text("\(fmtKm(snap.todayKm)) km · \(snap.todayMin) min")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color(hex: 0x94A3B8))

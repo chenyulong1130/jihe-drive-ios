@@ -96,7 +96,7 @@ struct HeroStage: View {
                 Spacer(minLength: 0)
                     .allowsHitTesting(false)
                 tireBar
-                    .padding(.bottom, selection.blendsIntoPage ? 18 : 10)
+                    .padding(.bottom, selection.blendsIntoPage ? 6 : 2)
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
@@ -296,7 +296,7 @@ struct HeroStage: View {
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
-                                    reuseKey: "hero-\(vehicle.vinNo)-eye1",
+                                    reuseKey: "hero-\(vehicle.vinNo)-flat1",
                                     interactive: true,
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,

@@ -14,7 +14,7 @@ struct ChargeLiveActivity: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Label(context.state.charging ? "充电中" : "待机", systemImage: "bolt.fill")
+                        Label("充电中", systemImage: "bolt.fill")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.green)
                         Text(context.state.batteryName)
