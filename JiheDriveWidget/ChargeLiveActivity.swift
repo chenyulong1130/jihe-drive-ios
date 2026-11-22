@@ -134,15 +134,17 @@ struct ChargeLiveActivity: Widget {
                 let pulse = abs(sin(timeline.date.timeIntervalSince1970 * 2.2))
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.15))
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.green.opacity(0.75 + 0.2 * pulse), Color.green],
-                                startPoint: .leading,
-                                endPoint: .trailing
+                    if progress > 0 {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.green.opacity(0.75 + 0.2 * pulse), Color.green],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .frame(width: max(8, geo.size.width * CGFloat(min(max(progress, 0), 1))))
+                            .frame(width: geo.size.width * CGFloat(min(max(progress, 0), 1)))
+                    }
                 }
             }
         }

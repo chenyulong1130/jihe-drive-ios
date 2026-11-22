@@ -8,7 +8,7 @@ enum ChargeLiveActivityController {
 
         let liveBattery = battery.flatMap { $0.id.hasPrefix("vehicle-") ? nil : $0 }
         let charging = liveBattery?.isLiveCharging == true
-        let soc = min(max(liveBattery?.level ?? vehicle.soc, 0), 100)
+        let soc = min(max(liveBattery?.level ?? 0, 0), 100)
         let range = liveBattery?.rangeKm ?? vehicle.rangeKm
         let eta = etaText(battery: charging ? liveBattery : nil, charging: charging)
         let batteryName = {

@@ -261,12 +261,30 @@ enum WidgetSnapshot {
 
     static func write(_ snap: WidgetSnap) {
         var snap = snap
-        if snap.loggedIn, let old = readVin(snap.vin) {
-            if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
-            if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
-            if snap.vin.isEmpty { snap.vin = old.vin }
-            if snap.name.isEmpty { snap.name = old.name }
-            if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
+        let old = (snap.vin.isEmpty ? nil : readVin(snap.vin)) ?? readIgnoringVin()
+        if snap.loggedIn, let old {
+            if !hasVehicleData(snap), hasVehicleData(old) {
+                snap.name = old.name
+                if snap.vin.isEmpty { snap.vin = old.vin }
+                snap.soc = old.soc
+                snap.rangeKm = old.rangeKm
+                snap.charging = old.charging
+                snap.locked = old.locked
+                snap.online = old.online
+                snap.imageURL = old.imageURL
+                snap.todayKm = old.todayKm
+                snap.todayMin = old.todayMin
+                snap.tireText = old.tireText
+                snap.tireBound = old.tireBound
+            } else {
+                if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
+                if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
+                if snap.vin.isEmpty { snap.vin = old.vin }
+                if snap.name.isEmpty { snap.name = old.name }
+                if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
+                if snap.todayKm == 0, old.todayKm > 0 { snap.todayKm = old.todayKm }
+                if snap.todayMin == 0, old.todayMin > 0 { snap.todayMin = old.todayMin }
+            }
         }
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""

@@ -375,7 +375,8 @@ struct VehicleView: View {
 
     private func syncChargeIsland() {
         guard let vehicle = model.selectedVehicle else { return }
-        ChargeLiveActivityController.sync(vehicle: vehicle, battery: model.batteries.first)
+        let live = model.batteries.first { !$0.id.hasPrefix("vehicle-") }
+        ChargeLiveActivityController.sync(vehicle: vehicle, battery: live)
     }
 
     private func loadRideSummary(vin: String) async {

@@ -330,18 +330,17 @@ struct JiheDriveWidgetEntryView: View {
                     .foregroundStyle(Color(hex: 0x94A3B8))
                     .monospacedDigit()
             }
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Text("积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
                     .foregroundStyle(Color(hex: 0x0F172A))
-                Text("连签 \(snap.continueDays) 天")
+                Text("今日 +\(snap.displayTodayPoints)")
+                    .foregroundStyle(Color(hex: 0x16A34A))
+                Text("连签 \(snap.continueDays)天")
                     .foregroundStyle(Color(hex: 0x3B82F6))
             }
             .font(.system(size: 10, weight: .semibold))
             .lineLimit(1)
-            Text("今日积分 +\(snap.displayTodayPoints)")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(Color(hex: 0x16A34A))
-                .lineLimit(1)
+            .minimumScaleFactor(0.7)
         }
     }
 
@@ -428,37 +427,39 @@ struct JiheDriveWidgetEntryView: View {
 
     private var progress: some View {
         GeometryReader { geo in
+            let width = snap.soc <= 0
+                ? 0
+                : geo.size.width * CGFloat(min(100, snap.soc)) / 100
             ZStack(alignment: .leading) {
                 Capsule().fill(Color(hex: 0xE5E7EB))
-                Capsule()
-                    .fill(Color(hex: 0x22C55E))
-                    .frame(width: max(4, geo.size.width * CGFloat(min(100, max(0, snap.soc))) / 100))
+                if width > 0 {
+                    Capsule()
+                        .fill(Color(hex: 0x22C55E))
+                        .frame(width: width)
+                }
             }
         }
         .frame(height: 7)
     }
 
     private var controlBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 14) {
             controlButton(
                 intent: WidgetLockIntent(),
                 symbol: snap.locked ? "lock.fill" : "lock.open.fill",
-                tint: snap.locked ? Color(hex: 0x0F172A) : Color.white,
-                fill: snap.locked ? Color(hex: 0xE2E8F0) : Color(hex: 0xF97316),
+                tint: snap.locked ? Color(hex: 0x0F172A) : Color(hex: 0xEA580C),
                 label: snap.locked ? "已锁车" : "已开锁"
             )
             controlButton(
                 intent: WidgetCushionIntent(),
                 symbol: "carseat.right.fill",
-                tint: Color.white,
-                fill: Color(hex: 0x334155),
+                tint: Color(hex: 0x334155),
                 label: "坐垫"
             )
             controlButton(
                 intent: WidgetFindIntent(),
                 symbol: "light.beacon.max.fill",
-                tint: Color.white,
-                fill: Color(hex: 0x2563EB),
+                tint: Color(hex: 0x2563EB),
                 label: "寻车"
             )
         }
@@ -468,18 +469,14 @@ struct JiheDriveWidgetEntryView: View {
         intent: I,
         symbol: String,
         tint: Color,
-        fill: Color,
         label: String
     ) -> some View {
         Button(intent: intent) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(fill))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.8))
-                .shadow(color: fill.opacity(0.28), radius: 3, y: 1)
-                .contentShape(Circle())
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
                 .accessibilityLabel(label)
         }
         .buttonStyle(.plain)

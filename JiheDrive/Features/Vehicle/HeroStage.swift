@@ -278,8 +278,8 @@ struct HeroStage: View {
 
     // MARK: - 车 / 3D
 
-    /// 2D 贴底，少留空；3D 铺满英雄区（顶栏透明叠上去）
-    private var carTopPad: CGFloat { topInset + 58 }
+    /// 车图和顶栏电量之间留空，避免贴在标题下面
+    private var carTopPad: CGFloat { topInset + 86 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -293,6 +293,7 @@ struct HeroStage: View {
                         .overlay {
                             ZStack {
                                 twoDCar
+                                    .padding(.top, carTopPad)
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
@@ -338,9 +339,8 @@ struct HeroStage: View {
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, showTireMarks ? 2 : 0)
-                        .offset(y: 12)
+                        .padding(.horizontal, 4)
+                        .padding(.bottom, showTireMarks ? 6 : 4)
                         .allowsHitTesting(false)
                 }
             }
@@ -362,6 +362,7 @@ struct HeroStage: View {
             .padding(.trailing, 16)
             .accessibilityLabel("打开坐垫")
         }
+        .transaction { $0.animation = nil }
     }
 
     private var twoDCar: some View {
@@ -375,16 +376,15 @@ struct HeroStage: View {
                         .offset(y: 6)
                     if let url = vehicle.imageURL {
                         BottomFitVehicleImage(url: url)
-                            .id(vehicle.vinNo + url.absoluteString)
                     } else {
                         placeholder
                     }
                 }
-                .padding(.horizontal, 18)
-                .offset(y: 10)
-                .scaleEffect(0.94, anchor: .bottom)
+                .padding(.horizontal, 6)
+                .scaleEffect(0.98, anchor: .bottom)
                 .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
             }
+            .transaction { $0.animation = nil }
     }
 
     private var placeholder: some View {
@@ -676,10 +676,19 @@ private struct BottomFitVehicleImage: View {
                 Color.clear.frame(height: 1)
             }
         }
+        .transaction { $0.animation = nil }
         .task(id: url.absoluteString) {
-            image = ResourceCache.cachedImage(url)
+            if let cached = ResourceCache.cachedImage(url) {
+                image = cached
+                return
+            }
+            if let loaded = await ResourceCache.image(for: url) {
+                image = loaded
+            }
+        }
+        .onAppear {
             if image == nil {
-                image = await ResourceCache.image(for: url)
+                image = ResourceCache.cachedImage(url)
             }
         }
     }
