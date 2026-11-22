@@ -106,9 +106,11 @@ final class ZeehoMirrorLink {
             guard !self.closed else { return }
             self.closed = true
             // 极核要求显式通知停止投屏
-            if let reverse = self.reverseControlChannel {
-                try? reverse.write(try? ZeehoMirrorFrame.encodeControl(command: 0x20590, identifier: UInt32.max,
-                    payload: try? ZeehoMirrorFrame.json(["control": 0])))
+            if let reverse = self.reverseControlChannel,
+               let payload = try? ZeehoMirrorFrame.json(["control": 0]),
+               let control = try? ZeehoMirrorFrame.encodeControl(command: 0x20590,
+                                                                 identifier: UInt32.max, payload: payload) {
+                try? self.awaitWrite(reverse, control)
             }
             heartbeat?.cancel()
             heartbeat = nil
@@ -213,7 +215,7 @@ final class ZeehoMirrorLink {
                     "phoneType": "iOS",
                     "packageName": Bundle.main.bundleIdentifier ?? "com.liruixin.jihedrive",
                 ]))
-            try announcement.write(request)
+            try awaitWrite(announcement, request)
             let reply = try ZeehoMirrorFrame.decodeControl { count in
                 try awaitRead(announcement, count: count, timeout: 3)
             }
@@ -280,6 +282,26 @@ final class ZeehoMirrorLink {
         }
     }
 
+    /// 同步桥：async write → 阻塞返回（定时器 / 主流程等同步上下文用）。
+    private func awaitWrite(_ channel: ZeehoMirrorChannel, _ data: Data) throws {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Void, Error>?
+        Task.detached {
+            do {
+                try await channel.write(data)
+                result = .success(())
+            } catch {
+                result = .failure(error)
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        switch result! {
+        case .success: break
+        case .failure(let error): throw error
+        }
+    }
+
     // MARK: - 仪表回连处理
 
     private func accept(_ channel: ZeehoMirrorChannel, port: UInt16) {
@@ -313,7 +335,7 @@ final class ZeehoMirrorLink {
                     let request = try ZeehoMirrorFrame.decodeControl { count in
                         try self.awaitRead(channel, count: count, timeout: 5)
                     }
-                    try self.dispatchControl(request, channel: channel)
+                    try await self.dispatchControl(request, channel: channel)
                 }
             } catch {
                 self.fail(error)
@@ -321,7 +343,7 @@ final class ZeehoMirrorLink {
         }
     }
 
-    private func dispatchControl(_ request: ZeehoMirrorFrame.Control, channel: ZeehoMirrorChannel) throws {
+    private func dispatchControl(_ request: ZeehoMirrorFrame.Control, channel: ZeehoMirrorChannel) async throws {
         var payload = Data()
         switch request.command {
         case 0x10000, 0x20000, 0x10740, 0x10040, 0x70000000:
@@ -355,7 +377,7 @@ final class ZeehoMirrorLink {
                 "supportFunction": 128,
                 "mirrorRequestReconnect": true,
             ])
-            try replyControl(request, channel: channel, payload: payload)
+            try await replyControl(request, channel: channel, payload: payload)
             self.huid = huid
             self.signedHUID = signature
             log("仪表报告 HUName=\(name)，已回应本机 RSA2048 身份")
@@ -375,21 +397,21 @@ final class ZeehoMirrorLink {
             log("未知协商命令 0x\(String(request.command, radix: 16))，已忽略")
             return
         }
-        try replyControl(request, channel: channel, payload: payload)
+        try await replyControl(request, channel: channel, payload: payload)
         if request.command == 0x20000 && reverseControlChannel == nil {
             // 会话建立后的主动配置序列
-            try sendControl(channel, command: 0x204c0, identifier: 1,
+            try await sendControl(channel, command: 0x204c0, identifier: 1,
                             object: ["state": 0, "msg": ""])
             let phone = PhoneProfile.current()
-            try sendControl(channel, command: 0x20020, identifier: 2,
+            try await sendControl(channel, command: 0x20020, identifier: 2,
                             object: display(mode: 2, phone: phone))
-            try sendControl(channel, command: 0x20030, identifier: 3,
+            try await sendControl(channel, command: 0x20030, identifier: 3,
                             object: display(mode: 1, phone: phone))
-            try channel.write(try ZeehoMirrorFrame.encodeControl(command: 0x20050, identifier: 4))
-            try sendControl(channel, command: 0x205a0, identifier: 5,
+            try await channel.write(try ZeehoMirrorFrame.encodeControl(command: 0x20050, identifier: 4))
+            try await sendControl(channel, command: 0x205a0, identifier: 5,
                             object: ["isMaskVisible": false])
             // 极核专属：通知仪表开始投屏
-            try sendControl(channel, command: 0x20590, identifier: 6,
+            try await sendControl(channel, command: 0x20590, identifier: 6,
                             object: ["control": 1])
             reverseControlChannel = channel
             log("已发送开始投屏通知")
@@ -410,17 +432,17 @@ final class ZeehoMirrorLink {
     }
 
     private func replyControl(_ request: ZeehoMirrorFrame.Control, channel: ZeehoMirrorChannel,
-                              payload: Data) throws {
+                              payload: Data) async throws {
         let reply = try ZeehoMirrorFrame.encodeControl(command: request.command &+ 1,
                                                        identifier: request.identifier, payload: payload)
-        try channel.write(reply)
+        try await channel.write(reply)
     }
 
     private func sendControl(_ channel: ZeehoMirrorChannel, command: UInt32, identifier: UInt32,
-                             object: [String: Any]) throws {
+                             object: [String: Any]) async throws {
         let payload = try ZeehoMirrorFrame.json(object)
-        try channel.write(try ZeehoMirrorFrame.encodeControl(command: command,
-                                                             identifier: identifier, payload: payload))
+        try await channel.write(try ZeehoMirrorFrame.encodeControl(command: command,
+                                                                   identifier: identifier, payload: payload))
     }
 
     private func startHeartbeat(_ channel: ZeehoMirrorChannel) {
@@ -430,8 +452,8 @@ final class ZeehoMirrorLink {
         timer.setEventHandler { [weak self, weak channel] in
             guard let self, let channel else { return }
             do {
-                try channel.write(try ZeehoMirrorFrame.encodeControl(command: 0x70000000,
-                                                                     identifier: identifier))
+                try self.awaitWrite(channel, try ZeehoMirrorFrame.encodeControl(command: 0x70000000,
+                                                                                identifier: identifier))
                 identifier &+= 1
             } catch {
                 self.fail(error)
@@ -450,7 +472,7 @@ final class ZeehoMirrorLink {
                     let request = try ZeehoMirrorFrame.decodeAuxiliary { count in
                         try self.awaitRead(channel, count: count, timeout: 5)
                     }
-                    try self.dispatchAuxiliary(request, channel: channel)
+                    try await self.dispatchAuxiliary(request, channel: channel)
                 }
             } catch {
                 self.fail(error)
@@ -458,7 +480,7 @@ final class ZeehoMirrorLink {
         }
     }
 
-    private func dispatchAuxiliary(_ request: ZeehoMirrorFrame.Auxiliary, channel: ZeehoMirrorChannel) throws {
+    private func dispatchAuxiliary(_ request: ZeehoMirrorFrame.Auxiliary, channel: ZeehoMirrorChannel) async throws {
         var payload = Data()
         let response: UInt16
         switch request.command {
@@ -485,7 +507,7 @@ final class ZeehoMirrorLink {
             log("媒体身份回显校验通过，回应 H.264 / \(width)×\(height)")
         case 0x70:
             guard configured else { throw CPError.rejected("仪表在配置完成前请求媒体启动") }
-            try channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: 0x71, token: request.token))
+            try await channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: 0x71, token: request.token))
             mediaStarted = true
             return
         case 0x40:
@@ -503,8 +525,8 @@ final class ZeehoMirrorLink {
             response = 0x7f02
             log("媒体控制通道暂不支持 0x\(String(request.command, radix: 16))")
         }
-        try channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: response, token: request.token,
-                                                              payload: payload))
+        try await channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: response, token: request.token,
+                                                                     payload: payload))
     }
 
     // MARK: - 视频发送（供上层喂帧）
@@ -535,7 +557,7 @@ final class ZeehoMirrorLink {
         guard let videoChannel, isClosed == false else { return }
         do {
             let packet = try ZeehoMirrorFrame.encodeVideo(accessUnit, isFirstFrame: isFirstFrame)
-            try videoChannel.write(packet)
+            try awaitWrite(videoChannel, packet)
             if currentState != .streaming {
                 currentState = .streaming
             }

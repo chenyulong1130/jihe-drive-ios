@@ -89,12 +89,12 @@ final class CPVideoTranscoder {
             let status = VTCompressionSessionEncodeFrame(
                 session!,
                 imageBuffer: scaled,
-                presentationTimestamp: presentation,
+                presentationTimeStamp: presentation,
                 duration: CMTime(value: 1, timescale: CMTimeScale(fps)),
                 frameProperties: force
                     ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
                     : nil,
-                sourceFrameCallback: nil,
+                sourceFrameRefcon: nil,
                 infoFlagsOut: nil)
             guard status == noErr else {
                 throw CPError.malformed("编码帧失败（\(status)）")
@@ -185,8 +185,8 @@ final class CPVideoTranscoder {
             offsetToData: 0, dataLength: avcc.count, flags: 0, blockBufferOut: &blockBuffer)
         guard createStatus == kCMBlockBufferNoErr, let blockBuffer else { return }
         let fillStatus = avcc.withUnsafeBytes { bytes in
-            CMBlockBufferReplaceDataBytes(with: bytes.baseAddress, destinationBuffer: blockBuffer,
-                                          offset: 0, dataLength: avcc.count)
+            CMBlockBufferReplaceDataBytes(with: bytes.baseAddress!, blockBuffer: blockBuffer,
+                                          offsetIntoDestination: 0, dataLength: avcc.count)
         }
         guard fillStatus == kCMBlockBufferNoErr else { return }
         var sampleBuffer: CMSampleBuffer?
@@ -229,7 +229,6 @@ final class CPVideoTranscoder {
         var sizes: [Int] = []
         let payloads = [sps, pps]
         for payload in payloads {
-            guard let payload else { continue }
             let length = payload.count
             let pointer = UnsafeMutablePointer<UInt8>.allocate(capacity: length)
             payload.copyBytes(to: pointer, count: length)
@@ -249,28 +248,18 @@ final class CPVideoTranscoder {
             return false
         }
         decoderFormat = format
-        // 回调通过上下文取回 self（passRetained，随会话销毁释放）
-        let context = Unmanaged.passRetained(self)
-        var callback = VTDecompressionOutputCallback(
-            decompressionOutputRefCon: context.toOpaque(),
-            decompressionOutputCallback: { refCon, _, _, _, imageBuffer, _, _ in
-                guard let refCon, let imageBuffer else { return }
-                let transcoder = Unmanaged<CPVideoTranscoder>.fromOpaque(refCon).takeUnretainedValue()
-                transcoder.store(imageBuffer: imageBuffer)
-            })
+        // 解码输出经逐帧 completionHandler 回来，会话不挂全局回调
         var session: VTDecompressionSession?
         let decodeStatus = VTDecompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             formatDescription: format,
-            decoderSpecifications: [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: true] as CFDictionary,
-            destinationImageBufferAttributes: [
+            decoderSpecification: [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: true] as CFDictionary,
+            imageBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferOpenGLCompatibilityKey: true,
             ] as CFDictionary,
-            outputCallback: &callback,
             decompressionSessionOut: &session)
         guard decodeStatus == noErr, let session else {
-            context.release()
             MirrorLogStore.append("创建解码会话失败（\(decodeStatus)）")
             return false
         }
@@ -280,13 +269,18 @@ final class CPVideoTranscoder {
 
     private func decode(sampleBuffer: CMSampleBuffer, format: CMVideoFormatDescription) {
         guard let decoder = self.decoder else { return }
-        let infoFlags = VTDecodeFrameFlags(kVTDecodeFrame_EnableAsynchronousDecompression.rawValue)
+        // kVTDecodeFrame_EnableAsynchronousDecompression = 1 << 0
+        let infoFlags = VTDecodeFrameFlags(rawValue: 1 << 0)
         var flagsOut = VTDecodeInfoFlags()
         let status = VTDecompressionSessionDecodeFrame(
             decoder,
             sampleBuffer: sampleBuffer,
             flags: infoFlags,
-            infoFlagsOut: &flagsOut)
+            infoFlagsOut: &flagsOut,
+            completionHandler: { [weak self] status, _, imageBuffer, _, _, _ in
+                guard status == noErr, let imageBuffer else { return }
+                self?.store(imageBuffer: imageBuffer)
+            })
         if status != noErr {
             MirrorLogStore.append("解码失败（\(status)）")
             // 解码器失效时从关键帧重建
@@ -352,22 +346,22 @@ final class CPVideoTranscoder {
     private func ensureEncoder() throws -> VTCompressionSession {
         if let encoder { return encoder }
         var session: VTCompressionSession?
-        var callback = VTCompressionOutputCallback(
-            outputCallbackRefCon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
-            compressionOutputCallback: { refCon, _, status, flags, sampleBuffer in
-                guard let refCon, status == noErr, let sampleBuffer else { return }
-                let transcoder = Unmanaged<CPVideoTranscoder>.fromOpaque(refCon).takeUnretainedValue()
-                transcoder.handleEncoded(sampleBuffer: sampleBuffer.takeUnretainedValue(), flags: flags)
-            })
+        let refcon = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        let callback: VTCompressionOutputCallback = { refCon, _, status, flags, sampleBuffer in
+            guard let refCon, status == noErr, let sampleBuffer else { return }
+            Unmanaged<CPVideoTranscoder>.fromOpaque(refCon).takeUnretainedValue()
+                .handleEncoded(sampleBuffer: sampleBuffer.takeUnretainedValue(), flags: flags)
+        }
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             width: Int32(width),
             height: Int32(height),
             codecType: kCMVideoCodecType_H264,
-            encoderSpecifications: [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true] as CFDictionary,
+            encoderSpecification: [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true] as CFDictionary,
             imageBufferAttributes: [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange] as CFDictionary,
             compressedDataAllocator: nil,
-            outputCallback: &callback,
+            outputCallback: callback,
+            refcon: refcon,
             compressionSessionOut: &session)
         guard status == noErr, let session else {
             throw CPError.malformed("创建编码会话失败（\(status)）")
@@ -380,7 +374,7 @@ final class CPVideoTranscoder {
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
         ]
-        guard VTSessionSetProperties(session, propertyList: properties as CFDictionary) == noErr,
+        guard VTSessionSetProperties(session, propertyDictionary: properties as CFDictionary) == noErr,
               VTCompressionSessionPrepareToEncodeFrames(session) == noErr else {
             VTCompressionSessionInvalidate(session)
             throw CPError.malformed("编码会话配置失败")
@@ -430,8 +424,8 @@ final class CPVideoTranscoder {
             var index: Int = 0
             while true {
                 var size = 0
-                var headerLength = 0
-                var pointer: UnsafeMutablePointer<UInt8>?
+                var headerLength: Int32 = 0
+                var pointer: UnsafePointer<UInt8>?
                 guard CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
                     format, parameterSetIndex: index,
                     parameterSetPointerOut: &pointer,

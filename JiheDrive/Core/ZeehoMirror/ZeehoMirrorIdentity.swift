@@ -31,7 +31,7 @@ enum ZeehoMirrorIdentity {
 
     /// 读取（或首次生成）本机身份。并发调用时保证只有一个身份落地。
     static func load() throws -> Identity {
-        let query = baseQuery()
+        let query = baseQuery() as CFDictionary
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query, &item)
         if status == errSecSuccess {
@@ -72,17 +72,16 @@ enum ZeehoMirrorIdentity {
 
     /// 删除本机身份（调试用：下次启动重新生成）。
     static func reset() {
-        SecItemDelete(baseQuery() as CFDictionary)
-    }
+        SecItemDelete(baseQuery() as CFDictionary)    }
 
-    private static func baseQuery() -> CFDictionary {
+    private static func baseQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-        ] as CFDictionary
+        ]
     }
 
     private static func generate() throws -> Identity {
