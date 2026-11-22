@@ -31,11 +31,9 @@ struct ModelLoadingSkeleton: View {
                 .frame(width: 248 * scale, height: 78 * scale)
             // 轮子
             HStack(spacing: 88 * scale) {
-                Circle()
-                Circle()
+                Circle().fill(fill).frame(width: 26 * scale, height: 26 * scale)
+                Circle().fill(fill).frame(width: 26 * scale, height: 26 * scale)
             }
-            .fill(fill)
-            .frame(width: 26 * scale, height: 26 * scale)
             .offset(y: 13 * scale)
         }
         .overlay(alignment: .top) {
