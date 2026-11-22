@@ -6,10 +6,16 @@ struct Vehicle3DSheet: View {
     let vehicle: Vehicle
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appearance: AppearanceStore
     @StateObject private var loader = VehicleModelLoader()
     @State private var resetToken = 0
     @State private var glbFile: URL?
     @State private var glbFailed = false
+    @State private var seatOpen = false
+    @State private var seatToken = 0
+
+    /// 深色主题 → 全车灯点亮（不含转向灯）；浅色 → 熄灭。只改车灯自发光，不改场景光照。
+    private var lightsOn: Bool { appearance.resolvedScheme == .dark }
 
     private var modelURL: URL? { vehicle.model3DURL }
 
@@ -83,8 +89,7 @@ struct Vehicle3DSheet: View {
         if vehicle.isGLBModel {
             glbStage
         } else if let scene = loader.scene {
-            VehicleSceneView(scene: scene, interactive: true, autoSpin: true)
-                .id(resetToken)
+            VehicleSceneView(scene: scene, interactive: true, autoSpin: true, resetToken: resetToken)
         } else {
             switch loader.state {
             case .loading:
@@ -113,8 +118,19 @@ struct Vehicle3DSheet: View {
         if let glbFile {
             Color.clear
                 .overlay {
-                    ModelViewerWebView(glbFile: glbFile, interactive: true, autoRotate: false)
-                        .id(resetToken)
+                    ModelViewerWebView(
+                        glbFile: glbFile,
+                        interactive: true,
+                        autoRotate: false,
+                        resetToken: resetToken,
+                        lightsOn: lightsOn,
+                        seatOpen: seatOpen,
+                        seatToken: seatToken,
+                        onSeatChange: { open in
+                            // JS 即时回传坐垫状态（含动画过程），按钮态始终与 3D 一致
+                            if seatOpen != open { seatOpen = open }
+                        }
+                    )
                 }
         } else if glbFailed {
             VStack(spacing: 10) {
@@ -191,6 +207,21 @@ struct Vehicle3DSheet: View {
 
             Spacer(minLength: 8)
 
+            if vehicle.isGLBModel {
+                Button {
+                    seatOpen.toggle()
+                    seatToken += 1   // 触发 jhSetSeat，3D 立即开合；JS 完成后回传终态
+                } label: {
+                    Image(systemName: "figure.seated.side")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(seatOpen ? Theme.brand : .white)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(.ultraThinMaterial))
+                }
+                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                .accessibilityLabel(seatOpen ? "关闭坐垫" : "开启坐垫")
+            }
+
             if vehicle.model3DURL != nil {
                 Button {
                     withAnimation(Motion.quick) { resetToken += 1 }
@@ -223,7 +254,7 @@ struct Vehicle3DSheet: View {
         HStack(spacing: 6) {
             Image(systemName: "hand.draw.fill")
                 .font(.system(size: 10, weight: .medium))
-            Text("拖动旋转 · 双指缩放")
+            Text("拖动旋转 · 双指缩放 · 双击复位")
                 .font(.system(size: 11, weight: .medium))
         }
         .foregroundStyle(.white.opacity(0.7))

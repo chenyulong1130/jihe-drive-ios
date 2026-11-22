@@ -33,6 +33,8 @@ struct HeroStage: View {
     var modelGLBCached: Bool = false
     /// 这台车有官方 3D 时只出 3D，下载完成前也不要用 2D 占位
     var prefers3D: Bool = false
+    /// 车辆 Tab 是否在前台：不在时暂停背景视频与 3D 渲染，翻页不吃 GPU
+    var screenActive: Bool = true
     /// 实时电池充电态；列表里的充电标记不再当默认
     var liveCharging: Bool? = nil
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
@@ -130,8 +132,8 @@ struct HeroStage: View {
     private var backdrop: some View {
         Group {
             switch selection {
-            case .video:
-                videoBackdrop(url: videoURL, poster: videoPoster.map { .image($0) } ?? .none)
+                case .video:
+                    videoBackdrop(url: videoURL, poster: videoPoster.map { .image($0) } ?? .none, plays: screenActive)
 
             case .photo:
                 if let photo {
@@ -151,7 +153,7 @@ struct HeroStage: View {
                     Theme.groupedBackground
                 } else if let remote = theme.videoURL {
                     // 云端动态主题：封面垫底 + 循环视频（以前只贴了静图）
-                    videoBackdrop(url: remote, poster: .remote(theme.posterURL))
+                    videoBackdrop(url: remote, poster: .remote(theme.posterURL), plays: screenActive)
                 } else {
                     themeBackground(theme).overlay(scrim)
                 }
@@ -204,7 +206,7 @@ struct HeroStage: View {
     }
 
     @ViewBuilder
-    private func videoBackdrop(url: URL?, poster: PosterSource) -> some View {
+    private func videoBackdrop(url: URL?, poster: PosterSource, plays: Bool = true) -> some View {
         if let url {
             ZStack {
                 switch poster {
@@ -223,7 +225,7 @@ struct HeroStage: View {
                     Color(hex: 0x0B1A16)
                 }
 
-                CachedLoopingVideo(url: url, fadeBottom: selection.blendsIntoPage)
+                CachedLoopingVideo(url: url, fadeBottom: selection.blendsIntoPage, plays: plays)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                     .allowsHitTesting(false)
@@ -288,7 +290,8 @@ struct HeroStage: View {
     private var carTopPad: CGFloat { topInset + 70 }
     /// 3D 比 2D 更靠上一点，镜头拉近后不要离顶栏太远
     private var glbTopPad: CGFloat { topInset + 44 }
-    private var carBottomPad: CGFloat { showTireMarks ? 28 : 8 }
+    /// 底部留量固定：胎压标注出现/消失不再把车模型往上顶
+    private var carBottomPad: CGFloat { 28 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { prefers3D || modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -313,6 +316,7 @@ struct HeroStage: View {
                                     interactive: true,
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,
+                                    active: screenActive,
                                     onDrag: { dragging in
                                         if dragging { modelRotated = true }
                                         onInteract?(dragging)
@@ -345,6 +349,7 @@ struct HeroStage: View {
                         autoSpin: false,
                         spinSpeed: 0,
                         resetToken: cameraReset + localReset,
+                        active: screenActive,
                         onDrag: { dragging in
                             if dragging { modelRotated = true }
                             onInteract?(dragging)

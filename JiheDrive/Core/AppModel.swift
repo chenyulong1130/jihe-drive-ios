@@ -28,6 +28,8 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var errorMessage: String?
+    /// 最近一次车辆数据成功刷新的时间（轮询/下拉/回前台都会更新）
+    @Published private(set) var lastUpdatedAt: Date?
 
     /// 开关机刚发出时云端锁态会滞后，这段时间内别用列表/详情把乐观状态盖回去
     private var lockHold: (vin: String, locked: Bool, until: Date)?
@@ -175,6 +177,7 @@ final class AppModel: ObservableObject {
             _ = await (battery, detail, tire)
         }
         WidgetSnapshot.publish(from: self, ride: nil)
+        lastUpdatedAt = Date()
     }
 
     /// 前台轻量轮询：车辆首页 + 电池，不刷胎压/列表
@@ -186,6 +189,12 @@ final class AppModel: ObservableObject {
         _ = await (battery, detail, tire)
         WidgetSnapshot.publish(from: self, ride: nil)
         WidgetCenter.shared.reloadAllTimelines()
+        lastUpdatedAt = Date()
+    }
+
+    /// 下拉刷新等 View 侧路径手动标记更新时间
+    func markUpdated() {
+        lastUpdatedAt = Date()
     }
 
     /// 胎压传感器接口，独立于车辆详情，失败不影响主流程

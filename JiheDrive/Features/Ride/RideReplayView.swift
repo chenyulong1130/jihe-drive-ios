@@ -19,7 +19,6 @@ struct RideReplayView: View {
     @State private var showFullMap = false
     @State private var prefer3D: Bool
     @State private var liveAddress: String?
-    @State private var replayPhoto: UIImage?
     @State private var replayScene: SCNScene?
     @State private var replayGLB: URL?
 
@@ -27,7 +26,6 @@ struct RideReplayView: View {
         self.vehicle = vehicle
         self.tracks = [track]
         _prefer3D = State(initialValue: vehicle.model3DURL != nil)
-        _replayPhoto = State(initialValue: Self.cachedPhoto(for: vehicle))
         _replayGLB = State(initialValue: Self.cachedGLB(for: vehicle))
     }
 
@@ -35,14 +33,7 @@ struct RideReplayView: View {
         self.vehicle = vehicle
         self.tracks = tracks
         _prefer3D = State(initialValue: vehicle.model3DURL != nil)
-        _replayPhoto = State(initialValue: Self.cachedPhoto(for: vehicle))
         _replayGLB = State(initialValue: Self.cachedGLB(for: vehicle))
-    }
-
-    private static func cachedPhoto(for vehicle: Vehicle) -> UIImage? {
-        HeroAssetCache.photo(for: vehicle.vinNo)
-            ?? ResourceCache.cachedImage(vehicle.imageURL)
-            ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo)
     }
 
     private static func cachedGLB(for vehicle: Vehicle) -> URL? {
@@ -125,17 +116,8 @@ struct RideReplayView: View {
     private var cinematic: Bool { prefer3D }
     private var mapOnDark: Bool { colorScheme == .dark }
 
-    private var replayVehicleImage: UIImage? { replayPhoto }
-
     private func loadReplayAssets() async {
         let vin = vehicle.vinNo
-        if replayPhoto == nil {
-            replayPhoto = Self.cachedPhoto(for: vehicle)
-        }
-        if replayPhoto == nil, let url = vehicle.imageURL, let image = await ResourceCache.image(for: url) {
-            HeroAssetCache.rememberPhoto(image, vin: vin)
-            replayPhoto = image
-        }
         if replayScene == nil, let cached = VehicleModelLoader.cachedScene(vin: vin) {
             replayScene = ReplayMapModel.prepared(from: cached)
         }
@@ -547,7 +529,6 @@ struct RideReplayView: View {
             progress: progress,
             follow: playing,
             cinematic: cinematic,
-            vehicleImage: replayVehicleImage,
             modelScene: prefer3D ? replayScene : nil,
             glbFile: prefer3D ? replayGLB : nil,
             use3D: prefer3D,
@@ -613,7 +594,7 @@ struct RideReplayView: View {
                 .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-            .accessibilityLabel(prefer3D ? "切换为车辆图片" : "切换为3D车模")
+            .accessibilityLabel(prefer3D ? "切换为2D圆点" : "切换为3D车模")
         }
         .padding(.horizontal, Theme.page)
         .padding(.top, 4)

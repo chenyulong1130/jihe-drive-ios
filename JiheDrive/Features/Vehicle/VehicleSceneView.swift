@@ -10,6 +10,8 @@ struct VehicleSceneView: UIViewRepresentable {
     var autoSpin: Bool = false
     var spinSpeed: Float = 0.22
     var resetToken: Int = 0
+    /// 页面不在前台时置 false：停掉渲染循环，翻页不吃 GPU
+    var active: Bool = true
     var onDrag: ((Bool) -> Void)? = nil
 
     func makeUIView(context: Context) -> SCNView {
@@ -27,7 +29,9 @@ struct VehicleSceneView: UIViewRepresentable {
 
         context.coordinator.onDrag = onDrag
         context.coordinator.resetToken = resetToken
+        context.coordinator.active = active
         context.coordinator.attach(view: view, autoSpin: autoSpin, speed: spinSpeed)
+        view.isPlaying = active
         if interactive { context.coordinator.installGestures() }
         return view
     }
@@ -43,6 +47,10 @@ struct VehicleSceneView: UIViewRepresentable {
             context.coordinator.resetToken = resetToken
             context.coordinator.resetHome()
         }
+        if context.coordinator.active != active {
+            context.coordinator.active = active
+            view.isPlaying = active
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -56,6 +64,7 @@ struct VehicleSceneView: UIViewRepresentable {
     final class Coordinator: NSObject {
         var onDrag: ((Bool) -> Void)?
         var resetToken = 0
+        var active = true
         private weak var view: SCNView?
         private var orbit: SCNNode?
         private var rig: SCNNode?

@@ -4,29 +4,36 @@ struct MessageInboxView: View {
     @ObservedObject var store: MessageStore
     @Environment(\.dismiss) private var dismiss
     @State private var selected: InboxMessage?
-    @State private var filter = 0
-
-    private var filtered: [InboxMessage] {
-        switch filter {
-        case 3: return store.items.filter { $0.kind == 3 || $0.kind == 1 }
-        case 2: return store.items.filter { $0.kind == 2 }
-        case 4: return store.items.filter(\.isSocial)
-        default: return store.items
-        }
-    }
+    @State private var working = false
+    @State private var confirmDelete = false
 
     var body: some View {
         SheetShell(
-            title: headerTitle,
+            title: "消息",
             subtitle: store.unreadCount > 0 ? "\(store.unreadCount) 条未读" : nil,
-            onClose: { dismiss() }
+            onClose: { dismiss() },
+            trailing: {
+                headerButton(
+                    icon: "checkmark.circle",
+                    label: "全部已读",
+                    disabled: working || store.unreadCount == 0
+                ) {
+                    Task {
+                        working = true
+                        await store.markAllRead()
+                        working = false
+                    }
+                }
+                headerButton(
+                    icon: "trash",
+                    label: "清空",
+                    disabled: working || store.items.isEmpty
+                ) {
+                    confirmDelete = true
+                }
+            }
         ) {
             VStack(spacing: 0) {
-                filterBar
-                    .padding(.horizontal, 6)
-                    .padding(.top, 2)
-                    .padding(.bottom, 8)
-
                 if store.loading && store.items.isEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -34,12 +41,12 @@ struct MessageInboxView: View {
                     SoftBanner(text: error, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                         .padding(.horizontal, Theme.page)
                     Spacer()
-                } else if filtered.isEmpty {
+                } else if store.items.isEmpty {
                     empty
                 } else {
                     ScrollView(showsIndicators: false) {
                         LazyVStack(spacing: 12) {
-                            ForEach(filtered) { item in
+                            ForEach(store.items) { item in
                                 Button {
                                     store.open(item)
                                     selected = item
@@ -60,44 +67,35 @@ struct MessageInboxView: View {
         .sheet(item: $selected) { item in
             MessageDetailView(item: item)
         }
+        .confirmationDialog("清空所有消息？", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("全部删除", role: .destructive) {
+                working = true
+                Task {
+                    await store.deleteAll()
+                    working = false
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后不可恢复，刷新时以服务端数据为准")
+        }
         .task { await store.refresh(notifyNew: false) }
     }
 
-    private var headerTitle: String {
-        switch filter {
-        case 3: return "系统消息"
-        case 2: return "车辆消息"
-        case 4: return "互动消息"
-        default: return "消息"
-        }
-    }
-
-    private var filterBar: some View {
-        HStack(spacing: 0) {
-            tab("全部", 0)
-            tab("系统", 3)
-            tab("车辆", 2)
-            tab("互动", 4)
-        }
-    }
-
-    private func tab(_ title: String, _ kind: Int) -> some View {
-        let on = filter == kind
-        return Button {
-            withAnimation(.easeInOut(duration: 0.18)) { filter = kind }
+    /// 与关闭按钮同风格的圆形小按钮
+    private func headerButton(icon: String, label: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
         } label: {
-            VStack(spacing: 6) {
-                Text(title)
-                    .font(.system(size: 15, weight: on ? .semibold : .medium))
-                    .foregroundStyle(on ? Theme.label : Theme.secondary)
-                Capsule()
-                    .fill(on ? Theme.label : Color.clear)
-                    .frame(width: 18, height: 2.5)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(disabled ? Theme.tertiary : Theme.secondary)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(Theme.surfaceAlt))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+        .disabled(disabled)
+        .accessibilityLabel(label)
     }
 
     private var empty: some View {

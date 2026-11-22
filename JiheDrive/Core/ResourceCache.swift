@@ -248,12 +248,15 @@ struct CachedRemoteImage: View {
 struct CachedLoopingVideo: View {
     let url: URL
     var fadeBottom: Bool = false
+    /// 页面不在前台时置 false，暂停解码省 GPU
+    var plays: Bool = true
 
     var body: some View {
         LoopingVideoView(
             url: ResourceCache.existingFile(for: url, folder: "videos") ?? url,
             muted: true,
-            fadeBottom: fadeBottom
+            fadeBottom: fadeBottom,
+            plays: plays
         )
             .task(id: url.absoluteString) {
                 guard !url.isFileURL else { return }

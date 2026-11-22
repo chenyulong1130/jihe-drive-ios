@@ -7,16 +7,20 @@ struct LoopingVideoView: UIViewRepresentable {
     let url: URL
     var muted: Bool = true
     var fadeBottom: Bool = false
+    /// 页面不在前台时置 false 暂停，翻页不吃解码/GPU
+    var plays: Bool = true
 
     func makeUIView(context: Context) -> LoopingPlayerView {
         let view = LoopingPlayerView()
         view.fadeBottom = fadeBottom
+        view.plays = plays
         view.load(url: url, muted: muted)
         return view
     }
 
     func updateUIView(_ view: LoopingPlayerView, context: Context) {
         view.fadeBottom = fadeBottom
+        view.plays = plays
         view.load(url: url, muted: muted)
     }
 
@@ -35,6 +39,10 @@ final class LoopingPlayerView: UIView {
     private var player: AVPlayer?
     private var loadedURL: URL?
     private var shouldPlay = true
+    /// 业务侧开关：车辆 Tab 不在前台时置 false
+    var plays = true {
+        didSet { applyPlayback() }
+    }
     private var endObserver: NSObjectProtocol?
     private var appObservers: [NSObjectProtocol] = []
     var fadeBottom = false {
@@ -179,12 +187,20 @@ final class LoopingPlayerView: UIView {
     }
 
     private func resumeIfNeeded() {
-        guard shouldPlay, bounds.width > 1, bounds.height > 1 else { return }
+        guard shouldPlay, plays, bounds.width > 1, bounds.height > 1 else { return }
         if ProcessInfo.processInfo.isLowPowerModeEnabled {
             player?.pause()
             return
         }
         player?.play()
+    }
+
+    private func applyPlayback() {
+        if plays {
+            resumeIfNeeded()
+        } else {
+            player?.pause()
+        }
     }
 
     func stop() {

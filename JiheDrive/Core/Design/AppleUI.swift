@@ -603,10 +603,23 @@ struct InfoRow: View {
     }
 }
 
-struct SheetHeader: View {
+struct SheetHeader<Trailing: View>: View {
     let title: String
     var subtitle: String?
     let onClose: () -> Void
+    var trailing: Trailing
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        onClose: @escaping () -> Void,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.onClose = onClose
+        self.trailing = trailing()
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -631,6 +644,8 @@ struct SheetHeader: View {
 
                 Spacer(minLength: 0)
 
+                HStack(spacing: 8) { trailing }
+
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 12, weight: .bold))
@@ -654,21 +669,41 @@ struct SheetHeader: View {
     }
 }
 
-struct SheetShell<Content: View>: View {
+struct SheetShell<Content: View, Trailing: View>: View {
     let title: String
     var subtitle: String?
     let onClose: () -> Void
+    let trailing: Trailing
     let content: Content
 
+    /// 旧签名：无头部右侧操作区
     init(
         title: String,
         subtitle: String? = nil,
         onClose: @escaping () -> Void,
         @ViewBuilder content: () -> Content
+    ) where Trailing == EmptyView {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            onClose: onClose,
+            trailing: { EmptyView() },
+            content: content
+        )
+    }
+
+    /// 带 trailing 的完整签名（必须显式写 trailing: 标签，避免尾随闭包误绑）
+    init(
+        title: String,
+        subtitle: String? = nil,
+        onClose: @escaping () -> Void,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
         self.onClose = onClose
+        self.trailing = trailing()
         self.content = content()
     }
 
@@ -678,7 +713,7 @@ struct SheetShell<Content: View>: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Theme.groupedBackground.ignoresSafeArea())
             .safeAreaInset(edge: .top, spacing: 4) {
-                SheetHeader(title: title, subtitle: subtitle, onClose: onClose)
+                SheetHeader(title: title, subtitle: subtitle, onClose: onClose, trailing: { trailing })
             }
     }
 }

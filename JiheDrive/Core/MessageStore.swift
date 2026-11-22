@@ -34,6 +34,9 @@ final class MessageStore: ObservableObject {
         switch page {
         case .success(let list):
             collected = list
+        case .cancelled:
+            // 面板关闭中断了请求：保留现有状态，不算错误
+            return
         case .failure(let message):
             lastFail = message
             if collected.isEmpty, let uid, !uid.isEmpty {
@@ -62,14 +65,10 @@ final class MessageStore: ObservableObject {
         }
 
         if !seeded {
-            // 已读的记入 seen，未读的走一次本地通知，避免整页历史刷屏
-            seedSeen(items.filter { !$0.unread }.map(\.id))
+            // 首次拉取：所有消息直接记入 seen（含历史未读），只算角标、不弹通知。
+            // 之前只 seed 已读项，历史未读每次冷启动都会被当成新消息再弹一遍。
+            seedSeen(readIDs().union(items.map(\.id)))
             seeded = true
-            if notifyNew {
-                await notifyFresh(items)
-            } else {
-                seedSeen(items.map(\.id))
-            }
         } else if notifyNew {
             await notifyFresh(items)
         }
@@ -85,6 +84,61 @@ final class MessageStore: ObservableObject {
         Task { await postRead(item.id) }
     }
 
+    /// 全部已读：本地先置已读，再逐条同步官方 read 接口
+    func markAllRead() async {
+        let unreadIDs = items.filter(\.unread).map(\.id)
+        guard !unreadIDs.isEmpty else { return }
+        for id in unreadIDs {
+            markRead(id)
+            if let index = items.firstIndex(where: { $0.id == id }) {
+                items[index].unread = false
+            }
+        }
+        applyBadge()
+        for id in unreadIDs {
+            await postRead(id)
+        }
+    }
+
+    /// 全部删除：先逐条请求官方删除接口，最后清空本地列表。
+    /// 官方接口路径不确定，按 read_v2 同套路逐个尝试；失败时本地仍会清掉，刷新后以服务端为准。
+    func deleteAll() async {
+        let ids = items.map(\.id)
+        guard !ids.isEmpty else { return }
+        await hydrateUserId()
+        let uid = ZeehoClient.shared.userId ?? ""
+        for id in ids {
+            let messageId: Any = Int(id) ?? id
+            var query = ["messageId": id]
+            if !uid.isEmpty { query["userId"] = uid }
+
+            let deletePaths = [
+                "/v1.0/mine/cfmotoservermine/app/Message/delete_v2",
+                "/v1.0/mine/cfmotoservermine/app/Message/delete",
+                "/v1.0/mine/cfmotoservermine/app/Message/delMessage"
+            ]
+            var done = false
+            for path in deletePaths {
+                if await accepted(try? await ZeehoClient.shared.get(path, query: query)) { done = true; break }
+            }
+            guard !done else { continue }
+
+            var body: [String: Any] = ["messageId": messageId]
+            if !uid.isEmpty { body["userId"] = uid }
+            for path in deletePaths {
+                if await accepted(try? await ZeehoClient.shared.post(path, body: body)) { done = true; break }
+            }
+            if done { continue }
+
+            body["messageIds"] = [messageId]
+            var h5Query = H5Client.mineQuery
+            h5Query.merge(query) { _, new in new }
+            _ = try? await H5Client.post("/cfmotoservermine/app/Message/delete_v2", query: h5Query, body: body)
+        }
+        items = []
+        applyBadge()
+    }
+
     func requestPermission() async {
         let center = UNUserNotificationCenter.current()
         let status = await center.notificationSettings().authorizationStatus
@@ -97,6 +151,7 @@ final class MessageStore: ObservableObject {
 
     private enum FetchResult {
         case success([InboxMessage])
+        case cancelled
         case failure(String)
     }
 
@@ -131,6 +186,8 @@ final class MessageStore: ObservableObject {
                 return .failure(ZeehoClient.errorText(res) ?? "消息加载失败 (\(code))")
             }
             return .success(InboxMessage.parseList(res))
+        } catch is CancellationError {
+            return .cancelled
         } catch {
             return .failure(error.localizedDescription)
         }

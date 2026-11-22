@@ -139,6 +139,7 @@ struct VehicleView: View {
             _ = await (modelTask, photo, ride, battery, detail, tire, sign, addr, inbox)
             await signin.syncWidget(model: model, ride: rideExtra)
             syncChargeIsland()
+            model.markUpdated()
 
             // 充电中约 20 秒刷电池；平时约 90 秒。离开车辆 Tab 不刷
             while !Task.isCancelled {
@@ -191,11 +192,6 @@ struct VehicleView: View {
         .onChange(of: model.selectedVehicle?.longitude) { _, _ in
             Task { await resolveAddressIfNeeded() }
         }
-        .onChange(of: activeMainTab) { _, tab in
-            if tab == .vehicle {
-                cameraReset += 1
-            }
-        }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             // 回前台轻量刷新，不整页重载 3D/视频，避免闪白
@@ -227,6 +223,7 @@ struct VehicleView: View {
             modelGLBFile: heroGLB,
             modelGLBCached: vehicle.vinNo == loadedModelVin && (readyGLBVins.contains(vehicle.vinNo) || HeroAssetCache.glb(for: vehicle.vinNo) != nil),
             prefers3D: vehicle.model3DURL != nil,
+            screenActive: activeMainTab == .vehicle,
             liveCharging: model.batteries.first { !$0.id.hasPrefix("vehicle-") }?.isLiveCharging,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
@@ -375,6 +372,7 @@ struct VehicleView: View {
         await messages.refresh()
         syncChargeIsland()
         cameraReset += 1
+        model.markUpdated()
     }
 
     private func syncChargeIsland() {
@@ -405,12 +403,33 @@ struct VehicleView: View {
             if let error = model.errorMessage {
                 SoftBanner(text: error, icon: "wifi.exclamationmark", tone: Theme.orange)
             }
+            updatedAtFooter
         }
         .padding(.horizontal, 16)
         .padding(.top, themeStore.selection.blendsIntoPage ? 8 : 4)
         .padding(.bottom, 8)
         .background(alignment: .top) { contentBackdrop }
     }
+
+    /// 数据最近一次成功刷新的时间
+    private var updatedAtFooter: some View {
+        Group {
+            if let date = model.lastUpdatedAt {
+                Text("更新于 " + Self.timeFormatter.string(from: date))
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 2)
+            }
+        }
+        .transaction { $0.animation = nil }
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     @ViewBuilder
     private var contentBackdrop: some View {

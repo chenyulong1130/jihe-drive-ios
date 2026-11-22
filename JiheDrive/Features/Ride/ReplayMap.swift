@@ -16,8 +16,6 @@ struct ReplayMap: UIViewRepresentable {
     let follow: Bool
     /// 回放时切 3D 地形 + 追车相机
     var cinematic: Bool = false
-    /// 2D：官方车辆图片；没有图才退回圆点
-    var vehicleImage: UIImage? = nil
     /// SceneKit 立体车模（USDZ / 能转的 GLB）
     var modelScene: SCNScene? = nil
     /// GLB 本地文件，SceneKit 吃不了时用 model-viewer 铺到地图上
@@ -39,7 +37,6 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.edgePadding = edgePadding
         context.coordinator.times = times
         context.coordinator.duration = duration
-        context.coordinator.vehicleImage = vehicleImage
         context.coordinator.modelScene = modelScene
         context.coordinator.glbFile = glbFile
         context.coordinator.use3D = use3D
@@ -51,7 +48,6 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.edgePadding = edgePadding
         context.coordinator.times = times
         context.coordinator.duration = duration
-        context.coordinator.vehicleImage = vehicleImage
         context.coordinator.modelScene = modelScene
         context.coordinator.glbFile = glbFile
         context.coordinator.use3D = use3D
@@ -87,7 +83,6 @@ struct ReplayMap: UIViewRepresentable {
         var edgePadding = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
         var times: [TimeInterval] = []
         var duration: TimeInterval = 0
-        var vehicleImage: UIImage?
         var modelScene: SCNScene?
         var glbFile: URL?
         var use3D = false
@@ -231,7 +226,8 @@ struct ReplayMap: UIViewRepresentable {
                 let heading = cinematicEnabled ? displayHeading : 0
                 let camera = MKMapCamera(
                     lookingAtCenter: pose,
-                    fromDistance: cinematicEnabled ? 240 : 480,
+                    // 距离拉远：贴太近时瓦片每帧重绘，低端机上回放会卡
+                    fromDistance: cinematicEnabled ? 620 : 1350,
                     pitch: cinematicEnabled ? 58 : 0,
                     heading: heading
                 )
@@ -267,7 +263,6 @@ struct ReplayMap: UIViewRepresentable {
         ) {
             view.apply(
                 speed: speed,
-                vehicleImage: vehicleImage,
                 modelScene: modelScene,
                 glbFile: glbFile,
                 use3D: use3D,
@@ -369,7 +364,7 @@ struct ReplayMap: UIViewRepresentable {
                 let heading = blendHeading(to: lastCourse, k: min(1, 1 - exp(-frame / 0.18)))
                 let camera = MKMapCamera(
                     lookingAtCenter: target,
-                    fromDistance: 230,
+                    fromDistance: 620,
                     pitch: 58,
                     heading: heading
                 )
@@ -557,16 +552,12 @@ final class ReplayCursorAnnotation: MKPointAnnotation {
 final class ReplayCursorView: MKAnnotationView {
     static let reuseID = "replay-cursor"
     private static let dotSize: CGFloat = 14
-    private static let photoSize = CGSize(width: 78, height: 52)
     private static let model3DSize = CGSize(width: 132, height: 96)
-    /// 官方车图默认车头朝左（西，270°）
-    private static let imageNose: CLLocationDirection = 270
     /// GLB 默认车头朝右；再加 180° 后车头对准行驶方向（上次 -90° 会前后反）
     private static let modelYawBias: CLLocationDirection = 90
 
     private let bubble = UILabel()
     private let dot = UIView()
-    private let model = UIImageView()
     private let sceneView = SCNView()
     private var web: ReplayMapGLBView?
     private var yawNode: SCNNode?
@@ -595,13 +586,6 @@ final class ReplayCursorView: MKAnnotationView {
         dot.layer.borderColor = UIColor.white.cgColor
         dot.frame = bounds
 
-        model.contentMode = .scaleAspectFit
-        model.layer.shadowColor = UIColor.black.cgColor
-        model.layer.shadowOpacity = 0.35
-        model.layer.shadowRadius = 6
-        model.layer.shadowOffset = CGSize(width: 0, height: 3)
-        model.isHidden = true
-
         sceneView.backgroundColor = .clear
         sceneView.isOpaque = false
         sceneView.layer.isOpaque = false
@@ -614,10 +598,9 @@ final class ReplayCursorView: MKAnnotationView {
         sceneView.isHidden = true
 
         addSubview(dot)
-        addSubview(model)
         addSubview(sceneView)
         addSubview(bubble)
-        apply(speed: 0, vehicleImage: nil)
+        apply(speed: 0)
     }
 
     required init?(coder: NSCoder) {
@@ -626,7 +609,6 @@ final class ReplayCursorView: MKAnnotationView {
 
     func apply(
         speed: Double,
-        vehicleImage: UIImage? = nil,
         modelScene: SCNScene? = nil,
         glbFile: URL? = nil,
         use3D: Bool = false,
@@ -642,14 +624,10 @@ final class ReplayCursorView: MKAnnotationView {
         let width = max(44, textSize.width + 14)
 
         let live3D = use3D && (modelScene != nil || glbFile != nil)
-        let showPhoto = !live3D && vehicleImage != nil
-        model.image = vehicleImage
-        model.isHidden = !showPhoto
-        dot.isHidden = live3D || showPhoto
+        dot.isHidden = live3D
         sceneView.rendersContinuously = live3D && modelScene != nil
 
         if live3D {
-            model.transform = .identity
             bounds = CGRect(origin: .zero, size: Self.model3DSize)
             if let modelScene {
                 attachScene(modelScene)
@@ -673,24 +651,9 @@ final class ReplayCursorView: MKAnnotationView {
                 height: 20
             )
             centerOffset = CGPoint(x: 0, y: -22)
-        } else if showPhoto {
-            sceneView.isHidden = true
-            sceneView.isPlaying = false
-            web?.isHidden = true
-            bounds = CGRect(origin: .zero, size: Self.photoSize)
-            model.bounds = CGRect(origin: .zero, size: Self.photoSize)
-            model.center = CGPoint(x: Self.photoSize.width / 2, y: Self.photoSize.height / 2)
-            pointPhoto(heading: heading, mapHeading: mapHeading)
-            bubble.frame = CGRect(
-                x: (Self.photoSize.width - width) / 2,
-                y: -26,
-                width: width,
-                height: 20
-            )
-            centerOffset = CGPoint(x: 0, y: -10)
         } else {
+            // 2D 回放统一用圆点：官方车图每帧旋转重绘，低端机上太卡
             shownHeading = nil
-            model.transform = .identity
             sceneView.isHidden = true
             sceneView.isPlaying = false
             web?.isHidden = true
@@ -742,12 +705,6 @@ final class ReplayCursorView: MKAnnotationView {
     }
 
     /// 车头对准轨迹方向；气泡不转。地图旋转时扣掉相机朝向。
-    private func pointPhoto(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
-        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading)
-        let radians = (wrapped - Self.imageNose) * .pi / 180
-        model.transform = CGAffineTransform(rotationAngle: radians)
-    }
-
     private func pointScene(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
         let wrapped = screenHeading(heading: heading, mapHeading: mapHeading) + Self.modelYawBias
         yawNode?.eulerAngles.y = -Float(wrapped * .pi / 180)
@@ -807,5 +764,12 @@ final class ReplayMapGLBView: WKWebView {
         guard abs(degrees - lastYaw) > 2 || lastYaw.isNaN else { return }
         lastYaw = degrees
         evaluateJavaScript("window.jhSetYaw && window.jhSetYaw(\(degrees))", completionHandler: nil)
+    }
+
+    /// 挂后台 WebContent 进程被回收时，地图上的立体车会消失；回来立即重载
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard let file = loadedFile else { return }
+        loadedFile = nil
+        loadGLB(file)
     }
 }
