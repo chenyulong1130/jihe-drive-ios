@@ -35,6 +35,8 @@ struct HeroStage: View {
     var prefers3D: Bool = false
     /// 车辆 Tab 是否在前台：不在时暂停背景视频与 3D 渲染，翻页不吃 GPU
     var screenActive: Bool = true
+    /// 全车灯跟随外观深浅色：深色亮灯，nil 不下发
+    var lightsOn: Bool? = nil
     /// 实时电池充电态；列表里的充电标记不再当默认
     var liveCharging: Bool? = nil
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
@@ -288,10 +290,10 @@ struct HeroStage: View {
 
     /// 车图和顶栏电量之间留空，避免贴在标题下面
     private var carTopPad: CGFloat { topInset + 70 }
-    /// 3D 比 2D 更靠上一点，镜头拉近后不要离顶栏太远
-    private var glbTopPad: CGFloat { topInset + 44 }
-    /// 底部留量固定：胎压标注出现/消失不再把车模型往上顶
-    private var carBottomPad: CGFloat { 28 }
+    /// 3D 比 2D 更靠上一点，镜头拉近后不要离顶栏太远；整体再下移 12pt 贴近底部胎压
+    private var glbTopPad: CGFloat { topInset + 56 }
+    /// 底部留量给胎压标注；2D 稍紧，3D 压得更低一点
+    private var carBottomPad: CGFloat { prefers3D ? 16 : 20 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { prefers3D || modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
@@ -317,6 +319,7 @@ struct HeroStage: View {
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,
                                     active: screenActive,
+                                    lightsOn: lightsOn,
                                     onDrag: { dragging in
                                         if dragging { modelRotated = true }
                                         onInteract?(dragging)

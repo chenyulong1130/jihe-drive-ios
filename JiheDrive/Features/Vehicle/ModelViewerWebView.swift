@@ -12,10 +12,10 @@ struct ModelViewerWebView: UIViewRepresentable {
     var resetToken: Int = 0
     /// 页面不在前台时置 false：暂停渲染，翻页不吃 WebGL
     var active: Bool = true
+    var lightsOn: Bool? = nil        // 全车灯（不含转向灯）：深色主题 true / 浅色 false
     var onDrag: ((Bool) -> Void)? = nil
     var onOrbitChanged: ((Bool) -> Void)? = nil
     var onReady: (() -> Void)? = nil
-    var lightsOn: Bool? = nil        // 全车灯（不含转向灯）：深色主题 true / 浅色 false
     var seatOpen: Bool = false       // 坐垫目标状态
     var seatToken: Int = 0           // 每次变更 +1 触发下发
     var onSeatChange: ((Bool) -> Void)? = nil        // JS 即时回传坐垫开关状态

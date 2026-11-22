@@ -6,6 +6,7 @@ struct VehicleView: View {
     @EnvironmentObject private var wallpaperStore: WallpaperStore
     @EnvironmentObject private var videoStore: VideoBackdropStore
     @EnvironmentObject private var messages: MessageStore
+    @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.activeMainTab) private var activeMainTab
 
@@ -224,6 +225,7 @@ struct VehicleView: View {
             modelGLBCached: vehicle.vinNo == loadedModelVin && (readyGLBVins.contains(vehicle.vinNo) || HeroAssetCache.glb(for: vehicle.vinNo) != nil),
             prefers3D: vehicle.model3DURL != nil,
             screenActive: activeMainTab == .vehicle,
+            lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.batteries.first { !$0.id.hasPrefix("vehicle-") }?.isLiveCharging,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
