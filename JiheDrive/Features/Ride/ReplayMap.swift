@@ -226,8 +226,8 @@ struct ReplayMap: UIViewRepresentable {
                 let heading = cinematicEnabled ? displayHeading : 0
                 let camera = MKMapCamera(
                     lookingAtCenter: pose,
-                    // 距离拉远：贴太近时瓦片每帧重绘，低端机上回放会卡
-                    fromDistance: cinematicEnabled ? 620 : 1350,
+                    // 距离拉远：太近瓦片每帧重绘卡顿，也太压迫；电影 950 / 平面 1800
+                    fromDistance: cinematicEnabled ? 950 : 1800,
                     pitch: cinematicEnabled ? 58 : 0,
                     heading: heading
                 )
@@ -364,7 +364,7 @@ struct ReplayMap: UIViewRepresentable {
                 let heading = blendHeading(to: lastCourse, k: min(1, 1 - exp(-frame / 0.18)))
                 let camera = MKMapCamera(
                     lookingAtCenter: target,
-                    fromDistance: 620,
+                    fromDistance: 950,
                     pitch: 58,
                     heading: heading
                 )
