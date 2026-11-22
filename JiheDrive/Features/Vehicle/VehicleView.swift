@@ -168,6 +168,11 @@ struct VehicleView: View {
             restoreCachedHero(vin: vin)
             loadedModelVin = vin
         }
+        // 3D 模型地址只有详情接口带，详情回来晚了要补一次加载
+        .onChange(of: model.selectedVehicle?.model3DURL) { _, url in
+            guard url != nil else { return }
+            Task { await loadHeroModel() }
+        }
         .onChange(of: model.selectedVehicle?.soc) { _, _ in
             WidgetSnapshot.publish(from: model, signin: signin, ride: rideExtra)
             syncChargeIsland()
