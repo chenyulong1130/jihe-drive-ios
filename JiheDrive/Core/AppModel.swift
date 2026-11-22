@@ -400,8 +400,8 @@ final class AppModel: ObservableObject {
         }
         snap.vin = vehicle.vinNo
         snap.name = vehicle.name
-        snap.soc = vehicle.soc
-        snap.rangeKm = vehicle.rangeKm
+        snap.soc = vehicle.soc > 0 ? vehicle.soc : (previous?.soc ?? 0)
+        snap.rangeKm = vehicle.rangeKm > 0 ? vehicle.rangeKm : (previous?.rangeKm ?? 0)
         snap.charging = vehicle.isCharging
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline

@@ -180,7 +180,10 @@ struct BatteryInfo: Identifiable, Hashable {
         ]))
         let soh = optionalDouble(JSONDig.first(json, keys: ["soh", "batterySoh", "health"]))
         let score = stringValue(JSONDig.first(json, keys: ["score", "batteryScore"]))
-        let range = intValue(JSONDig.first(json, keys: ["hmiRidableMile", "ridableMile", "rangeKm"]))
+        let range = intValue(JSONDig.first(json, keys: [
+            "hmiRidableMile", "HMIRidableMile", "ridableMile", "remainMileage",
+            "remainMile", "rangeKm", "hmiRideableMile"
+        ]))
         let refresh = stringValue(JSONDig.first(json, keys: ["refreshTime", "updateTime", "ts"]))
         let chargeTimeString = stringValue(JSONDig.first(json, keys: ["chargeTimeString"]))
         let eta = stringValue(JSONDig.first(json, keys: [

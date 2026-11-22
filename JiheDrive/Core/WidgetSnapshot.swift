@@ -265,31 +265,12 @@ enum WidgetSnapshot {
             snap.vin = wanted
         }
         let old = (snap.vin.isEmpty ? nil : readVin(snap.vin))
-            ?? readKeychain()
-            ?? readIgnoringVin()
-        if snap.loggedIn, let old {
-            if !hasVehicleData(snap), hasVehicleData(old) {
-                snap.name = old.name
-                if snap.vin.isEmpty { snap.vin = old.vin }
-                snap.soc = old.soc
-                snap.rangeKm = old.rangeKm
-                snap.charging = old.charging
-                snap.locked = old.locked
-                snap.online = old.online
-                snap.imageURL = old.imageURL
-                snap.todayKm = old.todayKm
-                snap.todayMin = old.todayMin
-                snap.tireText = old.tireText
-                snap.tireBound = old.tireBound
-            } else {
-                if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
-                if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
-                if snap.vin.isEmpty { snap.vin = old.vin }
-                if snap.name.isEmpty { snap.name = old.name }
-                if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
-                if snap.todayKm == 0, old.todayKm > 0 { snap.todayKm = old.todayKm }
-                if snap.todayMin == 0, old.todayMin > 0 { snap.todayMin = old.todayMin }
-            }
+            ?? {
+                let fallback = readKeychain() ?? readIgnoringVin()
+                return sameVin(snap.vin, fallback?.vin) ? fallback : nil
+            }()
+        if snap.loggedIn, let old, sameVin(snap.vin, old.vin) {
+            fillMissingVehicle(&snap, from: old)
         }
         var payload = snap.dictionary
         payload["sessionToken"] = ZeehoClient.shared.token ?? ""
@@ -336,10 +317,10 @@ enum WidgetSnapshot {
             if let hit = candidates.first(where: { sameVin($0.vin, wanted) && hasVehicleData($0) }) {
                 return hit
             }
-            if let best = newest(candidates.filter(hasVehicleData)) {
-                return best
-            }
             if let acc = newest(candidates) {
+                if sameVin(acc.vin, wanted), hasVehicleData(acc) {
+                    return acc
+                }
                 return accountStub(from: acc, vin: wanted)
             }
             return nil
@@ -349,6 +330,40 @@ enum WidgetSnapshot {
 
     static func hasVehicleData(_ snap: WidgetSnap) -> Bool {
         snap.soc > 0 || snap.rangeKm > 0 || !snap.name.isEmpty
+    }
+
+    static func fillMissingVehicle(_ snap: inout WidgetSnap, from old: WidgetSnap) {
+        guard sameVin(snap.vin, old.vin) else { return }
+        if !hasVehicleData(snap), hasVehicleData(old) {
+            snap.name = old.name
+            if snap.vin.isEmpty { snap.vin = old.vin }
+            snap.soc = old.soc
+            snap.rangeKm = old.rangeKm
+            snap.charging = old.charging
+            snap.locked = old.locked
+            snap.online = old.online
+            snap.imageURL = old.imageURL
+            snap.todayKm = old.todayKm
+            snap.todayMin = old.todayMin
+            snap.tireText = old.tireText
+            snap.tireBound = old.tireBound
+            snap.totalMile = old.totalMile
+            snap.monthMile = old.monthMile
+            return
+        }
+        if snap.soc <= 0, old.soc > 0 { snap.soc = old.soc }
+        if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
+        if snap.vin.isEmpty { snap.vin = old.vin }
+        if snap.name.isEmpty { snap.name = old.name }
+        if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
+        if snap.todayKm == 0, old.todayKm > 0 { snap.todayKm = old.todayKm }
+        if snap.todayMin == 0, old.todayMin > 0 { snap.todayMin = old.todayMin }
+        if snap.tireText.isEmpty, !old.tireText.isEmpty {
+            snap.tireText = old.tireText
+            snap.tireBound = old.tireBound
+        }
+        if snap.totalMile == 0, old.totalMile > 0 { snap.totalMile = old.totalMile }
+        if snap.monthMile == "--", old.monthMile != "--" { snap.monthMile = old.monthMile }
     }
 
     static func readIgnoringVin() -> WidgetSnap? {

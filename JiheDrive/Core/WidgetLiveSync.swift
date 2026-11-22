@@ -43,26 +43,39 @@ enum WidgetLiveSync {
         if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
             let sameExisting = WidgetSnapshot.sameVin(existing?.vehicle?.vinNo, wantedVin)
             let stored = WidgetSnapshot.readVin(wantedVin)
-            let keep = stored ?? snap
             snap.vin = wantedVin
-            snap.name = sameExisting ? (existing?.vehicle?.name ?? keep.name) : keep.name
-            snap.soc = sameExisting ? (existing?.vehicle?.soc ?? keep.soc) : keep.soc
-            snap.rangeKm = sameExisting ? (existing?.vehicle?.rangeKm ?? keep.rangeKm) : keep.rangeKm
-            snap.charging = sameExisting ? (existing?.vehicle?.isCharging ?? keep.charging) : keep.charging
-            snap.locked = sameExisting ? (existing?.vehicle?.isLocked ?? keep.locked) : keep.locked
-            snap.online = sameExisting ? (existing?.vehicle?.isOnline ?? keep.online) : keep.online
-            snap.imageURL = sameExisting
-                ? (existing?.vehicle?.imageURL?.absoluteString ?? keep.imageURL)
-                : keep.imageURL
-            snap.todayKm = stored?.todayKm ?? keep.todayKm
-            snap.todayMin = stored?.todayMin ?? keep.todayMin
-            snap.lastKm = stored?.lastKm ?? keep.lastKm
-            snap.lastMin = stored?.lastMin ?? keep.lastMin
-            snap.accel = stored?.accel ?? keep.accel
-            snap.brake = stored?.brake ?? keep.brake
-            snap.maxSpeed = stored?.maxSpeed ?? keep.maxSpeed
-            snap.tireText = stored?.tireText ?? keep.tireText
-            snap.tireBound = stored?.tireBound ?? keep.tireBound
+            snap.name = stored?.name
+                ?? (sameExisting ? existing?.vehicle?.name : nil)
+                ?? ""
+            snap.soc = stored?.soc
+                ?? (sameExisting ? existing?.vehicle?.soc : nil)
+                ?? 0
+            snap.rangeKm = stored?.rangeKm
+                ?? (sameExisting ? existing?.vehicle?.rangeKm : nil)
+                ?? 0
+            snap.charging = stored?.charging
+                ?? (sameExisting ? existing?.vehicle?.isCharging : nil)
+                ?? false
+            snap.locked = stored?.locked
+                ?? (sameExisting ? existing?.vehicle?.isLocked : nil)
+                ?? true
+            snap.online = stored?.online
+                ?? (sameExisting ? existing?.vehicle?.isOnline : nil)
+                ?? false
+            snap.imageURL = stored?.imageURL
+                ?? (sameExisting ? existing?.vehicle?.imageURL?.absoluteString : nil)
+                ?? ""
+            snap.todayKm = stored?.todayKm ?? 0
+            snap.todayMin = stored?.todayMin ?? 0
+            snap.lastKm = stored?.lastKm ?? 0
+            snap.lastMin = stored?.lastMin ?? 0
+            snap.accel = stored?.accel ?? 0
+            snap.brake = stored?.brake ?? 0
+            snap.maxSpeed = stored?.maxSpeed ?? 0
+            snap.tireText = stored?.tireText ?? ""
+            snap.tireBound = stored?.tireBound ?? false
+            snap.totalMile = stored?.totalMile ?? 0
+            snap.monthMile = stored?.monthMile ?? "--"
         }
 
         var vehicle: Vehicle?

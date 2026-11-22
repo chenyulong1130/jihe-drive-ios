@@ -286,6 +286,8 @@ struct HeroStage: View {
 
     /// 车图和顶栏电量之间留空，避免贴在标题下面
     private var carTopPad: CGFloat { topInset + 70 }
+    /// 3D 比 2D 更靠上一点，镜头拉近后不要离顶栏太远
+    private var glbTopPad: CGFloat { topInset + 44 }
     private var carBottomPad: CGFloat { showTireMarks ? 28 : 8 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
     private var has3D: Bool { prefers3D || modelGLBFile != nil || modelScene != nil }
@@ -313,13 +315,18 @@ struct HeroStage: View {
                                 },
                                 onReady: { glbRevealed = true }
                             )
-                            .padding(.top, carTopPad)
+                            .id(vehicle.vinNo)
+                            .padding(.top, glbTopPad)
                             .padding(.bottom, carBottomPad)
                             .opacity(glbVisible ? 1 : 0)
                         }
                         .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
                         .onAppear { if modelGLBCached { glbRevealed = true } }
+                        .onChange(of: vehicle.vinNo) { _, _ in
+                            glbRevealed = modelGLBCached
+                            modelRotated = false
+                        }
                         .onChange(of: modelGLBFile) { _, _ in
                             glbRevealed = modelGLBCached
                         }
@@ -335,7 +342,7 @@ struct HeroStage: View {
                             onInteract?(dragging)
                         }
                     )
-                    .padding(.top, carTopPad)
+                    .padding(.top, glbTopPad)
                     .padding(.bottom, carBottomPad)
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }

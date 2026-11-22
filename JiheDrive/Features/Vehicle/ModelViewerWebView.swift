@@ -24,7 +24,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         if let pooled = ModelViewerPool.view(for: reuseKey) {
             pooled.removeFromSuperview()
             bind(pooled, context: context)
-            if pooled.url != nil {
+            if pooled.url != nil, ModelViewerPool.file(for: reuseKey) == glbFile {
                 context.coordinator.markLoaded(glbFile, interactive: interactive)
                 DispatchQueue.main.async { context.coordinator.onReady?() }
             } else {
@@ -52,7 +52,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         installGestures(on: view, coordinator: context.coordinator)
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
-        ModelViewerPool.store(view, for: reuseKey)
+        ModelViewerPool.store(view, for: reuseKey, file: glbFile)
         return view
     }
 
@@ -62,7 +62,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.onDrag = onDrag
         context.coordinator.onOrbitChanged = onOrbitChanged
         context.coordinator.onReady = onReady
-        if view.url == nil {
+        if ModelViewerPool.file(for: reuseKey) != glbFile || view.url == nil {
             context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
         } else {
             context.coordinator.markLoaded(glbFile, interactive: interactive)
@@ -75,7 +75,7 @@ struct ModelViewerWebView: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         uiView.removeFromSuperview()
-        ModelViewerPool.store(uiView, for: coordinator.reuseKey)
+        ModelViewerPool.store(uiView, for: coordinator.reuseKey, file: coordinator.currentFile)
     }
 
     private func bind(_ view: WKWebView, context: Context) {
@@ -116,12 +116,13 @@ struct ModelViewerWebView: UIViewRepresentable {
         var resetToken = 0
         var reuseKey = ""
         private var loadedFile: URL?
-
         private var loadedInteractive: Bool?
+        var currentFile: URL? { loadedFile }
 
         func markLoaded(_ glbFile: URL, interactive: Bool) {
             loadedFile = glbFile
             loadedInteractive = interactive
+            ModelViewerPool.remember(file: glbFile, for: reuseKey)
         }
 
         @objc func handleOuterPan(_ gesture: UIPanGestureRecognizer) {
@@ -152,6 +153,7 @@ struct ModelViewerWebView: UIViewRepresentable {
 
             loadedFile = glbFile
             loadedInteractive = interactive
+            ModelViewerPool.remember(file: glbFile, for: reuseKey)
             scheme.replace(glb: data, script: script)
 
             let html = ModelViewerAsset.html(interactive: interactive, autoRotate: autoRotate)
@@ -185,15 +187,29 @@ struct ModelViewerWebView: UIViewRepresentable {
 /// 同一 VIN 复用 WKWebView，切页/刷新不再重新解析 GLB
 enum ModelViewerPool {
     private static var views: [String: WKWebView] = [:]
+    private static var files: [String: URL] = [:]
 
     static func view(for key: String) -> WKWebView? {
         guard !key.isEmpty else { return nil }
         return views[key]
     }
 
-    static func store(_ view: WKWebView, for key: String) {
+    static func file(for key: String) -> URL? {
+        guard !key.isEmpty else { return nil }
+        return files[key]
+    }
+
+    static func remember(file: URL, for key: String) {
+        guard !key.isEmpty else { return }
+        files[key] = file
+    }
+
+    static func store(_ view: WKWebView, for key: String, file: URL? = nil) {
         guard !key.isEmpty else { return }
         views[key] = view
+        if let file {
+            files[key] = file
+        }
     }
 }
 
@@ -213,10 +229,10 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "0deg 90deg 5.0m"
-        let target = "0.02m 0.80m auto"
-        let minOrbit = interactive ? "auto 84deg 2.8m" : "auto 90deg 4.8m"
-        let maxOrbit = interactive ? "auto 94deg 7.2m" : "auto 90deg 5.4m"
+        let orbit = "0deg 90deg 4.35m"
+        let target = "0.02m 0.74m auto"
+        let minOrbit = interactive ? "auto 84deg 2.5m" : "auto 90deg 4.1m"
+        let maxOrbit = interactive ? "auto 94deg 6.6m" : "auto 90deg 4.7m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
         let controls = interactive ? "camera-controls touch-action=\"none\"" : "interaction-prompt=\"none\""
 

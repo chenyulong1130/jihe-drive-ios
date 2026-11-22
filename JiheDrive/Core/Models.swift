@@ -88,7 +88,7 @@ struct Vehicle: Identifiable, Hashable {
             name: name,
             modelName: modelName,
             soc: battery.level > 0 ? battery.level : soc,
-            rangeKm: battery.rangeKm ?? rangeKm,
+            rangeKm: (battery.rangeKm ?? 0) > 0 ? (battery.rangeKm ?? rangeKm) : rangeKm,
             totalMileKm: totalMileKm,
             isOnline: isOnline,
             onlineKnown: onlineKnown,
@@ -234,7 +234,16 @@ extension Vehicle {
         self.name = Self.firstString(json, keys: ["vehicleName", "deviceName", "name"]) ?? "我的车辆"
         self.modelName = Self.firstString(json, keys: ["vehicleTypeName", "modelName", "vehicleType"])
         self.soc = Self.intValue(json["bmssoc"] ?? iot["BMSSOC"] ?? iot["bmssoc"])
-        self.rangeKm = Self.intValue(json["hmiRidableMile"] ?? iot["HMIRidableMile"] ?? iot["hmiRidableMile"])
+        self.rangeKm = Self.intValue(
+            json["hmiRidableMile"]
+                ?? iot["HMIRidableMile"]
+                ?? iot["hmiRidableMile"]
+                ?? json["ridableMile"]
+                ?? json["remainMileage"]
+                ?? json["remainMile"]
+                ?? json["rangeKm"]
+                ?? json["hmiRideableMile"]
+        )
         self.totalMileKm = Self.doubleValue(json["totalRideMile"] ?? iot["TotalRideMile"]) ?? 0
         let online = Self.onlineHint(json)
         self.isOnline = online ?? false

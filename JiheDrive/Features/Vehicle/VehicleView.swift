@@ -127,6 +127,7 @@ struct VehicleView: View {
             }
             rideExtra = nil
             resolvedAddress = nil
+            async let modelTask: Void = loadHeroModel()
             async let photo: Void = cacheSelectedPhoto()
             async let ride: Void = loadRideSummary(vin: vin)
             async let battery: Void = model.loadBattery(vin: vin)
@@ -135,12 +136,7 @@ struct VehicleView: View {
             async let sign: Void = signin.refresh()
             async let addr: Void = resolveAddressIfNeeded()
             async let inbox: Void = messages.refresh()
-            _ = await (photo, ride, battery, detail, tire, sign, addr, inbox)
-            if readyGLBVins.contains(vin), heroGLB != nil {
-                snapshotMarkerIfNeeded(vin: vin)
-            } else {
-                await loadHeroModel()
-            }
+            _ = await (modelTask, photo, ride, battery, detail, tire, sign, addr, inbox)
             await signin.syncWidget(model: model, ride: rideExtra)
             syncChargeIsland()
 
@@ -166,6 +162,11 @@ struct VehicleView: View {
                     await signin.syncWidget(model: model, ride: rideExtra)
                 }
             }
+        }
+        .onChange(of: model.selectedVehicle?.vinNo) { _, vin in
+            guard let vin else { return }
+            restoreCachedHero(vin: vin)
+            loadedModelVin = vin
         }
         .onChange(of: model.selectedVehicle?.soc) { _, _ in
             WidgetSnapshot.publish(from: model, signin: signin, ride: rideExtra)
@@ -267,22 +268,19 @@ struct VehicleView: View {
     private func restoreCachedHero(vin: String) {
         let vehicle = model.selectedVehicle
         let remote = vehicle?.model3DURL
-        if vehicle?.isGLBModel == true {
-            if let file = GLBModelStore.cached(vin: vin, remote: remote) {
-                HeroAssetCache.rememberGLB(file, vin: vin)
-                heroGLB = file
-                readyGLBVins.insert(vin)
-                model3D.clear()
-                return
-            }
-        } else if let remote {
+        if let file = HeroAssetCache.glb(for: vin) ?? GLBModelStore.cached(vin: vin, remote: remote) {
+            HeroAssetCache.rememberGLB(file, vin: vin)
+            heroGLB = file
+            readyGLBVins.insert(vin)
+            model3D.clear()
+            return
+        }
+        if let remote, vehicle?.isGLBModel != true {
             model3D.restore(vin: vin, url: remote)
             heroGLB = nil
             return
         }
-        if HeroAssetCache.glb(for: vin) == nil {
-            heroGLB = nil
-        }
+        heroGLB = nil
         if VehicleModelLoader.cachedScene(vin: vin) == nil {
             model3D.clear()
         }
@@ -296,8 +294,7 @@ struct VehicleView: View {
             return
         }
         let vin = vehicle.vinNo
-        await cacheSelectedPhoto()
-        if let cached = HeroAssetCache.glb(for: vin) {
+        if let cached = HeroAssetCache.glb(for: vin) ?? GLBModelStore.cached(vin: vin, remote: vehicle.model3DURL) {
             heroGLB = cached
             readyGLBVins.insert(vin)
             snapshotMarkerIfNeeded(vin: vin)

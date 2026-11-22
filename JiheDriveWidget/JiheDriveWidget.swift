@@ -57,26 +57,9 @@ struct SnapshotProvider: TimelineProvider {
 
     private static func mergeVehicle(primary: WidgetSnap, fallback: WidgetSnap) -> WidgetSnap {
         var snap = primary
-        if !hasVehicle(snap), hasVehicle(fallback) {
-            snap.name = fallback.name
-            snap.vin = snap.vin.isEmpty ? fallback.vin : snap.vin
-            snap.soc = fallback.soc
-            snap.rangeKm = fallback.rangeKm
-            snap.charging = fallback.charging
-            snap.locked = fallback.locked
-            snap.online = fallback.online
-            snap.imageURL = fallback.imageURL
-            snap.todayKm = fallback.todayKm
-            snap.todayMin = fallback.todayMin
-            snap.tireText = fallback.tireText
-            snap.tireBound = fallback.tireBound
-        } else {
-            if snap.soc <= 0, fallback.soc > 0 { snap.soc = fallback.soc }
-            if snap.rangeKm <= 0, fallback.rangeKm > 0 { snap.rangeKm = fallback.rangeKm }
-            if snap.name.isEmpty { snap.name = fallback.name }
-            if snap.vin.isEmpty { snap.vin = fallback.vin }
-            if snap.todayKm == 0, fallback.todayKm > 0 { snap.todayKm = fallback.todayKm }
-            if snap.todayMin == 0, fallback.todayMin > 0 { snap.todayMin = fallback.todayMin }
+        if snap.vin.isEmpty { snap.vin = fallback.vin }
+        if WidgetSnapshot.sameVin(snap.vin, fallback.vin) {
+            WidgetSnapshot.fillMissingVehicle(&snap, from: fallback)
         }
         if snap.pointsTotal <= 0 { snap.pointsTotal = fallback.pointsTotal }
         if snap.pointsToday <= 0 {
