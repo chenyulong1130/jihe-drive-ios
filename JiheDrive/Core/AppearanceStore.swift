@@ -108,18 +108,54 @@ final class AppearanceStore: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.applyToWindows(setStyle: false)
+                guard let self else { return }
+                // 后台期间系统可能切了深浅色，跟随模式下重新解析
+                if self.mode == .system {
+                    self.refreshResolved()
+                } else {
+                    self.applyToWindows(setStyle: false)
+                }
             }
         })
         observers.append(center.addObserver(
-            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            forName: UIApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                // 控制中心切深浅色不触发 willEnterForeground，这里再兜一次
+                if self.mode == .system {
+                    self.refreshResolved()
+                } else {
+                    self.applyToWindows(setStyle: false)
+                }
+            }
+        })
+        // iOS 的系统深浅色切换是 Darwin 通知，NotificationCenter.default 收不到，
+        // 必须经 CFNotificationCenter 注册，再转成内部 NS 通知给主线程消费。
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotificationCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, _, _, _, _ in
+                NotificationCenter.default.post(
+                    name: Notification.Name("jihe.systemAppearanceChanged"),
+                    object: nil
+                )
+            },
+            "AppleInterfaceThemeChangedNotification" as CFString,
+            nil,
+            .deliverImmediately
+        )
+        observers.append(center.addObserver(
+            forName: Notification.Name("jihe.systemAppearanceChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.mode == .system else { return }
                 // 录屏 / 控制中心会把 trait 变成 unspecified，不能当成浅色
-                if self.mode == .system, Self.currentInterfaceStyle() == .unspecified {
+                if Self.currentInterfaceStyle() == .unspecified {
                     self.applyToWindows(setStyle: false)
                     return
                 }
@@ -156,6 +192,13 @@ final class AppearanceStore: ObservableObject {
                 self?.applyToWindows(setStyle: false)
             }
         })
+    }
+
+    deinit {
+        CFNotificationCenterRemoveEveryObserver(
+            CFNotificationCenterGetDarwinNotificationCenter(),
+            Unmanaged.passUnretained(self).toOpaque()
+        )
     }
 
     private static func scheme(for mode: AppAppearance, fallback: ColorScheme) -> ColorScheme {

@@ -239,7 +239,10 @@ struct ModelViewerWebView: UIViewRepresentable {
                 if !self.active {
                     webView.evaluateJavaScript("window.jhSetPaused && window.jhSetPaused(true)", completionHandler: nil)
                 }
-                self.onReady?()
+            }
+            // 正常情况由 JS 的 ready 消息揭 loading；这里兜底防止消息丢失一直转圈
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.onReady?()
             }
         }
 
@@ -256,15 +259,18 @@ struct ModelViewerWebView: UIViewRepresentable {
             var rotated: Bool?
             var seatOpen: Bool?
             var seatProgress: Double?
+            var modelReady = false
             if let map = message.body as? [String: Any] {
                 rotated = map["rotated"] as? Bool
                 seatOpen = map["seatOpen"] as? Bool
                 seatProgress = map["progress"] as? Double
+                modelReady = (map["ready"] as? Bool) == true
             } else if let flag = message.body as? Bool {
                 rotated = flag
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                if modelReady { self.onReady?() }
                 if let seatProgress { self.onSeatProgress?(seatProgress) }
                 if let seatOpen { self.onSeatChange?(seatOpen) }
                 if let rotated { self.onOrbitChanged?(rotated) }
@@ -479,8 +485,8 @@ enum ModelViewerAsset {
           'L-TailLight': [0xff1a00, 5],
           'L-BrakeLight':[0xff1a00, 14]
         };
-        // 各车型节点命名不一，精确名匹配不到时按关键词兜底（排除转向灯）
-        const LAMP_SKIP = ['turn', 'indicator', 'blinker', 'winker', 'direction'];
+        // 各车型节点命名不一，按节点名/材质名关键词兜底（排除转向灯）
+        const LAMP_SKIP = ['turn', 'indicator', 'blinker', 'winker', 'direction', 'plug', 'lightpoint'];
         function lampHit(name) {
           const n = String(name || '').toLowerCase().replace(/[\\s\\-_.]/g, '');
           if (!n) return false;
@@ -496,7 +502,8 @@ enum ModelViewerAsset {
           return [0xfff2d0, 6];
         }
         const lampMats = [];
-        window.jhSetLights = (on) => {
+        let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
+        function applyLights(on) {
           for (const m of lampMats) {
             if (on) {
               m.emissive.setHex(m.userData.onColor);
@@ -507,7 +514,13 @@ enum ModelViewerAsset {
             }
           }
           needsRender = true;
+        }
+        window.jhSetLights = (on) => {
+          lightsState = !!on;
+          applyLights(lightsState);
         };
+        // 调试用：jhLampInfo() 看收集到了哪些灯材质、当前开关状态
+        window.jhLampInfo = () => ({ mats: lampMats.map((m) => m.name || 'unnamed'), lights: lightsState });
 
         new GLTFLoader().load('model.glb', (gltf) => {
           scene.add(gltf.scene);
@@ -523,35 +536,46 @@ enum ModelViewerAsset {
             pivot.add(seat);
             seat.position.sub(HINGE);
           }
-          for (const key in LAMP_CONF) {
-            const node = gltf.scene.getObjectByName(key);
-            if (!node) continue;
-            node.traverse((o) => {
-              if (o.isMesh) {
-                o.material.toneMapped = false;
-                o.material.userData.onColor = LAMP_CONF[key][0];
-                o.material.userData.onInt = LAMP_CONF[key][1];
-                o.material.emissive.setHex(0x000000);
-                o.material.emissiveIntensity = 0;
-                lampMats.push(o.material);
-              }
-            });
-          }
-          // 兜底：精确名没匹配到的模型，按节点/材质名关键词收灯
-          if (lampMats.length === 0) {
-            gltf.scene.traverse((o) => {
-              if (!o.isMesh) return;
+          // 统一收集灯材质：精确节点名优先，节点/材质名关键词兜底。
+          // 材质可能是数组；unlit 材质没有 emissive，要换成标准材质，否则点灯无效。
+          gltf.scene.traverse((o) => {
+            if (!o.isMesh) return;
+            const isArray = Array.isArray(o.material);
+            const list = isArray ? o.material : [o.material];
+            let replaced = false;
+            const processed = [];
+            for (const mat of list) {
+              if (!mat) { processed.push(mat); continue; }
               const spec = LAMP_CONF[o.name] ||
-                ((lampHit(o.name) || lampHit(o.material && o.material.name)) ? lampSpec(o.name + ' ' + ((o.material && o.material.name) || '')) : null);
-              if (!spec) return;
-              o.material.toneMapped = false;
-              o.material.userData.onColor = spec[0];
-              o.material.userData.onInt = spec[1];
-              o.material.emissive.setHex(0x000000);
-              o.material.emissiveIntensity = 0;
-              lampMats.push(o.material);
-            });
-          }
+                ((lampHit(o.name) || lampHit(mat.name)) ? lampSpec((o.name || '') + ' ' + (mat.name || '')) : null);
+              if (!spec) { processed.push(mat); continue; }
+              let m = mat;
+              if (!m.emissive) {
+                const std = new THREE.MeshStandardMaterial({
+                  color: m.color ? m.color.getHex() : 0xffffff,
+                  map: m.map || null,
+                  transparent: !!m.transparent,
+                  opacity: m.opacity != null ? m.opacity : 1,
+                  side: m.side
+                });
+                std.name = m.name || '';
+                m = std;
+                replaced = true;
+              }
+              if (lampMats.indexOf(m) < 0) {
+                m.toneMapped = false;
+                m.userData.onColor = spec[0];
+                m.userData.onInt = spec[1];
+                m.emissive.setHex(0x000000);
+                m.emissiveIntensity = 0;
+                lampMats.push(m);
+              }
+              processed.push(m);
+            }
+            if (replaced) o.material = isArray ? processed : processed[0];
+          });
+          // 模型加载晚于页面就绪：补挂最近的灯光/坐垫目标状态
+          if (lampMats.length > 0) applyLights(lightsState);
           // 对齐 model-viewer 的 camera-target auto 语义：把包围盒中心挪到
           // 相机 target（0.02, 0.74, 0），模型不再依赖原始坐标摆放
           const box = new THREE.Box3().setFromObject(gltf.scene);
@@ -560,6 +584,7 @@ enum ModelViewerAsset {
           gltf.scene.position.z += 0 - center.z;
           gltf.scene.position.y += 0.74 - center.y;
           needsRender = true;
+          post({ ready: true }); // 模型真正解析完成才揭掉 loading
         });
 
         // ---------- 主循环：按需渲染，静止时不耗 CPU（低配机友好） ----------

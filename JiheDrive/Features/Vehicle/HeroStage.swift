@@ -300,6 +300,11 @@ struct HeroStage: View {
     private var has3D: Bool { prefers3D || modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
 
+    /// 3D 还没就绪时隐藏坐垫按钮，别让它浮在 loading 文案上
+    private var seatButtonHidden: Bool {
+        (modelGLBFile != nil || prefers3D) && !glbVisible
+    }
+
     @ViewBuilder
     private var carLayer: some View {
         ZStack(alignment: .topTrailing) {
@@ -380,22 +385,25 @@ struct HeroStage: View {
                 }
             }
 
-            // 坐垫：叠在车图右上（对齐 Flutter / 小程序），不进顶栏
-            Button(action: onOpenCushion) {
-                SeatIcon(size: 18)
-                    .foregroundStyle(Theme.label)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.55))
-                    )
-                    .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
+            // 坐垫：叠在车图右上（对齐 Flutter / 小程序），不进顶栏；
+            // 3D 加载中隐藏，避免压在 loading 文案上
+            if !seatButtonHidden {
+                Button(action: onOpenCushion) {
+                    SeatIcon(size: 18)
+                        .foregroundStyle(Theme.label)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.white.opacity(0.55))
+                        )
+                        .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
+                }
+                .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+                .padding(.top, topInset + 140)
+                .padding(.trailing, 16)
+                .accessibilityLabel("打开坐垫")
             }
-            .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-            .padding(.top, topInset + 108)
-            .padding(.trailing, 16)
-            .accessibilityLabel("打开坐垫")
         }
         .transaction { $0.animation = nil }
     }
