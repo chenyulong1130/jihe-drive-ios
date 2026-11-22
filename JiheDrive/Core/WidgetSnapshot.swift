@@ -261,7 +261,12 @@ enum WidgetSnapshot {
 
     static func write(_ snap: WidgetSnap) {
         var snap = snap
-        let old = (snap.vin.isEmpty ? nil : readVin(snap.vin)) ?? readIgnoringVin()
+        if snap.vin.isEmpty, let wanted = selectedVin(), !wanted.isEmpty {
+            snap.vin = wanted
+        }
+        let old = (snap.vin.isEmpty ? nil : readVin(snap.vin))
+            ?? readKeychain()
+            ?? readIgnoringVin()
         if snap.loggedIn, let old {
             if !hasVehicleData(snap), hasVehicleData(old) {
                 snap.name = old.name
@@ -293,8 +298,10 @@ enum WidgetSnapshot {
         payload["selectedVin"] = wanted ?? snap.vin
         payload["userSelectedVin"] = wanted ?? snap.vin
         writeVinFile(snap, payload: payload)
-        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted),
-           readVin(wanted) != nil {
+        if wanted == nil || wanted?.isEmpty == true || sameVin(snap.vin, wanted) {
+            writeKeychain(snap, payload: payload)
+        }
+        if let wanted, !wanted.isEmpty, !sameVin(snap.vin, wanted) {
             return
         }
 
@@ -324,7 +331,7 @@ enum WidgetSnapshot {
         if let wanted, let per = readVin(wanted), hasVehicleData(per) {
             return per
         }
-        let candidates = [readSuite(), readFile(), readStandard()].compactMap { $0 }
+        let candidates = [readKeychain(), readSuite(), readFile(), readStandard()].compactMap { $0 }
         if let wanted, !wanted.isEmpty {
             if let hit = candidates.first(where: { sameVin($0.vin, wanted) && hasVehicleData($0) }) {
                 return hit
@@ -340,12 +347,30 @@ enum WidgetSnapshot {
         return newest(candidates)
     }
 
-    private static func hasVehicleData(_ snap: WidgetSnap) -> Bool {
+    static func hasVehicleData(_ snap: WidgetSnap) -> Bool {
         snap.soc > 0 || snap.rangeKm > 0 || !snap.name.isEmpty
     }
 
     static func readIgnoringVin() -> WidgetSnap? {
-        newest([readSuite(), readFile(), readStandard()].compactMap { $0 })
+        newest([readKeychain(), readSuite(), readFile(), readStandard()].compactMap { $0 })
+    }
+
+    private static func writeKeychain(_ snap: WidgetSnap, payload: [String: Any]) {
+        if hasVehicleData(snap),
+           let data = try? JSONSerialization.data(withJSONObject: payload) {
+            KeychainStore.shared.setData(data, for: .widgetSnap)
+        }
+        if !snap.vin.isEmpty {
+            KeychainStore.shared.set(snap.vin, for: .selectedVin)
+        }
+    }
+
+    private static func readKeychain() -> WidgetSnap? {
+        guard let data = KeychainStore.shared.data(for: .widgetSnap),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return WidgetSnap.from(json)
     }
 
     private static func accountStub(from acc: WidgetSnap, vin: String) -> WidgetSnap {
@@ -395,6 +420,7 @@ enum WidgetSnapshot {
 
     static func persistSelectedVin(_ vin: String?) {
         let value = vin ?? ""
+        KeychainStore.shared.set(value.isEmpty ? nil : value, for: .selectedVin)
         suiteDefaults()?.set(value, forKey: "userSelectedVin")
         suiteDefaults()?.set(value, forKey: "selectedVin")
         suiteDefaults()?.synchronize()
@@ -419,6 +445,7 @@ enum WidgetSnapshot {
 
     static func selectedVin() -> String? {
         let candidates: [String?] = [
+            KeychainStore.shared.value(for: .selectedVin),
             suiteDefaults()?.string(forKey: "userSelectedVin"),
             selectedVinFile(),
             suiteDefaults()?.string(forKey: "selectedVin"),
@@ -573,8 +600,11 @@ enum WidgetSnapshot {
         }
         suiteDefaults()?.set(payload, forKey: "widget_image_\(key)")
         suiteDefaults()?.synchronize()
-        if sameVin(targetVin, selectedVin()), let generic = imageFileURL() {
-            try? payload.write(to: generic, options: [.atomic])
+        if sameVin(targetVin, selectedVin()) {
+            KeychainStore.shared.setData(payload, for: .widgetImage)
+            if let generic = imageFileURL() {
+                try? payload.write(to: generic, options: [.atomic])
+            }
         }
     }
 
@@ -588,9 +618,15 @@ enum WidgetSnapshot {
             if let data = suiteDefaults()?.data(forKey: "widget_image_\(key)"), !data.isEmpty {
                 return data
             }
-            return nil
+            if sameVin(targetVin, selectedVin()),
+               let data = KeychainStore.shared.data(for: .widgetImage), !data.isEmpty {
+                return data
+            }
         }
         if let generic = imageFileURL(), let data = try? Data(contentsOf: generic), !data.isEmpty {
+            return data
+        }
+        if let data = KeychainStore.shared.data(for: .widgetImage), !data.isEmpty {
             return data
         }
         return nil
@@ -598,8 +634,10 @@ enum WidgetSnapshot {
 
     static func displayImage(vin: String? = nil) -> UIImage? {
         let target = vin.flatMap { $0.isEmpty ? nil : $0 } ?? selectedVin()
-        guard let data = loadImage(target) else { return nil }
-        return UIImage(data: data)
+        if let data = loadImage(target) ?? loadImage(selectedVin()) ?? loadImage() {
+            return UIImage(data: data)
+        }
+        return nil
     }
 
     /// 压到小组件够用的尺寸，避免把原图塞进时间线后被系统丢掉

@@ -484,7 +484,7 @@ struct JiheDriveWidgetEntryView: View {
 
     private var vehicleImage: some View {
         Group {
-            if let image = WidgetSnapshot.displayImage(vin: snap.vin) {
+            if let image = WidgetSnapshot.displayImage(vin: snap.vin.isEmpty ? nil : snap.vin) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()

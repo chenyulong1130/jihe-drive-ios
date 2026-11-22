@@ -146,7 +146,7 @@ struct VehicleView: View {
 
             // 充电中约 20 秒刷电池；平时约 90 秒。离开车辆 Tab 不刷
             while !Task.isCancelled {
-                let charging = model.batteries.first?.isLiveCharging == true
+                let charging = model.batteries.first { !$0.id.hasPrefix("vehicle-") }?.isLiveCharging == true
                 try? await Task.sleep(nanoseconds: charging ? 20_000_000_000 : 90_000_000_000)
                 guard !Task.isCancelled else { break }
                 guard scenePhase == .active, activeMainTab == .vehicle else { continue }
@@ -220,6 +220,8 @@ struct VehicleView: View {
             modelScene: model3D.scene,
             modelGLBFile: heroGLB,
             modelGLBCached: vehicle.vinNo == loadedModelVin && (readyGLBVins.contains(vehicle.vinNo) || HeroAssetCache.glb(for: vehicle.vinNo) != nil),
+            prefers3D: vehicle.model3DURL != nil,
+            liveCharging: model.batteries.first { !$0.id.hasPrefix("vehicle-") }?.isLiveCharging,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             tireFrontTemp: model.tire?.frontTemp,

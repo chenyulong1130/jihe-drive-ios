@@ -181,10 +181,17 @@ enum WidgetLiveSync {
             if battery.range > 0 { snap.rangeKm = battery.range }
             snap.charging = battery.charging
         }
-        if snap.soc <= 0, let cached = cachedSnap, cached.soc > 0,
-           WidgetSnapshot.sameVin(cached.vin, snap.vin) {
-            snap.soc = cached.soc
-            if snap.rangeKm <= 0 { snap.rangeKm = cached.rangeKm }
+        if let cached = cachedSnap, WidgetSnapshot.hasVehicleData(cached) {
+            let sameCar = WidgetSnapshot.sameVin(cached.vin, wantedVin ?? snap.vin)
+            if sameCar {
+                if snap.soc <= 0 { snap.soc = cached.soc }
+                if snap.rangeKm <= 0 { snap.rangeKm = cached.rangeKm }
+                if snap.name.isEmpty { snap.name = cached.name }
+                if snap.vin.isEmpty { snap.vin = cached.vin }
+                if snap.imageURL.isEmpty { snap.imageURL = cached.imageURL }
+                if snap.todayKm == 0 { snap.todayKm = cached.todayKm }
+                if snap.todayMin == 0 { snap.todayMin = cached.todayMin }
+            }
         }
         if let wantedVin, !wantedVin.isEmpty, snap.vin.isEmpty {
             snap.vin = wantedVin
@@ -241,7 +248,7 @@ enum WidgetLiveSync {
             items = skeleton
         }
         guard let battery = items.first else { return nil }
-        return (battery.level, battery.rangeKm ?? 0, battery.isCharging)
+        return (battery.level, battery.rangeKm ?? 0, battery.isLiveCharging)
     }
 
     private static func fetchVehicle(hint: Vehicle?, wanted: String?) async -> Vehicle? {
@@ -303,16 +310,18 @@ enum WidgetLiveSync {
            !WidgetSnapshot.sameVin(vehicle.vinNo, wanted) {
             return
         }
-        snap.name = vehicle.name
-        snap.vin = vehicle.vinNo
-        snap.soc = vehicle.soc
-        snap.rangeKm = vehicle.rangeKm
+        if !vehicle.name.isEmpty { snap.name = vehicle.name }
+        if !vehicle.vinNo.isEmpty { snap.vin = vehicle.vinNo }
+        if vehicle.soc > 0 { snap.soc = vehicle.soc }
+        if vehicle.rangeKm > 0 { snap.rangeKm = vehicle.rangeKm }
         snap.charging = vehicle.isCharging
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline
-        snap.totalMile = vehicle.totalMileKm
-        snap.monthMile = vehicle.monthMileage ?? "--"
-        snap.imageURL = vehicle.imageURL?.absoluteString ?? snap.imageURL
+        if vehicle.totalMileKm > 0 { snap.totalMile = vehicle.totalMileKm }
+        snap.monthMile = vehicle.monthMileage ?? snap.monthMile
+        if let url = vehicle.imageURL?.absoluteString, !url.isEmpty {
+            snap.imageURL = url
+        }
         if let km = ride?.todayKm { snap.todayKm = km }
         if let minutes = ride?.todayMin { snap.todayMin = minutes }
         if let km = ride?.lastKm { snap.lastKm = km }

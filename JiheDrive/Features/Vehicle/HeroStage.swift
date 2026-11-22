@@ -31,6 +31,10 @@ struct HeroStage: View {
     var modelGLBFile: URL? = nil
     /// 这份 GLB 已经展示过，切回来不要再闪 2D
     var modelGLBCached: Bool = false
+    /// 这台车有官方 3D 时只出 3D，下载完成前也不要用 2D 占位
+    var prefers3D: Bool = false
+    /// 实时电池充电态；列表里的充电标记不再当默认
+    var liveCharging: Bool? = nil
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
     var tireFrontBar: Double? = nil
     var tireRearBar: Double? = nil
@@ -69,7 +73,9 @@ struct HeroStage: View {
     private var secondaryText: Color { onDark ? Color.white.opacity(0.78) : Theme.secondary }
 
     /// 主题底边伸进内容区的渐隐高度
-    static let pageBlend: CGFloat = 80
+    static let pageBlend: CGFloat = 36
+
+    private var charging: Bool { liveCharging == true }
 
     var body: some View {
         let tail = selection.blendsIntoPage ? Self.pageBlend : 0
@@ -96,7 +102,7 @@ struct HeroStage: View {
                 Spacer(minLength: 0)
                     .allowsHitTesting(false)
                 tireBar
-                    .padding(.bottom, selection.blendsIntoPage ? 6 : 2)
+                    .padding(.bottom, selection.blendsIntoPage ? 10 : 6)
             }
             .padding(.horizontal, 18)
             .padding(.top, topInset)
@@ -279,9 +285,10 @@ struct HeroStage: View {
     // MARK: - 车 / 3D
 
     /// 车图和顶栏电量之间留空，避免贴在标题下面
-    private var carTopPad: CGFloat { topInset + 86 }
+    private var carTopPad: CGFloat { topInset + 70 }
+    private var carBottomPad: CGFloat { showTireMarks ? 28 : 8 }
     private var hasTire: Bool { validBar(frontBar) != nil || validBar(rearBar) != nil }
-    private var has3D: Bool { modelGLBFile != nil || modelScene != nil }
+    private var has3D: Bool { prefers3D || modelGLBFile != nil || modelScene != nil }
     private var showTireMarks: Bool { hasTire && (!has3D || !modelRotated) }
 
     @ViewBuilder
@@ -291,27 +298,24 @@ struct HeroStage: View {
                 if let modelGLBFile {
                     Color.clear
                         .overlay {
-                            ZStack {
-                                twoDCar
-                                    .padding(.top, carTopPad)
-                                    .opacity(glbVisible ? 0 : 1)
-                                ModelViewerWebView(
-                                    glbFile: modelGLBFile,
-                                    reuseKey: "hero-\(vehicle.vinNo)-flat2",
-                                    interactive: true,
-                                    autoRotate: false,
-                                    resetToken: cameraReset + localReset,
-                                    onDrag: { dragging in
-                                        if dragging { modelRotated = true }
-                                        onInteract?(dragging)
-                                    },
-                                    onOrbitChanged: { rotated in
-                                        modelRotated = rotated
-                                    },
-                                    onReady: { glbRevealed = true }
-                                )
-                                .opacity(glbVisible ? 1 : 0)
-                            }
+                            ModelViewerWebView(
+                                glbFile: modelGLBFile,
+                                reuseKey: "hero-\(vehicle.vinNo)-flat2",
+                                interactive: true,
+                                autoRotate: false,
+                                resetToken: cameraReset + localReset,
+                                onDrag: { dragging in
+                                    if dragging { modelRotated = true }
+                                    onInteract?(dragging)
+                                },
+                                onOrbitChanged: { rotated in
+                                    modelRotated = rotated
+                                },
+                                onReady: { glbRevealed = true }
+                            )
+                            .padding(.top, carTopPad)
+                            .padding(.bottom, carBottomPad)
+                            .opacity(glbVisible ? 1 : 0)
                         }
                         .simultaneousGesture(heroDrag)
                         .onTapGesture(count: 2) { resetCamera() }
@@ -320,27 +324,29 @@ struct HeroStage: View {
                             glbRevealed = modelGLBCached
                         }
                 } else if let modelScene {
-                    ZStack {
-                        twoDCar.opacity(0.001)
-                        VehicleSceneView(
-                            scene: modelScene,
-                            interactive: true,
-                            autoSpin: false,
-                            spinSpeed: 0,
-                            resetToken: cameraReset + localReset,
-                            onDrag: { dragging in
-                                if dragging { modelRotated = true }
-                                onInteract?(dragging)
-                            }
-                        )
-                    }
+                    VehicleSceneView(
+                        scene: modelScene,
+                        interactive: true,
+                        autoSpin: false,
+                        spinSpeed: 0,
+                        resetToken: cameraReset + localReset,
+                        onDrag: { dragging in
+                            if dragging { modelRotated = true }
+                            onInteract?(dragging)
+                        }
+                    )
+                    .padding(.top, carTopPad)
+                    .padding(.bottom, carBottomPad)
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
+                } else if prefers3D {
+                    Color.clear
+                        .allowsHitTesting(false)
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
                         .padding(.horizontal, 4)
-                        .padding(.bottom, showTireMarks ? 6 : 4)
+                        .padding(.bottom, carBottomPad)
                         .allowsHitTesting(false)
                 }
             }
@@ -478,7 +484,7 @@ struct HeroStage: View {
     // MARK: - 电量（对齐小程序：电量% + 续航挤在左侧，短进度条 140×6）
 
     private var batteryBlock: some View {
-        let energy = vehicle.isCharging ? Theme.green : primary
+        let energy = charging ? Theme.green : primary
         let content = VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("\(soc)")
@@ -488,7 +494,7 @@ struct HeroStage: View {
                     .monospacedDigit()
                 Text("%")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(vehicle.isCharging ? Theme.green.opacity(0.85) : secondaryText)
+                    .foregroundStyle(charging ? Theme.green.opacity(0.85) : secondaryText)
                     .padding(.trailing, 9)
 
                 Text("\(vehicle.rangeKm)")
@@ -502,7 +508,7 @@ struct HeroStage: View {
 
             ChargingBar(
                 progress: socRatio,
-                charging: vehicle.isCharging,
+                charging: charging,
                 track: primary.opacity(0.18),
                 fill: socColor
             )
@@ -525,7 +531,7 @@ struct HeroStage: View {
         HStack(spacing: 10) {
             signalBars
 
-            if vehicle.isCharging {
+            if charging {
                 ChargingChip()
             }
 
@@ -560,7 +566,7 @@ struct HeroStage: View {
     private var socRatio: CGFloat { CGFloat(soc) / 100 }
 
     private var socColor: Color {
-        if vehicle.isCharging { return Theme.green }
+        if charging { return Theme.green }
         if soc <= 15 { return Theme.red }
         if soc <= 30 { return Theme.orange }
         return onDark ? .white : Theme.brand
