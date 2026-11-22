@@ -213,8 +213,8 @@ enum ModelViewerAsset {
 
     /// 与安卓版 VehicleModelCamera 对齐的相机参数；interactive 时开 camera-controls 可拖拽
     static func html(interactive: Bool, autoRotate: Bool) -> String {
-        let orbit = "-6.5deg 90deg 5.0m"
-        let target = "0.02m 0.70m auto"
+        let orbit = "0deg 90deg 5.0m"
+        let target = "0.02m 0.80m auto"
         let minOrbit = interactive ? "auto 84deg 2.8m" : "auto 90deg 4.8m"
         let maxOrbit = interactive ? "auto 94deg 7.2m" : "auto 90deg 5.4m"
         let rotation = autoRotate ? "auto-rotate rotation-per-second=\"14deg\"" : ""
@@ -342,8 +342,8 @@ enum ModelViewerAsset {
 
     /// 轨迹回放地图上的立体车模：略俯视、带接地阴影，靠 orientation 跟着航向转。
     static func mapHTML() -> String {
-        let orbit = "168deg 70deg 5.6m"
-        let target = "0m 0.40m 0m"
+        let orbit = "180deg 65deg 5.8m"
+        let target = "0m 0.38m 0m"
         return """
         <!DOCTYPE html>
         <html>

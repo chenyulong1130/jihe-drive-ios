@@ -37,6 +37,11 @@ struct WidgetSnap: Equatable {
     var monthMile = "--"
     var updatedAt = Date().timeIntervalSince1970
 
+    /// 今日积分：接口差值、签到分、社区分取最大，避免基线重置后显示 0
+    var displayTodayPoints: Int {
+        max(pointsToday, todaySignScore + (communityDone ? 3 : 0))
+    }
+
     var dictionary: [String: Any] {
         [
             "loggedIn": loggedIn,
@@ -237,6 +242,10 @@ enum WidgetSnapshot {
             snap.continueDays = signin.info?.continueDays ?? snap.continueDays
             snap.totalSignCount = signin.totalSignCount ?? snap.totalSignCount
             snap.todaySignScore = signin.info?.todayRuleScore ?? snap.todaySignScore
+            let earned = (signin.info?.todayEarnedScore ?? 0) + (signin.communityDone ? 3 : 0)
+            if earned > 0 {
+                snap.pointsToday = max(snap.pointsToday, earned)
+            }
             let left = signin.info?.daysUntilLottery ?? snap.lotteryLeft
             snap.lotteryLeft = left
             if snap.lotteryText.isEmpty {
@@ -266,7 +275,8 @@ enum WidgetSnapshot {
         payload["selectedVin"] = wanted ?? snap.vin
         payload["userSelectedVin"] = wanted ?? snap.vin
         writeVinFile(snap, payload: payload)
-        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted) {
+        if let wanted, !wanted.isEmpty, !snap.vin.isEmpty, !sameVin(snap.vin, wanted),
+           readVin(wanted) != nil {
             return
         }
 
@@ -293,13 +303,16 @@ enum WidgetSnapshot {
 
     static func read() -> WidgetSnap? {
         let wanted = selectedVin()
-        if let wanted, let per = readVin(wanted) {
+        if let wanted, let per = readVin(wanted), hasVehicleData(per) {
             return per
         }
         let candidates = [readSuite(), readFile(), readStandard()].compactMap { $0 }
         if let wanted, !wanted.isEmpty {
-            if let hit = candidates.first(where: { sameVin($0.vin, wanted) }) {
+            if let hit = candidates.first(where: { sameVin($0.vin, wanted) && hasVehicleData($0) }) {
                 return hit
+            }
+            if let best = newest(candidates.filter(hasVehicleData)) {
+                return best
             }
             if let acc = newest(candidates) {
                 return accountStub(from: acc, vin: wanted)
@@ -307,6 +320,10 @@ enum WidgetSnapshot {
             return nil
         }
         return newest(candidates)
+    }
+
+    private static func hasVehicleData(_ snap: WidgetSnap) -> Bool {
+        snap.soc > 0 || snap.rangeKm > 0 || !snap.name.isEmpty
     }
 
     static func readIgnoringVin() -> WidgetSnap? {

@@ -34,33 +34,35 @@ enum WidgetLiveSync {
             return empty
         }
 
+        let cachedSnap = WidgetSnapshot.read()
         let wantedVin = WidgetSnapshot.selectedVin()
             ?? existing?.vehicle?.vinNo
-        let cachedSnap = WidgetSnapshot.read()
+            ?? cachedSnap?.vin
         var snap = cachedSnap ?? WidgetSnap()
         snap.loggedIn = true
         if let wantedVin, !wantedVin.isEmpty, !WidgetSnapshot.sameVin(snap.vin, wantedVin) {
             let sameExisting = WidgetSnapshot.sameVin(existing?.vehicle?.vinNo, wantedVin)
             let stored = WidgetSnapshot.readVin(wantedVin)
+            let keep = stored ?? snap
             snap.vin = wantedVin
-            snap.name = sameExisting ? (existing?.vehicle?.name ?? "") : (stored?.name ?? "")
-            snap.soc = sameExisting ? (existing?.vehicle?.soc ?? 0) : (stored?.soc ?? 0)
-            snap.rangeKm = sameExisting ? (existing?.vehicle?.rangeKm ?? 0) : (stored?.rangeKm ?? 0)
-            snap.charging = sameExisting ? (existing?.vehicle?.isCharging ?? false) : (stored?.charging ?? false)
-            snap.locked = sameExisting ? (existing?.vehicle?.isLocked ?? true) : (stored?.locked ?? true)
-            snap.online = sameExisting ? (existing?.vehicle?.isOnline ?? false) : (stored?.online ?? false)
+            snap.name = sameExisting ? (existing?.vehicle?.name ?? keep.name) : keep.name
+            snap.soc = sameExisting ? (existing?.vehicle?.soc ?? keep.soc) : keep.soc
+            snap.rangeKm = sameExisting ? (existing?.vehicle?.rangeKm ?? keep.rangeKm) : keep.rangeKm
+            snap.charging = sameExisting ? (existing?.vehicle?.isCharging ?? keep.charging) : keep.charging
+            snap.locked = sameExisting ? (existing?.vehicle?.isLocked ?? keep.locked) : keep.locked
+            snap.online = sameExisting ? (existing?.vehicle?.isOnline ?? keep.online) : keep.online
             snap.imageURL = sameExisting
-                ? (existing?.vehicle?.imageURL?.absoluteString ?? "")
-                : (stored?.imageURL ?? "")
-            snap.todayKm = stored?.todayKm ?? 0
-            snap.todayMin = stored?.todayMin ?? 0
-            snap.lastKm = stored?.lastKm ?? 0
-            snap.lastMin = stored?.lastMin ?? 0
-            snap.accel = stored?.accel ?? 0
-            snap.brake = stored?.brake ?? 0
-            snap.maxSpeed = stored?.maxSpeed ?? 0
-            snap.tireText = stored?.tireText ?? ""
-            snap.tireBound = stored?.tireBound ?? false
+                ? (existing?.vehicle?.imageURL?.absoluteString ?? keep.imageURL)
+                : keep.imageURL
+            snap.todayKm = stored?.todayKm ?? keep.todayKm
+            snap.todayMin = stored?.todayMin ?? keep.todayMin
+            snap.lastKm = stored?.lastKm ?? keep.lastKm
+            snap.lastMin = stored?.lastMin ?? keep.lastMin
+            snap.accel = stored?.accel ?? keep.accel
+            snap.brake = stored?.brake ?? keep.brake
+            snap.maxSpeed = stored?.maxSpeed ?? keep.maxSpeed
+            snap.tireText = stored?.tireText ?? keep.tireText
+            snap.tireBound = stored?.tireBound ?? keep.tireBound
         }
 
         var vehicle: Vehicle?
@@ -163,13 +165,14 @@ enum WidgetLiveSync {
             snap.lotteryLeft = lottery.left
         }
 
-        let points = await fetchPoints()
+        let earnedToday = todayScore + (communityDone ? 3 : 0) + (lottery.claimed ? max(lottery.score, 0) : 0)
+        let points = await fetchPoints(alreadyToday: earnedToday)
         if points.total > 0 {
             snap.pointsTotal = points.total
-            snap.pointsToday = points.today
+            snap.pointsToday = max(points.today, earnedToday)
         } else {
             snap.pointsTotal = cachedSnap?.pointsTotal ?? 0
-            snap.pointsToday = cachedSnap?.pointsToday ?? 0
+            snap.pointsToday = max(cachedSnap?.pointsToday ?? 0, earnedToday)
         }
 
         applyVehicle(&snap, vehicle: vehicle, tire: tire, ride: ride)
@@ -440,27 +443,27 @@ enum WidgetLiveSync {
 
     // MARK: - Points
 
-    private static func fetchPoints() async -> (total: Int, today: Int) {
+    private static func fetchPoints(alreadyToday: Int) async -> (total: Int, today: Int) {
         var total = await fetchIntegralTotal()
         if total == 0 {
             total = await fetchSettingScore()
         }
-        guard total > 0 else { return (0, 0) }
+        guard total > 0 else { return (0, max(0, alreadyToday)) }
 
         let todayKey = CommunityTask.todayKey()
         let defaults = WidgetSnapshot.suiteDefaults()
-        let versionKey = "widget_points_baseline_v2"
+        let versionKey = "widget_points_baseline_v3"
         let baselineDate = defaults?.string(forKey: "widget_points_baseline_date") ?? ""
         var baseline = defaults?.integer(forKey: "widget_points_baseline") ?? 0
         let needReset = defaults?.bool(forKey: versionKey) != true || baselineDate != todayKey
         if needReset {
-            baseline = total
+            baseline = max(0, total - max(0, alreadyToday))
             defaults?.set(true, forKey: versionKey)
             defaults?.set(todayKey, forKey: "widget_points_baseline_date")
             defaults?.set(baseline, forKey: "widget_points_baseline")
             defaults?.synchronize()
         }
-        return (total, max(0, total - baseline))
+        return (total, max(0, total - baseline, alreadyToday))
     }
 
     private static func fetchIntegralTotal() async -> Int {

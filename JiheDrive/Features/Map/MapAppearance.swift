@@ -21,22 +21,36 @@ enum MapAppearance {
         map.backgroundColor = UIColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
     }
 
-    /// 全屏回放追车：深色 + 真实地形，方便 3D 俯仰
+    /// 全屏回放追车：跟 App 浅/深主题，默认浅色；开俯仰方便立体车模
     static func applyCinematic(to map: MKMapView) {
         map.mapType = .standard
-        map.overrideUserInterfaceStyle = .dark
+        map.overrideUserInterfaceStyle = .unspecified
         map.showsCompass = false
         map.showsScale = false
         map.showsBuildings = true
         map.showsTraffic = false
         map.pointOfInterestFilter = .includingAll
+        let dark = currentDark
         let config = MKStandardMapConfiguration(elevationStyle: .realistic, emphasisStyle: .default)
         config.pointOfInterestFilter = .includingAll
         config.showsTraffic = false
         map.preferredConfiguration = config
         map.isPitchEnabled = true
         map.isRotateEnabled = true
-        map.backgroundColor = UIColor(red: 0.07, green: 0.12, blue: 0.14, alpha: 1)
+        map.backgroundColor = dark
+            ? UIColor(red: 0.067, green: 0.094, blue: 0.145, alpha: 1)
+            : UIColor(red: 0.93, green: 0.94, blue: 0.96, alpha: 1)
+    }
+
+    private static var currentDark: Bool {
+        if let style = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: { $0.isKeyWindow })?
+            .traitCollection.userInterfaceStyle {
+            return style == .dark
+        }
+        return UITraitCollection.current.userInterfaceStyle == .dark
     }
 }
 

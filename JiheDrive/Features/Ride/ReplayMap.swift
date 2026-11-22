@@ -561,6 +561,8 @@ final class ReplayCursorView: MKAnnotationView {
     private static let model3DSize = CGSize(width: 132, height: 96)
     /// 官方车图默认车头朝左（西，270°）
     private static let imageNose: CLLocationDirection = 270
+    /// GLB 默认车头朝右，航向再减 90° 才对准轨迹
+    private static let modelYawBias: CLLocationDirection = -90
 
     private let bubble = UILabel()
     private let dot = UIView()
@@ -747,12 +749,12 @@ final class ReplayCursorView: MKAnnotationView {
     }
 
     private func pointScene(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
-        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading)
+        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading) + Self.modelYawBias
         yawNode?.eulerAngles.y = -Float(wrapped * .pi / 180)
     }
 
     private func pointGLB(heading: CLLocationDirection, mapHeading: CLLocationDirection) {
-        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading)
+        let wrapped = screenHeading(heading: heading, mapHeading: mapHeading) + Self.modelYawBias
         web?.setYaw(wrapped)
     }
 }

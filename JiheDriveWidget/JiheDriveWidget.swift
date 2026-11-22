@@ -29,37 +29,8 @@ struct SnapshotProvider: TimelineProvider {
         Task {
             let disk = WidgetSnapshot.read() ?? WidgetSnap()
             let live = await WidgetLiveSync.refresh()
-            let wanted = WidgetSnapshot.selectedVin()
-            var snap = live
-            if let wanted, !wanted.isEmpty, !WidgetSnapshot.sameVin(live.vin, wanted) {
-                if let per = WidgetSnapshot.readVin(wanted) ?? (WidgetSnapshot.sameVin(disk.vin, wanted) ? disk : nil) {
-                    snap = per
-                    snap.pointsTotal = live.pointsTotal
-                    snap.pointsToday = live.pointsToday
-                    snap.signedToday = live.signedToday
-                    snap.communityDone = live.communityDone
-                    snap.continueDays = live.continueDays
-                    snap.lotteryText = live.lotteryText
-                    snap.lotteryLeft = live.lotteryLeft
-                    snap.lotteryClaimed = live.lotteryClaimed
-                } else {
-                    snap.vin = wanted
-                    snap.soc = 0
-                    snap.rangeKm = 0
-                    snap.charging = false
-                    snap.name = ""
-                    snap.imageURL = ""
-                    snap.todayKm = 0
-                    snap.todayMin = 0
-                }
-            } else {
-                if snap.soc <= 0, disk.soc > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.soc = disk.soc }
-                if snap.rangeKm <= 0, disk.rangeKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.rangeKm = disk.rangeKm }
-                if snap.vin.isEmpty { snap.vin = wanted ?? disk.vin }
-                if snap.name.isEmpty, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.name = disk.name }
-                if snap.todayKm == 0, disk.todayKm > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.todayKm = disk.todayKm }
-                if snap.todayMin == 0, disk.todayMin > 0, WidgetSnapshot.sameVin(disk.vin, snap.vin) { snap.todayMin = disk.todayMin }
-            }
+            var snap = Self.mergeVehicle(primary: live, fallback: disk)
+            snap.pointsToday = max(snap.pointsToday, live.pointsToday, live.todaySignScore)
             let next = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
             completion(Timeline(entries: [.from(matchingSelected(snap))], policy: .after(next)))
         }
@@ -67,8 +38,50 @@ struct SnapshotProvider: TimelineProvider {
 
     private func matchingSelected(_ snap: WidgetSnap) -> WidgetSnap {
         guard let wanted = WidgetSnapshot.selectedVin(), !wanted.isEmpty else { return snap }
-        if WidgetSnapshot.sameVin(snap.vin, wanted) { return snap }
-        if let per = WidgetSnapshot.readVin(wanted) { return per }
+        if WidgetSnapshot.sameVin(snap.vin, wanted), Self.hasVehicle(snap) { return snap }
+        if let per = WidgetSnapshot.readVin(wanted), Self.hasVehicle(per) {
+            var next = per
+            next.pointsTotal = max(next.pointsTotal, snap.pointsTotal)
+            next.pointsToday = max(next.pointsToday, snap.pointsToday, snap.todaySignScore)
+            next.signedToday = next.signedToday || snap.signedToday
+            next.communityDone = next.communityDone || snap.communityDone
+            next.continueDays = max(next.continueDays, snap.continueDays)
+            return next
+        }
+        return snap
+    }
+
+    private static func hasVehicle(_ snap: WidgetSnap) -> Bool {
+        snap.soc > 0 || snap.rangeKm > 0 || !snap.name.isEmpty
+    }
+
+    private static func mergeVehicle(primary: WidgetSnap, fallback: WidgetSnap) -> WidgetSnap {
+        var snap = primary
+        if !hasVehicle(snap), hasVehicle(fallback) {
+            snap.name = fallback.name
+            snap.vin = snap.vin.isEmpty ? fallback.vin : snap.vin
+            snap.soc = fallback.soc
+            snap.rangeKm = fallback.rangeKm
+            snap.charging = fallback.charging
+            snap.locked = fallback.locked
+            snap.online = fallback.online
+            snap.imageURL = fallback.imageURL
+            snap.todayKm = fallback.todayKm
+            snap.todayMin = fallback.todayMin
+            snap.tireText = fallback.tireText
+            snap.tireBound = fallback.tireBound
+        } else {
+            if snap.soc <= 0, fallback.soc > 0 { snap.soc = fallback.soc }
+            if snap.rangeKm <= 0, fallback.rangeKm > 0 { snap.rangeKm = fallback.rangeKm }
+            if snap.name.isEmpty { snap.name = fallback.name }
+            if snap.vin.isEmpty { snap.vin = fallback.vin }
+            if snap.todayKm == 0, fallback.todayKm > 0 { snap.todayKm = fallback.todayKm }
+            if snap.todayMin == 0, fallback.todayMin > 0 { snap.todayMin = fallback.todayMin }
+        }
+        if snap.pointsTotal <= 0 { snap.pointsTotal = fallback.pointsTotal }
+        if snap.pointsToday <= 0 {
+            snap.pointsToday = max(fallback.pointsToday, fallback.todaySignScore)
+        }
         return snap
     }
 
@@ -90,6 +103,7 @@ struct SnapshotProvider: TimelineProvider {
         snap.continueDays = 8
         snap.signedToday = false
         snap.communityDone = false
+        snap.locked = true
         snap.lotteryLeft = 22
         snap.lotteryText = "盲盒22天"
         snap.tireText = "2.0bar 6°C"
@@ -204,9 +218,9 @@ struct JiheDriveWidgetEntryView: View {
                 .padding(.top, 6)
             Spacer(minLength: 0)
             HStack {
-                Text(snap.pointsTotal > 0 ? "\(snap.pointsTotal) 分" : "-- 分")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(hex: 0x0F172A))
+                Text("今日 +\(snap.displayTodayPoints)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color(hex: 0x16A34A))
                 Spacer(minLength: 0)
                 Text(lotteryPillText)
                     .font(.system(size: 10, weight: .semibold))
@@ -316,17 +330,18 @@ struct JiheDriveWidgetEntryView: View {
                     .foregroundStyle(Color(hex: 0x94A3B8))
                     .monospacedDigit()
             }
-            HStack(spacing: 0) {
+            HStack(spacing: 6) {
                 Text("积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
                     .foregroundStyle(Color(hex: 0x0F172A))
-                Text("  今日 +\(snap.pointsToday)")
-                    .foregroundStyle(Color(hex: 0x22C55E))
-                Text("  连签 \(snap.continueDays) 天")
+                Text("连签 \(snap.continueDays) 天")
                     .foregroundStyle(Color(hex: 0x3B82F6))
             }
             .font(.system(size: 10, weight: .semibold))
             .lineLimit(1)
-            .minimumScaleFactor(0.75)
+            Text("今日积分 +\(snap.displayTodayPoints)")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color(hex: 0x16A34A))
+                .lineLimit(1)
         }
     }
 
@@ -387,7 +402,7 @@ struct JiheDriveWidgetEntryView: View {
         HStack(spacing: 0) {
             Text("总积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
                 .foregroundStyle(Color(hex: 0x0F172A))
-            Text(" · 今日 +\(snap.pointsToday)")
+            Text(" · 今日积分 +\(snap.displayTodayPoints)")
                 .foregroundStyle(Color(hex: 0x10B981))
             Text(" · 连签 \(snap.continueDays)天")
                 .foregroundStyle(Color(hex: 0x3B82F6))
@@ -424,23 +439,26 @@ struct JiheDriveWidgetEntryView: View {
     }
 
     private var controlBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             controlButton(
                 intent: WidgetLockIntent(),
-                symbol: snap.locked ? "lock.open.fill" : "lock.fill",
-                tint: snap.locked ? Color(hex: 0x16A34A) : Color(hex: 0xEA580C),
-                label: snap.locked ? "开机" : "关机"
+                symbol: snap.locked ? "lock.fill" : "lock.open.fill",
+                tint: snap.locked ? Color(hex: 0x0F172A) : Color.white,
+                fill: snap.locked ? Color(hex: 0xE2E8F0) : Color(hex: 0xF97316),
+                label: snap.locked ? "已锁车" : "已开锁"
             )
             controlButton(
                 intent: WidgetCushionIntent(),
-                symbol: "rectangle.portrait.bottomhalf.filled",
-                tint: Color(hex: 0x475569),
+                symbol: "carseat.right.fill",
+                tint: Color.white,
+                fill: Color(hex: 0x334155),
                 label: "坐垫"
             )
             controlButton(
                 intent: WidgetFindIntent(),
-                symbol: "speaker.wave.2.fill",
-                tint: Color(hex: 0x2563EB),
+                symbol: "light.beacon.max.fill",
+                tint: Color.white,
+                fill: Color(hex: 0x2563EB),
                 label: "寻车"
             )
         }
@@ -450,15 +468,17 @@ struct JiheDriveWidgetEntryView: View {
         intent: I,
         symbol: String,
         tint: Color,
+        fill: Color,
         label: String
     ) -> some View {
         Button(intent: intent) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.white.opacity(0.95)))
-                .overlay(Circle().strokeBorder(Color(hex: 0xE2E8F0), lineWidth: 0.8))
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(fill))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.8))
+                .shadow(color: fill.opacity(0.28), radius: 3, y: 1)
                 .contentShape(Circle())
                 .accessibilityLabel(label)
         }

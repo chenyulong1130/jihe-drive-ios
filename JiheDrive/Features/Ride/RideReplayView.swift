@@ -10,6 +10,7 @@ struct RideReplayView: View {
     let tracks: [RideTrack]
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var progress: Double = 0
     @State private var playing = false
@@ -122,6 +123,7 @@ struct RideReplayView: View {
     }
 
     private var cinematic: Bool { prefer3D }
+    private var mapOnDark: Bool { colorScheme == .dark }
 
     private var replayVehicleImage: UIImage? { replayPhoto }
 
@@ -557,7 +559,7 @@ struct RideReplayView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .trailing, spacing: 8) {
-                TrackSpeedLegend(compact: true, onDark: true)
+                TrackSpeedLegend(compact: true, onDark: mapOnDark)
                     .padding(.trailing, 16)
                 fullMapBottomPanel
             }
@@ -619,8 +621,8 @@ struct RideReplayView: View {
         .background(
             LinearGradient(
                 colors: [
-                    Color(red: 0.93, green: 0.94, blue: 0.96).opacity(0.96),
-                    Color(red: 0.93, green: 0.94, blue: 0.96).opacity(0.0)
+                    Theme.groupedBackground.opacity(0.96),
+                    Theme.groupedBackground.opacity(0.0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -675,9 +677,9 @@ struct RideReplayView: View {
 
     /// 底部：速度折线 + 时间轴，玻璃底板；图例单独叠在地图右下角
     private var fullMapBottomPanel: some View {
-        let ink: Color = cinematic ? .white : Theme.label
-        let mute: Color = cinematic ? Color.white.opacity(0.72) : Theme.secondary
-        let faint: Color = cinematic ? Color.white.opacity(0.55) : Theme.tertiary
+        let ink: Color = Theme.label
+        let mute: Color = Theme.secondary
+        let faint: Color = Theme.tertiary
         return VStack(spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(String(format: "%.1f", track.mileage))
@@ -717,9 +719,9 @@ struct RideReplayView: View {
                         times: clock.times,
                         duration: clock.duration,
                         progress: progress,
-                        tint: cinematic ? Color(hex: 0x7DD3FC) : Theme.brand,
+                        tint: Theme.brand,
                         height: 72,
-                        onDark: cinematic
+                        onDark: mapOnDark
                     ) { value in
                         playing = false
                         progress = min(max(value, 0), 1)
@@ -755,7 +757,7 @@ struct RideReplayView: View {
                     start: wallClock(0),
                     end: wallClock(1),
                     speed: speeds.count > 1 ? currentSpeed : nil,
-                    onDark: cinematic
+                    onDark: mapOnDark
                 )
 
                 Button {
@@ -790,7 +792,7 @@ struct RideReplayView: View {
                     topTrailingRadius: 22,
                     style: .continuous
                 )
-                .fill(cinematic ? Color.white.opacity(0.06) : Color.white.opacity(0.18))
+                .fill(Theme.surface.opacity(mapOnDark ? 0.18 : 0.55))
             }
             .overlay {
                 UnevenRoundedRectangle(
@@ -800,7 +802,7 @@ struct RideReplayView: View {
                     topTrailingRadius: 22,
                     style: .continuous
                 )
-                .strokeBorder(Color.white.opacity(cinematic ? 0.22 : 0.45), lineWidth: 0.7)
+                .strokeBorder(Color.white.opacity(mapOnDark ? 0.16 : 0.45), lineWidth: 0.7)
             }
             .ignoresSafeArea(edges: .bottom)
         }

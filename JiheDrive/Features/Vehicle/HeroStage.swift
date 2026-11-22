@@ -296,7 +296,7 @@ struct HeroStage: View {
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
-                                    reuseKey: "hero-\(vehicle.vinNo)-flat1",
+                                    reuseKey: "hero-\(vehicle.vinNo)-flat2",
                                     interactive: true,
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,
@@ -338,8 +338,9 @@ struct HeroStage: View {
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
-                        .padding(.horizontal, 0)
-                        .padding(.bottom, showTireMarks ? 8 : 4)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, showTireMarks ? 2 : 0)
+                        .offset(y: 12)
                         .allowsHitTesting(false)
                 }
             }
@@ -379,7 +380,9 @@ struct HeroStage: View {
                         placeholder
                     }
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal, 18)
+                .offset(y: 10)
+                .scaleEffect(0.94, anchor: .bottom)
                 .shadow(color: Color.black.opacity(onDark ? 0.28 : 0.10), radius: 16, x: 0, y: 10)
             }
     }
