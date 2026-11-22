@@ -15,6 +15,14 @@ struct InboxMessage: Identifiable, Hashable {
     var carInfo: String
     var addressText: String
     var coordinate: String
+    var actorName: String
+    var actorAvatar: URL?
+    var quote: String
+    var actionText: String
+    var verified: Bool
+
+    var isSocial: Bool { kind == 4 || !actorName.isEmpty || actorAvatar != nil }
+    var isCampaign: Bool { kind == 1 && imageURL != nil }
 
     static func == (lhs: InboxMessage, rhs: InboxMessage) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -44,15 +52,27 @@ struct InboxMessage: Identifiable, Hashable {
             "messageTime", "messageTimeStr", "createDate", "createTime", "sendTime", "gmtCreate", "publishTime", "updateDate"
         ])
         let rawType = intValue(json, ["messageType", "messageKind", "kind", "type", "msgType"])
-        kind = Self.group(rawType)
-        kindLabel = Self.label(for: rawType)
         unread = Self.isUnread(json)
         imageURL = urlValue(json, ["picUrl", "imageUrl", "picture", "coverUrl", "imgUrl"])
-            ?? urlValue(extra, ["addressThumbnail", "picUrl", "imageUrl"])
+            ?? urlValue(extra, ["picUrl", "imageUrl", "coverUrl"])
+            ?? urlValue(extra, ["addressThumbnail"])
         jumpURL = urlValue(json, ["jumpUrl", "skipUrl", "linkUrl", "url", "h5Url", "targetUrl"])
         carInfo = text(extra, ["carInfo"]).replacingOccurrences(of: "车辆：", with: "")
         coordinate = text(extra, ["location"])
         addressText = Self.parseAddress(extra)
+        actorName = text(extra, ["nickName", "fromNickName", "userName", "userNick", "fromUserName", "authorName"])
+        actorAvatar = urlValue(extra, ["avatar", "headImg", "headImage", "fromAvatar", "userAvatar", "authorAvatar"])
+        quote = Self.stripHTML(text(extra, ["postContent", "feedContent", "comment", "quote", "originContent", "sourceContent"]))
+        actionText = text(extra, ["action", "actionText", "operateName", "operateTypeName"])
+        verified = boolValue(extra, ["vip", "verified", "isVip", "official"])
+        if actorName.isEmpty, let split = Self.splitSocialTitle(title) {
+            actorName = split.name
+            if actionText.isEmpty { actionText = split.action }
+        }
+        if actionText.isEmpty { actionText = Self.guessAction(title) }
+        let social = !actorName.isEmpty || actorAvatar != nil || rawType / 100 == 2 || rawType == 4
+        kind = social ? 4 : Self.group(rawType)
+        kindLabel = Self.label(for: kind == 4 ? 4 : rawType)
     }
 
     private static func parseAddress(_ extra: [String: Any]) -> String {
@@ -83,21 +103,43 @@ struct InboxMessage: Identifiable, Hashable {
         case 1: return "活动"
         case 2: return "车辆"
         case 3: return "系统"
+        case 4: return "互动"
         default: return kind == 0 ? "通知" : "类型\(kind)"
         }
     }
 
-    /// 筛选分组：1 活动 / 2 车辆 / 3 系统。官方 messageType 如 302、108。
+    /// 筛选分组：1 活动 / 2 车辆 / 3 系统 / 4 互动。官方 messageType 如 302、108。
     static func group(_ type: Int) -> Int {
         switch type {
-        case 1, 2, 3: return type
+        case 1, 2, 3, 4: return type
         default:
             switch type / 100 {
             case 1: return 1
+            case 2: return 4
             case 3: return 2
             default: return 3
             }
         }
+    }
+
+    private static func splitSocialTitle(_ title: String) -> (name: String, action: String)? {
+        for sep in ["。", ".", " "] {
+            guard let range = title.range(of: sep) else { continue }
+            let name = String(title[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let action = String(title[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if name.count >= 2, action.contains("点赞") || action.contains("评论") || action.contains("关注") || action.contains("回复") {
+                return (name, action)
+            }
+        }
+        return nil
+    }
+
+    private static func guessAction(_ title: String) -> String {
+        if title.contains("点赞") { return "点赞了你的帖子" }
+        if title.contains("评论") { return "评论了你的帖子" }
+        if title.contains("关注") { return "关注了你" }
+        if title.contains("回复") { return "回复了你" }
+        return ""
     }
 
     private static func isUnread(_ json: [String: Any]) -> Bool {
@@ -166,6 +208,16 @@ private func intValue(_ json: [String: Any], _ keys: [String]) -> Int {
         if let number = Int("\(raw)") { return number }
     }
     return 0
+}
+
+private func boolValue(_ json: [String: Any], _ keys: [String]) -> Bool {
+    for key in keys {
+        guard let raw = json[key], !(raw is NSNull) else { continue }
+        if let flag = raw as? Bool { return flag }
+        let text = "\(raw)".trimmingCharacters(in: .whitespaces).lowercased()
+        if ["1", "true", "y", "yes"].contains(text) { return true }
+    }
+    return false
 }
 
 private func urlValue(_ json: [String: Any], _ keys: [String]) -> URL? {

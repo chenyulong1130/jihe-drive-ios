@@ -69,7 +69,7 @@ struct HeroStage: View {
     private var secondaryText: Color { onDark ? Color.white.opacity(0.78) : Theme.secondary }
 
     /// 主题底边伸进内容区的渐隐高度
-    static let pageBlend: CGFloat = 96
+    static let pageBlend: CGFloat = 80
 
     var body: some View {
         let tail = selection.blendsIntoPage ? Self.pageBlend : 0
@@ -296,7 +296,7 @@ struct HeroStage: View {
                                     .opacity(glbVisible ? 0 : 1)
                                 ModelViewerWebView(
                                     glbFile: modelGLBFile,
-                                    reuseKey: "hero-\(vehicle.vinNo)-lift1",
+                                    reuseKey: "hero-\(vehicle.vinNo)-eye1",
                                     interactive: true,
                                     autoRotate: false,
                                     resetToken: cameraReset + localReset,
@@ -585,21 +585,21 @@ struct HeroStage: View {
 
     private func tireColumn(title: String, bar: Double?, temp: Double?) -> some View {
         let tint = tireTint(bar)
-        return VStack(spacing: 2) {
+        return VStack(spacing: 1) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(tint)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(bar.map { String(format: "%.1f", $0) } ?? "--")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(tint)
                     .monospacedDigit()
                 Text("bar")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(tint.opacity(0.9))
                 if let temp, temp > -40, temp < 120 {
                     Text(String(format: "%.0f°", temp))
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(tint.opacity(0.9))
                 }
             }

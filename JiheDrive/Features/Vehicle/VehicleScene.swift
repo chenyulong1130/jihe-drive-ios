@@ -131,7 +131,7 @@ enum VehicleSceneBuilder {
     static func cameraOrbit() -> SCNNode {
         let orbit = SCNNode()
         orbit.name = "orbit"
-        orbit.position = SCNVector3(0, 0.56, 0)
+        orbit.position = SCNVector3(0, 0.72, 0)
 
         let camera = SCNCamera()
         camera.fieldOfView = 38
@@ -147,7 +147,7 @@ enum VehicleSceneBuilder {
 
         let rig = SCNNode()
         rig.name = "rig"
-        rig.position = SCNVector3(0, sin(0.15) * 2.5, cos(0.15) * 2.5)
+        rig.position = SCNVector3(0, sin(0.06) * 2.55, cos(0.06) * 2.55)
         rig.addChildNode(cameraNode)
 
         orbit.addChildNode(rig)

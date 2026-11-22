@@ -217,7 +217,7 @@ struct VehicleView: View {
             tireFrontTemp: model.tire?.frontTemp,
             tireRearTemp: model.tire?.rearTemp,
             topInset: bar + 8,
-            height: max(390, fullHeight * 0.46),
+            height: max(348, fullHeight * 0.40),
             onPickVehicle: {
                 if model.vehicles.count > 1 {
                     showPicker = true
