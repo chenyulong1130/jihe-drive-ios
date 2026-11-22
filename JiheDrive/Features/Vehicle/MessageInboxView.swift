@@ -6,10 +6,20 @@ struct MessageInboxView: View {
     @State private var selected: InboxMessage?
     @State private var working = false
     @State private var confirmDelete = false
+    /// 分类：没有「全部」，三桶互斥覆盖所有消息，默认进系统
+    @State private var filter = 0
+
+    private var filtered: [InboxMessage] {
+        switch filter {
+        case 1: return store.items.filter { $0.kind == 2 }
+        case 2: return store.items.filter(\.isSocial)
+        default: return store.items.filter { !$0.isSocial && $0.kind != 2 }
+        }
+    }
 
     var body: some View {
         SheetShell(
-            title: "消息",
+            title: headerTitle,
             subtitle: store.unreadCount > 0 ? "\(store.unreadCount) 条未读" : nil,
             onClose: { dismiss() },
             trailing: {
@@ -34,6 +44,11 @@ struct MessageInboxView: View {
             }
         ) {
             VStack(spacing: 0) {
+                filterBar
+                    .padding(.horizontal, 6)
+                    .padding(.top, 2)
+                    .padding(.bottom, 8)
+
                 if store.loading && store.items.isEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -41,12 +56,12 @@ struct MessageInboxView: View {
                     SoftBanner(text: error, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
                         .padding(.horizontal, Theme.page)
                     Spacer()
-                } else if store.items.isEmpty {
+                } else if filtered.isEmpty {
                     empty
                 } else {
                     ScrollView(showsIndicators: false) {
                         LazyVStack(spacing: 12) {
-                            ForEach(store.items) { item in
+                            ForEach(filtered) { item in
                                 Button {
                                     store.open(item)
                                     selected = item
@@ -96,6 +111,41 @@ struct MessageInboxView: View {
         .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
         .disabled(disabled)
         .accessibilityLabel(label)
+    }
+
+    private var headerTitle: String {
+        switch filter {
+        case 1: return "车辆消息"
+        case 2: return "互动消息"
+        default: return "系统消息"
+        }
+    }
+
+    private var filterBar: some View {
+        HStack(spacing: 0) {
+            tab("系统", 0)
+            tab("车辆", 1)
+            tab("互动", 2)
+        }
+    }
+
+    private func tab(_ title: String, _ kind: Int) -> some View {
+        let on = filter == kind
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) { filter = kind }
+        } label: {
+            VStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 15, weight: on ? .semibold : .medium))
+                    .foregroundStyle(on ? Theme.label : Theme.secondary)
+                Capsule()
+                    .fill(on ? Theme.label : Color.clear)
+                    .frame(width: 18, height: 2.5)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var empty: some View {
