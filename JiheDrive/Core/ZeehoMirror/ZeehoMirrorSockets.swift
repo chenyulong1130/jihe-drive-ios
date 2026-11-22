@@ -55,6 +55,7 @@ final class ZeehoMirrorChannel {
         return try await withCheckedThrowingContinuation { continuation in
             let lock = NSLock()
             var resumed = false
+            var timeoutItem: DispatchWorkItem!
             let finish: (Result<ZeehoMirrorChannel, Error>) -> Void = { result in
                 lock.lock()
                 let already = resumed
@@ -64,7 +65,7 @@ final class ZeehoMirrorChannel {
                 timeoutItem.cancel()
                 continuation.resume(with: result)
             }
-            let timeoutItem = DispatchWorkItem {
+            timeoutItem = DispatchWorkItem {
                 connection.cancel()
                 finish(.failure(ChannelError.timeout("\(name)连接")))
             }
