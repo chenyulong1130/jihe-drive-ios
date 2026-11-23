@@ -3,8 +3,10 @@ import SwiftUI
 
 /// 3D 看车：只用接口返回的模型，没有模型就展示官方车图。
 struct Vehicle3DSheet: View {
+    /// 展示瞬间的快照；真实车况（坐垫/电量/3D 地址）统一走 live
     let vehicle: Vehicle
 
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appearance: AppearanceStore
     @StateObject private var loader = VehicleModelLoader()
@@ -32,10 +34,18 @@ struct Vehicle3DSheet: View {
     private var stageFgSoft: Color { stageDark ? Color.white.opacity(0.62) : Theme.secondary }
     private var stageFgHint: Color { stageDark ? Color.white.opacity(0.7) : Theme.secondary }
 
-    private var modelURL: URL? { vehicle.model3DURL }
+    /// sheet 内容不会随父视图刷新，入参是打开瞬间的快照——坐垫状态/3D 地址必须实时取，
+    /// 否则轮询到"坐垫已打开"也进不来，模型永远保持关闭且动画不触发。
+    private var live: Vehicle {
+        guard let current = model.selectedVehicle,
+              WidgetSnapshot.sameVin(current.vinNo, vehicle.vinNo) else { return vehicle }
+        return current
+    }
+
+    private var modelURL: URL? { live.model3DURL }
 
     /// 云端真实坐垫状态；nil=未拿到或已过期（不拿本地 toggle 冒充）
-    private var realSeatOpen: Bool? { vehicle.seat?.isOpen() }
+    private var realSeatOpen: Bool? { live.seat?.isOpen() }
 
     private var seatCaption: String {
         guard let open = realSeatOpen else { return "未知" }
@@ -58,7 +68,7 @@ struct Vehicle3DSheet: View {
                 seatOpen = open
                 seatToken += 1
             }
-            if vehicle.isGLBModel {
+            if live.isGLBModel {
                 await loadGLB()
             } else {
                 loader.restore(vin: vehicle.vinNo, url: modelURL)
@@ -97,7 +107,7 @@ struct Vehicle3DSheet: View {
             VStack {
                 header
                 Spacer(minLength: 0)
-                if vehicle.model3DURL != nil {
+                if live.model3DURL != nil {
                     hint
                 }
             }
@@ -116,7 +126,7 @@ struct Vehicle3DSheet: View {
 
     @ViewBuilder
     private var stageContent: some View {
-        if vehicle.isGLBModel {
+        if live.isGLBModel {
             glbStage
         } else if let scene = loader.scene {
             VehicleSceneView(scene: scene, interactive: true, autoSpin: true, resetToken: resetToken)
@@ -181,7 +191,7 @@ struct Vehicle3DSheet: View {
     }
 
     private func loadGLB() async {
-        guard let url = modelURL, vehicle.isGLBModel else { return }
+        guard let url = modelURL, live.isGLBModel else { return }
         if let cached = GLBModelStore.cached(vin: vehicle.vinNo, remote: url) {
             glbFile = cached
             return
@@ -227,17 +237,17 @@ struct Vehicle3DSheet: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(vehicle.name)
+                Text(live.name)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(stageFg)
-                Text(vehicle.model3DURL != nil ? "官方 3D 模型" : "官方车辆图片")
+                Text(live.model3DURL != nil ? "官方 3D 模型" : "官方车辆图片")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(stageFgSoft)
             }
 
             Spacer(minLength: 8)
 
-            if vehicle.isGLBModel {
+            if live.isGLBModel {
                 Button {
                     seatOpen.toggle()
                     seatToken += 1   // 触发 jhSetSeat，3D 立即开合；JS 完成后回传终态
@@ -252,7 +262,7 @@ struct Vehicle3DSheet: View {
                 .accessibilityLabel("切换模型坐垫，实际坐垫\(seatCaption)")
             }
 
-            if vehicle.model3DURL != nil {
+            if live.model3DURL != nil {
                 Button {
                     withAnimation(Motion.quick) { resetToken += 1 }
                 } label: {
