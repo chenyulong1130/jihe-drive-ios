@@ -421,11 +421,9 @@ enum ModelViewerAsset {
         pmrem.dispose();
         const hemi = new THREE.HemisphereLight(0xffffff, 0x555555, 1.6);
         scene.add(hemi);
-        const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-        sun.position.set(5, 8, 5);
-        scene.add(sun);
-        // 反侧补光（对齐 demo）：只有一盏主光时背光面会明显偏暗，车漆看起来"半黑半白"
-        const fill = new THREE.DirectionalLight(0xffffff, 1.2);
+        // 不放主光（用户要求）：单方向主光会让背光面明显偏暗（"半黑半白"）。
+        // 只留半球光 + RoomEnvironment 环境反射 + 反侧弱补光，整体均匀柔和。
+        const fill = new THREE.DirectionalLight(0xffffff, 1.0);
         fill.position.set(-6, 4, -4);
         scene.add(fill);
 
