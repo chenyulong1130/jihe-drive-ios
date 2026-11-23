@@ -199,7 +199,9 @@ final class CPDirectAccessoryTransport {
         connection = nil
         endpoint = nil
         dataOutHandlerBox = nil
-        onData = nil
+        // 不清 onData：回调由上层（CPBootstrap）管理生命周期。
+        // CarWithin 的同名 stop 也不清 onData；start() 内部会先调 stop()，
+        // 若在这里清空会把上层刚设置的回调抹掉，导致 iAP2 收包被丢弃。
     }
 
     deinit { stop() }

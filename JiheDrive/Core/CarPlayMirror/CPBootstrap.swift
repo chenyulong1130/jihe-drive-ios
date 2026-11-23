@@ -52,9 +52,12 @@ final class CPBootstrap {
         self.configuration = configuration
         self.identity = identity
         active = true
-        transport.onData = { [weak self] data in self?.receive(data) }
         do {
             try transport.start(withIdentifier: configuration.deviceID, transportType: 2)
+            // 关键：必须在 transport.start() 之后设置回调。start() 内部会先 stop()，
+            // 而 stop() 末尾执行 onData = nil；若提前设置，回调会被清空，iOS 回来的
+            // iAP2 数据全部丢弃，握手停在「已创建配件端点」——CarWithin 的 stop 不清 onData。
+            transport.onData = { [weak self] data in self?.receive(data) }
             stage(.transportReady)
             stage("已创建本机配件端点（Wi-Fi 直连），正在建立 iAP2")
             try transport.send(CPIAP2.presence)
