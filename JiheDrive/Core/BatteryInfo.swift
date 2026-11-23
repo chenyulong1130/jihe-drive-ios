@@ -11,7 +11,9 @@ struct BatteryInfo: Identifiable, Hashable {
     let power: Double?
     let type: String
     let stateText: String
-    let isCharging: Bool
+    /// 充电状态原始变量（接口 `chargeState`：0=未充电 / 1=充电中 / 2=放电中 / 3=待机）。
+    /// nil 表示响应里没有这个字段（老接口/骨架），此时才退回 stateText 文案判断。
+    let chargeState: Int?
     let isPulledOut: Bool
     let abnormal: String?
     let chargeMinutes: Int?
@@ -37,6 +39,12 @@ struct BatteryInfo: Identifiable, Hashable {
 
     var hasLiveElectrical: Bool { voltage > 0 || current != nil || power != nil }
 
+    /// 充电中：以接口变量 chargeState 为准，没有变量才看文案
+    var isCharging: Bool {
+        if let chargeState { return chargeState == 1 }
+        return stateText == "充电中"
+    }
+
     /// 以电池接口实时状态为准：有实测电流/功率就是充电中；
     /// 只有"充"状态文案而没有实时电气数据（电池服务过期、数据断流）不算。
     /// 注意："未充电"也含"充"字，必须用精确等于，不能用 contains。
@@ -44,11 +52,12 @@ struct BatteryInfo: Identifiable, Hashable {
     /// 配合 contains("充") 把每台车都判成充电中（车辆主页/小组件/灵动岛全线误报）。
     var isLiveCharging: Bool {
         if isPulledOut { return false }
+        if let chargeState { return chargeState == 1 }   // 服务端状态变量优先，不做文案匹配
+        // 没有 chargeState 的老响应：退回电气判据（电流/功率实测值）
         if stateText == "未充电" || stateText == "放电中" { return false }
         if let current, current > 0.3 { return true }
         if let power, power > 10 { return true }
-        guard stateText == "充电中" else { return false }
-        return current != nil || power != nil
+        return false
     }
 
     var hasChargeInfo: Bool {
@@ -73,7 +82,7 @@ struct BatteryInfo: Identifiable, Hashable {
             power: other.power ?? power,
             type: other.type == "锂电池" ? (type.isEmpty ? other.type : type) : other.type,
             stateText: other.stateText.isEmpty ? stateText : other.stateText,
-            isCharging: other.isCharging,
+            chargeState: other.chargeState ?? chargeState,
             isPulledOut: isPulledOut || other.isPulledOut,
             abnormal: other.abnormal ?? abnormal,
             chargeMinutes: other.chargeMinutes ?? chargeMinutes,
@@ -129,7 +138,7 @@ struct BatteryInfo: Identifiable, Hashable {
             power: top.power ?? power,
             type: type == "锂电池" ? top.type : type,
             stateText: top.stateText,
-            isCharging: isCharging || top.isCharging,
+            chargeState: top.chargeState ?? chargeState,
             isPulledOut: isPulledOut || top.isPulledOut,
             abnormal: abnormal ?? top.abnormal,
             chargeMinutes: top.chargeMinutes ?? chargeMinutes,
@@ -163,7 +172,7 @@ struct BatteryInfo: Identifiable, Hashable {
             power: nil,
             type: "锂电池",
             stateText: vehicle.isCharging ? "充电中" : "待机",
-            isCharging: vehicle.isCharging,
+            chargeState: vehicle.isCharging ? 1 : nil,
             isPulledOut: false,
             abnormal: nil,
             chargeMinutes: nil,
@@ -240,9 +249,10 @@ struct BatteryInfo: Identifiable, Hashable {
             "expectFullTimeDescribe", "etaFullText", "expectFullTime"
         ]))
 
+        // 充电状态以接口变量 chargeState 为准（0 未充电 / 1 充电中 / 2 放电中 / 3 待机）
+        let chargeRaw = optionalInt(JSONDig.first(json, keys: ["chargeState"]))
         let parsedState = stateText(rawState, powerState: powerState)
-        // 不能用 contains("充")："未充电"也含"充"字，会误判成充电中
-        let charging = parsedState == "充电中" || boolCharge(powerState)
+        let charging = chargeRaw.map { $0 == 1 } ?? (parsedState == "充电中")
         let online = optionalOnline(JSONDig.first(json, keys: ["onlineStatus", "isOnline", "online"]))
         let soc = level > 0 ? level : grade
 
@@ -272,7 +282,7 @@ struct BatteryInfo: Identifiable, Hashable {
             power: power,
             type: typeName.isEmpty ? "锂电池" : typeName,
             stateText: parsedState,
-            isCharging: charging,
+            chargeState: chargeRaw,
             isPulledOut: pulledFlag == "1" || pulledFlag.lowercased() == "true",
             abnormal: (abnormal?.isEmpty ?? true) || abnormal == "0" ? nil : abnormal,
             chargeMinutes: chargeMin,
@@ -374,6 +384,23 @@ struct BatteryInfo: Identifiable, Hashable {
         if let text = raw as? String, let number = Double(text) { return Int(number) }
         if let number = raw as? NSNumber { return number.intValue }
         return 0
+    }
+
+    /// 可选整数：区分「字段缺失」与「值为 0」，充电状态判定必须靠它
+    private static func optionalInt(_ raw: Any?) -> Int? {
+        guard let raw, !(raw is NSNull) else { return nil }
+        if let number = raw as? Int { return number }
+        if let number = raw as? Double { return Int(number) }
+        if let text = raw as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return nil }
+            return Int(trimmed) ?? Double(trimmed).map { Int($0) }
+        }
+        if let number = raw as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+            return number.intValue
+        }
+        return nil
     }
 
     private static func doubleValue(_ raw: Any?) -> Double {

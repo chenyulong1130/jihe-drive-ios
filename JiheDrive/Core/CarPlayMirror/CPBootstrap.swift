@@ -58,11 +58,18 @@ final class CPBootstrap {
             stage(.transportReady)
             stage("已创建本机配件端点（Wi-Fi 直连），正在建立 iAP2")
             try transport.send(CPIAP2.presence)
+            stage("已发送 iAP2 在线探测（\(CPIAP2.presence.count) 字节），等待 iOS 响应")
             let syn = CPIAP2.Packet(control: 0x80, sequence: sequence, acknowledgement: 0, session: 0,
                 payload: Data([1, 5, 8, 0, 7, 0xd0, 0, 0xfa, 3, 3, 1, 0, 1]))
             schedule(after: 0.1) { [weak self] in
                 guard let self, self.active else { return }
-                try? self.transport.send(syn.encoded())
+                do {
+                    let bytes = syn.encoded()
+                    try self.transport.send(bytes)
+                    self.stage("已发送 iAP2 SYN（\(bytes.count) 字节）")
+                } catch {
+                    self.finish("iAP2 SYN 写入失败：\(error.localizedDescription)")
+                }
             }
             schedule(after: 20) { [weak self] in
                 guard let self, self.active, !self.requested else { return }
@@ -122,6 +129,7 @@ final class CPBootstrap {
 
     private func receive(_ data: Data) {
         guard active else { return }
+        stage("收到本机 iAP2 数据（\(data.count) 字节）")
         do {
             for event in try parser.append(data) {
                 switch event {

@@ -60,13 +60,16 @@ final class CPDirectAccessoryTransport {
     /// 加载 CoreAccessories 框架并取出共享 client。
     private static func acquireClient() throws -> AnyObject {
         if let cached = cachedClient { return cached }
-        let frameworkPath = "/System/Library/PrivateFrameworks/CoreAccessories.framework"
-        guard let bundle = Bundle(path: frameworkPath), bundle.load() else {
-            throw TransportError.frameworkUnavailable
+        // 与 CarWithin 一致：先查类，未注册再加载框架。
+        var cls = NSClassFromString("ACCTransportClient")
+        if cls == nil {
+            let frameworkPath = "/System/Library/PrivateFrameworks/CoreAccessories.framework"
+            guard let bundle = Bundle(path: frameworkPath), bundle.load() else {
+                throw TransportError.frameworkUnavailable
+            }
+            cls = NSClassFromString("ACCTransportClient")
         }
-        guard let cls = NSClassFromString("ACCTransportClient") else {
-            throw TransportError.frameworkUnavailable
-        }
+        guard let cls else { throw TransportError.frameworkUnavailable }
         let sharedSelector = NSSelectorFromString("sharedClient")
         typealias SharedFn = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
         guard let sharedImp = class_getClassMethod(cls, sharedSelector).map({ method_getImplementation($0) }) else {
@@ -155,26 +158,40 @@ final class CPDirectAccessoryTransport {
     }
 
     /// 向本机 iOS 发送数据（配件 → 手机方向）。
+    /// 必须直接以 objc_msgSend 传 NSData：NSObject.perform(with:) 会把 Swift Data
+    /// 包成 __SwiftValue，私有框架按 NSData 读取时会拿不到字节（表现为端点建好但 iAP2 无任何响应）。
     func send(_ data: Data) throws {
         guard let client, let endpoint, isActive else { throw TransportError.sendFailure }
-        let selector = NSSelectorFromString("processIncomingData:forEndpointWithUUID:")
-        guard Self.hasMethod(client, "processIncomingData:forEndpointWithUUID:", 2) else {
-            throw TransportError.methodMissing("processIncomingData:forEndpointWithUUID:")
+        let name = "processIncomingData:forEndpointWithUUID:"
+        guard Self.hasMethod(client, name, 2) else { throw TransportError.methodMissing(name) }
+        let selector = NSSelectorFromString(name)
+        typealias SendFn = @convention(c) (AnyObject, Selector, NSData, AnyObject) -> Void
+        guard let imp = class_getInstanceMethod(object_getClass(client), selector)
+                .map({ method_getImplementation($0) }) else {
+            throw TransportError.methodMissing(name)
         }
-        guard let nsClient = client as? NSObject else { throw TransportError.sendFailure }
-        nsClient.perform(selector, with: data, with: endpoint)
+        let fn = unsafeBitCast(imp, to: SendFn.self)
+        fn(client, selector, data as NSData, endpoint)
     }
 
     func stop() {
-        if let client, let endpoint,
-           Self.hasMethod(client, "destroyEndpointWithUUID:", 1),
-           let nsClient = client as? NSObject {
-            nsClient.perform(NSSelectorFromString("destroyEndpointWithUUID:"), with: endpoint)
+        if let client, let endpoint, Self.hasMethod(client, "destroyEndpointWithUUID:", 1) {
+            let selector = NSSelectorFromString("destroyEndpointWithUUID:")
+            typealias DestroyFn = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+            if let imp = class_getInstanceMethod(object_getClass(client), selector)
+                    .map({ method_getImplementation($0) }) {
+                let fn = unsafeBitCast(imp, to: DestroyFn.self)
+                fn(client, selector, endpoint)
+            }
         }
-        if let client, let connection,
-           Self.hasMethod(client, "destroyConnectionWithUUID:", 1),
-           let nsClient = client as? NSObject {
-            nsClient.perform(NSSelectorFromString("destroyConnectionWithUUID:"), with: connection)
+        if let client, let connection, Self.hasMethod(client, "destroyConnectionWithUUID:", 1) {
+            let selector = NSSelectorFromString("destroyConnectionWithUUID:")
+            typealias DestroyFn = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+            if let imp = class_getInstanceMethod(object_getClass(client), selector)
+                    .map({ method_getImplementation($0) }) {
+                let fn = unsafeBitCast(imp, to: DestroyFn.self)
+                fn(client, selector, connection)
+            }
         }
         isActive = false
         generation = UUID()
