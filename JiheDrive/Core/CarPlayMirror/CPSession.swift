@@ -75,6 +75,14 @@ final class CPReceiver {
         }
     }
 
+    /// 请求 iPhone 立即编码一个关键帧（解码/转码恢复用），转发到活跃媒体会话
+    func requestKeyFrame() {
+        queue.async { [weak self] in
+            guard let media = self?.sessions.values.first(where: { $0.media != nil })?.media else { return }
+            media.requestKeyFrame()
+        }
+    }
+
     private func stopOnQueue() {
         generation = UUID()
         listener?.cancel()
