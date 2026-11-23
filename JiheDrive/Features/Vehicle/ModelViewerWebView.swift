@@ -18,6 +18,7 @@ struct ModelViewerWebView: UIViewRepresentable {
     var onReady: (() -> Void)? = nil
     var seatOpen: Bool = false       // 坐垫目标状态
     var seatToken: Int = 0           // 每次变更 +1 触发下发
+    var onSeatDebug: ((String) -> Void)? = nil        // 坐垫挂载诊断（真机排查"点了没反应"）
     var onSeatChange: ((Bool) -> Void)? = nil        // JS 即时回传坐垫开关状态
     var onSeatProgress: ((Double) -> Void)? = nil    // 0~1 开合进度
 
@@ -26,6 +27,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.onDrag = onDrag
         context.coordinator.onOrbitChanged = onOrbitChanged
         context.coordinator.onReady = onReady
+        context.coordinator.onSeatDebug = onSeatDebug
         context.coordinator.onSeatChange = onSeatChange
         context.coordinator.onSeatProgress = onSeatProgress
         context.coordinator.resetToken = resetToken
@@ -78,6 +80,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.onDrag = onDrag
         context.coordinator.onOrbitChanged = onOrbitChanged
         context.coordinator.onReady = onReady
+        context.coordinator.onSeatDebug = onSeatDebug
         context.coordinator.onSeatChange = onSeatChange
         context.coordinator.onSeatProgress = onSeatProgress
         context.coordinator.desiredLightsOn = lightsOn
@@ -153,6 +156,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         var onDrag: ((Bool) -> Void)?
         var onOrbitChanged: ((Bool) -> Void)?
         var onReady: (() -> Void)?
+        var onSeatDebug: ((String) -> Void)?
         var onSeatChange: ((Bool) -> Void)?
         var onSeatProgress: ((Double) -> Void)?
         var resetToken = 0
@@ -179,6 +183,17 @@ struct ModelViewerWebView: UIViewRepresentable {
             if force || appliedSeatToken != desiredSeatToken {
                 appliedSeatToken = desiredSeatToken
                 view.evaluateJavaScript("window.jhSetSeat && window.jhSetSeat(\(desiredSeatOpen))", completionHandler: nil)
+                reportSeatDebug(view)
+            }
+        }
+
+        /// 回读坐垫挂载状态（pivot 是否建立、命中哪个节点）
+        func reportSeatDebug(_ view: WKWebView) {
+            guard let onSeatDebug else { return }
+            view.evaluateJavaScript(
+                "JSON.stringify(window.jhSeatDebug ? window.jhSeatDebug() : {pivot:false,node:'no-fn'})"
+            ) { value, _ in
+                if let text = value as? String { onSeatDebug(text) }
             }
         }
 
@@ -270,7 +285,11 @@ struct ModelViewerWebView: UIViewRepresentable {
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if modelReady { self.onReady?() }
+                if modelReady {
+                    self.onReady?()
+                    // 模型就绪后回读坐垫挂载状态（真机排查"点了模型不动"）
+                    if let view = message.webView { self.reportSeatDebug(view) }
+                }
                 if let seatProgress { self.onSeatProgress?(seatProgress) }
                 if let seatOpen { self.onSeatChange?(seatOpen) }
                 if let rotated { self.onOrbitChanged?(rotated) }
@@ -461,10 +480,30 @@ enum ModelViewerAsset {
         let pivot = null;
         let seatAnim = null;
         let seatTarget = false; // 最近一次 jhSetSeat 的目标，模型就绪前先记下
+        let seatNodeName = '';  // 命中的坐垫节点名，空=没找到（诊断用）
+
+        // 兜底搜索：精确名都没有时，取名字含 seat 且体积最大的部件（排除贴图/材质节点）
+        function findSeatNode(root) {
+          const exact = root.getObjectByName('FR-Seat-T') || root.getObjectByName('SEAT-Seat-T');
+          if (exact) return exact;
+          let best = null, bestVol = 0;
+          root.traverse((o) => {
+            const n = String(o.name || '');
+            if (!/seat/i.test(n)) return;
+            if (/tex|texture|material|mat$|light/i.test(n)) return;
+            const box = new THREE.Box3().setFromObject(o);
+            if (box.isEmpty()) return;
+            const sz = box.getSize(new THREE.Vector3());
+            const vol = sz.x * sz.y * sz.z;
+            if (vol > bestVol) { bestVol = vol; best = o; }
+          });
+          return best;
+        }
 
         function setupSeat(root) {
-          const node = root.getObjectByName('FR-Seat-T') || root.getObjectByName('SEAT-Seat-T');
-          if (!node) return;
+          const node = findSeatNode(root);
+          if (!node) { seatNodeName = ''; return; }
+          seatNodeName = node.name || '?'
           const seat = (node.name === 'SEAT-Seat-T' && node.parent) ? node.parent : node;
           seat.updateWorldMatrix(true, false);
           const box = new THREE.Box3().setFromObject(seat);
@@ -496,6 +535,14 @@ enum ModelViewerAsset {
           if (!pivot) return; // 模型未就绪：记下目标，setupSeat 后补挂
           driveSeat(seatTarget);
         };
+        // 诊断：坐垫是否挂上、命中哪个节点、当前角度，便于真机定位"点了没反应"
+        window.jhSeatDebug = () => ({
+          pivot: !!pivot,
+          node: seatNodeName,
+          target: seatTarget,
+          degrees: pivot ? +(pivot.rotation.z * 180 / Math.PI).toFixed(1) : null,
+          modelReady: !!window.__jhModelReady
+        });
         window.jhSeatState = () => {
           if (!pivot) return { ready: false };
           const p = Math.min(Math.max(pivot.rotation.z / OPEN_ANGLE, 0), 1);
@@ -666,6 +713,7 @@ enum ModelViewerAsset {
           gltf.scene.position.y += 0.74 - center.y;
           buildBeam(gltf.scene);
           needsRender = true;
+          window.__jhModelReady = true;
           readyPending = true; // 首帧渲染完成后再上报 ready，避免揭掉 loading 后还有空窗
         });
 

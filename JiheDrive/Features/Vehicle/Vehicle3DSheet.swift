@@ -15,6 +15,8 @@ struct Vehicle3DSheet: View {
     @State private var glbFailed = false
     @State private var seatOpen = false
     @State private var seatToken = 0
+    /// 坐垫挂载诊断文本（真机排查"点了没反应"用）
+    @State private var seatDebug = "" 
 
     /// 深色主题 → 全车灯点亮（不含转向灯）；浅色 → 熄灭。只改车灯自发光，不改场景光照。
     private var lightsOn: Bool { appearance.resolvedScheme == .dark }
@@ -166,6 +168,7 @@ struct Vehicle3DSheet: View {
                         lightsOn: lightsOn,
                         seatOpen: seatOpen,
                         seatToken: seatToken,
+                        onSeatDebug: { text in seatDebug = text },
                         onSeatChange: { open in
                             // JS 即时回传坐垫状态（含动画过程），按钮态始终与 3D 一致
                             if seatOpen != open { seatOpen = open }
@@ -340,6 +343,11 @@ struct Vehicle3DSheet: View {
                         HairLine()
                         InfoRow(title: "VIN", value: vehicle.vinNo, mono: true)
                             .padding(.top, 10)
+                        if !seatDebug.isEmpty {
+                            HairLine().padding(.vertical, 10)
+                            // 真机排查：模型坐垫节点是否挂上（pivot）、命中哪个节点、当前角度
+                            InfoRow(title: "模型坐垫", value: seatDebug, mono: true)
+                        }
                     }
                 }
             }
