@@ -114,6 +114,22 @@ struct MirrorView: View {
 
                 if mode == "carplay" {
                     startButton
+                    if case .liveFallback = controller.phase {
+                        Button {
+                            controller.retryBootstrap()
+                        } label: {
+                            Text("重试本机 CarPlay 引导")
+                                .font(Theme.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.brand)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if controller.phase.isRunning {
+                        Text("极核仪表：\(controller.zeehoStatus)")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 } else {
                     broadcastButton
                 }
@@ -295,39 +311,51 @@ struct MirrorView: View {
 
                 HairLine()
 
-                // 仪表
-                HStack(spacing: 10) {
-                    Image(systemName: "gauge.with.needle")
-                        .foregroundStyle(Theme.brand)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("极核 6.2 寸仪表")
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                        Text("1024×480 · H.264 25帧")
-                            .font(Theme.caption)
-                            .foregroundStyle(Theme.secondary)
+                // 仪表（可选输出，不影响本地 CarPlay）
+                Toggle("投屏到极核仪表", isOn: $store.castToZeeho)
+                    .font(Theme.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.label)
+                    .tint(Theme.brand)
+                    .onChange(of: store.castToZeeho) { _, value in
+                        store.commitCastToZeeho()
+                        controller.setCastToZeeho(value)
                     }
-                    Spacer(minLength: 0)
-                }
 
-                HStack(spacing: 8) {
-                    Text("IP")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                    TextField("192.168.0.1", text: $store.dashboardIP)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.decimalPad)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
+                if store.castToZeeho {
+                    HStack(spacing: 10) {
+                        Image(systemName: "gauge.with.needle")
+                            .foregroundStyle(Theme.brand)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("极核 6.2 寸仪表")
+                                .font(Theme.headline)
+                                .foregroundStyle(Theme.label)
+                            Text("1024×480 · H.264 25帧")
+                                .font(Theme.caption)
+                                .foregroundStyle(Theme.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
 
-                Picker("裁剪", selection: $store.cropMode) {
-                    Text("居中裁剪").tag("crop")
-                    Text("完整画面").tag("fit")
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: store.cropMode) { _, _ in
-                    store.commitCropMode()
+                    HStack(spacing: 8) {
+                        Text("IP")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                        TextField("192.168.0.1", text: $store.dashboardIP)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.decimalPad)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
+
+                    Picker("裁剪", selection: $store.cropMode) {
+                        Text("居中裁剪").tag("crop")
+                        Text("完整画面").tag("fit")
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: store.cropMode) { _, value in
+                        store.commitCropMode()
+                        controller.setCropMode(value)
+                    }
                 }
             }
         }

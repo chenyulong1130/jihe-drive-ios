@@ -29,7 +29,7 @@ final class CPDirectAccessoryTransport {
             case .methodMissing(let what):
                 return "CoreAccessories 传输方法已变化：\(what)"
             case .refused(let what):
-                return "CoreAccessories 拒绝了\(what)（当前签名可能无私有传输权限）"
+                return "CoreAccessories 拒绝了\(what)（连接标识/回调签名不匹配，或当前签名无私有传输权限）"
             case .sendFailure:
                 return "直连传输写入失败"
             }

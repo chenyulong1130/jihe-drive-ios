@@ -17,12 +17,15 @@ enum CPMirrorDiagnostics {
     // MARK: - 预检
 
     /// 逐项检查并等待全部完成（总超时约 5 秒）。
-    static func preflight(dashboardIP: String) async -> [CheckResult] {
+    static func preflight(dashboardIP: String, includeDashboard: Bool = true) async -> [CheckResult] {
         async let identity = checkIdentity()
         async let wifi = checkWiFi()
         async let local = checkLocalIP()
-        async let dashboard = checkDashboard(dashboardIP)
-        return await [identity, wifi, local, dashboard]
+        if includeDashboard {
+            async let dashboard = checkDashboard(dashboardIP)
+            return await [identity, wifi, local, dashboard]
+        }
+        return await [identity, wifi, local]
     }
 
     /// 配件身份：直接走 load()——Keychain / 内置资源 / IdentityImport 暂存目录

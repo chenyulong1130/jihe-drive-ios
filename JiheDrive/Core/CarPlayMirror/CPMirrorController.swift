@@ -89,6 +89,7 @@ final class CPMirrorController: ObservableObject {
     private let stateLock = NSLock()
     private var firstFrameSent = false
     private var localVideoReceived = false
+    private var pendingControlConnected = false
     private var dashboardIP: String = ""
     private var localIP: String = ""
     private var currentConfiguration: CPInfo.Configuration?
@@ -110,7 +111,9 @@ final class CPMirrorController: ObservableObject {
         self.localIP = localIP
         self.castToZeeho = castToZeeho
         self.localVideoReceived = false
+        self.pendingControlConnected = false
         self.zeehoStatus = castToZeeho ? "等待连接" : "未启用"
+        setCropMode(UserDefaults(suiteName: MirrorLogStore.appGroupID)?.string(forKey: "mirror.crop") ?? "crop")
 
         let identity: CPAccessoryIdentity
         do {
@@ -144,6 +147,15 @@ final class CPMirrorController: ObservableObject {
                 self.localVideoReceived = true
                 self.appendLog("已收到 CarPlay 视频，本地预览与触控可用")
                 self.setPhase(.localStreaming)
+            }
+        }
+        receiver.onControlConnected = { [weak self] in
+            guard let self, self.startToken == token else { return }
+            // 通知引导会话：否则它会在 45 秒后误判为「未收到控制连接」。
+            if let bootstrap = self.bootstrap {
+                bootstrap.didConnectControl()
+            } else {
+                self.pendingControlConnected = true
             }
         }
         receiver.onFailure = { [weak self] reason in
@@ -199,6 +211,11 @@ final class CPMirrorController: ObservableObject {
         startBootstrap(with: configuration, identity: identity, token: startToken)
     }
 
+    /// 裁剪模式与整屏镜像共用 App Group 设置。
+    func setCropMode(_ value: String) {
+        transcoder.scaleMode = value == "fit" ? .fit : .crop
+    }
+
     /// 运行中切换极核输出（下次启动也会读取同一状态）。
     func setCastToZeeho(_ enabled: Bool) {
         guard castToZeeho != enabled else { return }
@@ -246,8 +263,12 @@ final class CPMirrorController: ObservableObject {
                 break
             }
         }
-        bootstrap.start(configuration: configuration, identity: identity)
         self.bootstrap = bootstrap
+        bootstrap.start(configuration: configuration, identity: identity)
+        if pendingControlConnected {
+            pendingControlConnected = false
+            bootstrap.didConnectControl()
+        }
     }
 
     // MARK: - 极核链路与喂帧循环
