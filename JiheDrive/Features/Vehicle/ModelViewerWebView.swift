@@ -406,8 +406,9 @@ enum ModelViewerAsset {
         sun.position.set(5, 8, 5);
         scene.add(sun);
 
-        const DEFAULT_POS = new THREE.Vector3(0.02, 0.74, 4.35);
-        const DEFAULT_TARGET = new THREE.Vector3(0.02, 0.74, 0);
+        // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
+        const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);
+        const DEFAULT_TARGET = new THREE.Vector3(0.02, 0.88, 0);
         const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 100);
         camera.position.copy(DEFAULT_POS);
 
