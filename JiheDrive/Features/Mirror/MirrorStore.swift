@@ -18,6 +18,8 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var identityHint: String?
     /// 整屏镜像裁剪：crop = 居中裁横幅（默认，导航信息区），fit = 完整画面加黑边
     @Published var cropMode: String
+    /// 是否把 CarPlay 画面转投极核仪表；关闭时本地预览与触控照常可用。
+    @Published var castToZeeho: Bool
 
     private let locationManager = CLLocationManager()
     private static let wifiService = "com.liruixin.jihedrive.wifi"
@@ -27,6 +29,7 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         dashboardIP = savedIP?.isEmpty == false ? savedIP! : "192.168.0.1"
         let group = UserDefaults(suiteName: MirrorLogStore.appGroupID)
         cropMode = group?.string(forKey: "mirror.crop") == "fit" ? "fit" : "crop"
+        castToZeeho = UserDefaults.standard.object(forKey: "mirror.cast.zeeho") as? Bool ?? true
         super.init()
         locationManager.delegate = self
         recheckIdentity()
@@ -174,6 +177,10 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
     func commitCropMode() {
         let group = UserDefaults(suiteName: MirrorLogStore.appGroupID)
         group?.set(cropMode, forKey: "mirror.crop")
+    }
+
+    func commitCastToZeeho() {
+        UserDefaults.standard.set(castToZeeho, forKey: "mirror.cast.zeeho")
     }
 
     /// 广播扩展最近状态（5 秒内视为活跃）。

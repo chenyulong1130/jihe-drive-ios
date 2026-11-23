@@ -354,7 +354,7 @@ enum ModelViewerAsset {
 
     /// three.js 自绘 viewer（three r160 + GLTFLoader + OrbitControls + RoomEnvironment）。
     /// 相机参数与原 model-viewer 对齐：orbit 0deg 90deg 4.35m / target 0.02 0.74 / fov 26。
-    /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯,不含转向灯,不改场景光照) / jhResetOrbit。
+    /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯,含近光光域,不含转向灯) / jhResetOrbit。
     static func html(interactive: Bool, autoRotate: Bool) -> String {
         return """
         <!DOCTYPE html>
@@ -478,7 +478,7 @@ enum ModelViewerAsset {
           return { ready: true, open: p > 0.05, progress: p };
         };
 
-        // ---------- 灯光：全车灯（不含转向灯），只改材质自发光，不动场景光照 ----------
+        // ---------- 灯光：全车灯（不含转向灯）。灯面改自发光 + 近光投真实光域 ----------
         // AE4 / AE8 车模已解包核对，灯节点命名一致：L-LowBeam / L-HighBeam /
         //   L-TailLight / L-BrakeLight / L-TurnSignal-L / L-TurnSignal-R，AE8 另有 L-LightBar / K-Light。
         // 只认真实灯节点名，不用裸 brake/light 关键词猜——旧逻辑会把 FW/RW-BrakeFlange-T（刹车盘）
@@ -496,8 +496,74 @@ enum ModelViewerAsset {
           if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
           return null;
         }
+        // ---------- 近光光域：大灯向车头前方投出可见光锥、真实聚光与地面光斑 ----------
+        // 车头朝 +z（GLB 实测：前轮 FW z≈+0.06、后轮 RW z≈-0.08），模型已在归一化后调用。
+        function buildBeam(root) {
+          if (beamGroup) return;
+          const lampNode = root.getObjectByName('L-LowBeam');
+          if (!lampNode) return;
+          root.updateMatrixWorld(true);
+          const box = new THREE.Box3().setFromObject(root);
+          const size = box.getSize(new THREE.Vector3());
+          const from = new THREE.Vector3();
+          lampNode.getWorldPosition(from);
+          const groundY = box.min.y;
+          const reach = Math.max(2.2, size.z * 1.3);
+          const to = new THREE.Vector3(from.x, groundY, from.z + reach);
+          const dir = to.clone().sub(from);
+          const dist = dir.length();
+
+          beamGroup = new THREE.Group();
+          beamGroup.name = 'LowBeamFX';
+
+          // 真实聚光：照亮前轮 / 挡泥板与落地点附近
+          const spot = new THREE.SpotLight(0xffedd0, 45, dist * 2.4, 0.46, 0.55, 1.6);
+          spot.position.copy(from);
+          spot.target.position.copy(to);
+          beamGroup.add(spot);
+          beamGroup.add(spot.target);
+
+          // 可见光锥：灯口细、落点宽的半透明加色圆台
+          const cone = new THREE.Mesh(
+            new THREE.CylinderGeometry(reach * 0.26, 0.04, dist, 28, 1, true),
+            new THREE.MeshBasicMaterial({
+              color: 0xffe6b0, transparent: true, opacity: 0.10,
+              blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+            })
+          );
+          cone.position.copy(from).addScaledVector(dir, 0.5);
+          cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+          beamGroup.add(cone);
+
+          // 地面光斑：径向渐变贴图压平成椭圆
+          const cnv = document.createElement('canvas');
+          cnv.width = 128; cnv.height = 128;
+          const g2 = cnv.getContext('2d');
+          const grad = g2.createRadialGradient(64, 64, 4, 64, 64, 62);
+          grad.addColorStop(0, 'rgba(255,238,186,0.55)');
+          grad.addColorStop(0.55, 'rgba(255,226,156,0.20)');
+          grad.addColorStop(1, 'rgba(255,220,140,0)');
+          g2.fillStyle = grad;
+          g2.fillRect(0, 0, 128, 128);
+          const tex = new THREE.CanvasTexture(cnv);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          const pool = new THREE.Mesh(
+            new THREE.CircleGeometry(reach * 0.26, 40),
+            new THREE.MeshBasicMaterial({
+              map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+            })
+          );
+          pool.rotation.x = -Math.PI / 2;
+          pool.position.set(to.x, groundY + 0.006, to.z);
+          pool.scale.set(0.8, 1.5, 1);
+          beamGroup.add(pool);
+
+          beamGroup.visible = lightsState;
+          scene.add(beamGroup);
+        }
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
+        let beamGroup = null;    // 近光光域（可见光锥 + 聚光 + 地面光斑），随灯开关
         function applyLights(on) {
           for (const m of lampMats) {
             if (on) {
@@ -508,6 +574,7 @@ enum ModelViewerAsset {
               m.emissiveIntensity = 0;
             }
           }
+          if (beamGroup) beamGroup.visible = !!on;
           needsRender = true;
         }
         window.jhSetLights = (on) => {
@@ -577,6 +644,7 @@ enum ModelViewerAsset {
           gltf.scene.position.x += 0.02 - center.x;
           gltf.scene.position.z += 0 - center.z;
           gltf.scene.position.y += 0.74 - center.y;
+          buildBeam(gltf.scene);
           needsRender = true;
           readyPending = true; // 首帧渲染完成后再上报 ready，避免揭掉 loading 后还有空窗
         });

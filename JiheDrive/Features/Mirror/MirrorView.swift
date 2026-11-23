@@ -213,8 +213,10 @@ struct MirrorView: View {
         }
         store.commitWiFi()
         store.commitDashboardIP()
+        store.commitCastToZeeho()
         let localIP = CPMirrorDiagnostics.localIPv4() ?? ""
-        controller.start(dashboardIP: store.dashboardIP, localIP: localIP)
+        controller.start(dashboardIP: store.dashboardIP, localIP: localIP,
+                         castToZeeho: store.castToZeeho)
     }
 
     // MARK: - 广播按钮（整屏镜像模式）
@@ -424,7 +426,8 @@ struct MirrorView: View {
 
     private func runChecks() async -> [CPMirrorDiagnostics.CheckResult] {
         await MainActor.run { runningChecks = true }
-        let results = await CPMirrorDiagnostics.preflight(dashboardIP: store.dashboardIP)
+        let results = await CPMirrorDiagnostics.preflight(dashboardIP: store.dashboardIP,
+                                                          includeDashboard: store.castToZeeho)
         await MainActor.run {
             checks = results
             runningChecks = false

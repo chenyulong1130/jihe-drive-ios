@@ -17,6 +17,21 @@ struct Vehicle3DSheet: View {
     /// 深色主题 → 全车灯点亮（不含转向灯）；浅色 → 熄灭。只改车灯自发光，不改场景光照。
     private var lightsOn: Bool { appearance.resolvedScheme == .dark }
 
+    // MARK: - 舞台配色跟随主题（浅色下不再是深色底）
+
+    private var stageDark: Bool { appearance.resolvedScheme == .dark }
+
+    private var stageGradientColors: [Color] {
+        stageDark
+            ? [Color(hex: 0x081018), Color(hex: 0x122236), Color(hex: 0x060B10)]
+            : [Color(hex: 0xE9EDF3), Color(hex: 0xF4F6F9), Color(hex: 0xDCE3EC)]
+    }
+
+    /// 舞台上的前景文字：深色舞台用白，浅色舞台用主题色
+    private var stageFg: Color { stageDark ? .white : Theme.label }
+    private var stageFgSoft: Color { stageDark ? Color.white.opacity(0.62) : Theme.secondary }
+    private var stageFgHint: Color { stageDark ? Color.white.opacity(0.7) : Theme.secondary }
+
     private var modelURL: URL? { vehicle.model3DURL }
 
     /// 云端真实坐垫状态；nil=未拿到或已过期（不拿本地 toggle 冒充）
@@ -62,17 +77,13 @@ struct Vehicle3DSheet: View {
     private func stage(height: CGFloat) -> some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(hex: 0x081018),
-                    Color(hex: 0x122236),
-                    Color(hex: 0x060B10)
-                ],
+                colors: stageGradientColors,
                 startPoint: .top,
                 endPoint: .bottom
             )
 
             RadialGradient(
-                colors: [Color(hex: 0x2F6FD0).opacity(0.30), Color.clear],
+                colors: [Color(hex: 0x2F6FD0).opacity(stageDark ? 0.30 : 0.14), Color.clear],
                 center: .init(x: 0.5, y: 0.44),
                 startRadius: 8,
                 endRadius: 260
@@ -125,7 +136,7 @@ struct Vehicle3DSheet: View {
                         .opacity(0.72)
                         .padding(.horizontal, 20)
                 }
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(stageFg.opacity(0.9))
             default:
                 photoStage
             }
@@ -163,7 +174,7 @@ struct Vehicle3DSheet: View {
                     .opacity(0.72)
                     .padding(.horizontal, 20)
             }
-            .foregroundStyle(.white.opacity(0.9))
+            .foregroundStyle(stageFg.opacity(0.9))
         } else {
             ModelLoadingSkeleton(scale: 1.2)
         }
@@ -202,14 +213,14 @@ struct Vehicle3DSheet: View {
                         Text("暂无车辆图片")
                             .font(Theme.footnote)
                     }
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(stageFgHint)
                 }
             }
             .frame(maxWidth: .infinity)
 
             Text("该车型接口未返回 3D 模型")
                 .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(stageFgSoft)
         }
     }
 
@@ -218,10 +229,10 @@ struct Vehicle3DSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(vehicle.name)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(stageFg)
                 Text(vehicle.model3DURL != nil ? "官方 3D 模型" : "官方车辆图片")
                     .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(stageFgSoft)
             }
 
             Spacer(minLength: 8)
@@ -233,7 +244,7 @@ struct Vehicle3DSheet: View {
                 } label: {
                     Image(systemName: "figure.seated.side")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(seatOpen ? Theme.brand : .white)
+                        .foregroundStyle(seatOpen ? Theme.brand : stageFg)
                         .frame(width: 36, height: 36)
                         .background(Circle().fill(.ultraThinMaterial))
                 }
@@ -247,7 +258,7 @@ struct Vehicle3DSheet: View {
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(stageFg)
                         .frame(width: 36, height: 36)
                         .background(Circle().fill(.ultraThinMaterial))
                 }
@@ -257,9 +268,9 @@ struct Vehicle3DSheet: View {
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(stageFg)
                     .frame(width: 36, height: 36)
                     .background(Circle().fill(.ultraThinMaterial))
             }
@@ -276,7 +287,7 @@ struct Vehicle3DSheet: View {
             Text("拖动旋转 · 双指缩放 · 双击复位")
                 .font(.system(size: 11, weight: .medium))
         }
-        .foregroundStyle(.white.opacity(0.7))
+        .foregroundStyle(stageFgHint)
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
         .background(Capsule().fill(.ultraThinMaterial))

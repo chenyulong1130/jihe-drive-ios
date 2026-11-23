@@ -85,12 +85,16 @@ final class CPReceiver {
         connections.removeAll()
     }
 
-    private func listen(port: UInt16, identity: CPAccessoryIdentity) {
+    /// port 为 nil 时使用系统分配的临时端口：7000 被占用时自动回退，
+    /// 实际端口经 onListening 回写引导会话的 StartSession 消息。
+    private func listen(port: UInt16?, identity: CPAccessoryIdentity) {
         let generation = self.generation
         do {
-            let candidate = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!)
+            let candidate = try NWListener(using: .tcp,
+                                           on: port.flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any)
             candidate.stateUpdateHandler = { [weak self, weak candidate] state in
-                guard let self, let candidate else { return }
+                guard let self, let candidate,
+                      self.generation == generation, self.listener === candidate else { return }
                 switch state {
                 case .ready:
                     guard let actualPort = candidate.port?.rawValue else {
@@ -98,9 +102,16 @@ final class CPReceiver {
                         return
                     }
                     self.log("CarPlay 控制监听器已在端口 \(actualPort) 就绪")
-                    self.onListening?(actualPort)
+                    DispatchQueue.main.async { [weak self] in self?.onListening?(actualPort) }
                 case .failed(let error):
-                    self.fail("监听器失败：\(error.localizedDescription)")
+                    if let port, case .posix(.EADDRINUSE) = error {
+                        self.log("端口 \(port) 已被占用，正在申请可用端口")
+                        candidate.cancel()
+                        self.listener = nil
+                        self.listen(port: nil, identity: identity)
+                    } else {
+                        self.fail("监听器失败：\(error.localizedDescription)")
+                    }
                 default:
                     break
                 }
@@ -137,6 +148,13 @@ final class CPReceiver {
             }
             listener = candidate
             candidate.start(queue: queue)
+        } catch let error as NWError {
+            if let port, case .posix(.EADDRINUSE) = error {
+                log("端口 \(port) 已被占用，正在申请可用端口")
+                listen(port: nil, identity: identity)
+            } else {
+                fail("无法创建监听器：\(error.localizedDescription)")
+            }
         } catch {
             fail("无法创建监听器：\(error.localizedDescription)")
         }

@@ -4,15 +4,16 @@ import ObjectiveC.runtime
 /// CoreAccessories 私有框架桥：让本机 iOS 把 App 当作「已连接的 Wi-Fi 配件」，
 /// 从而在直连传输上跑 iAP2 会话（同机 CarPlay 的入口）。
 ///
-/// 调用面（iOS 16–26 实测有效，系统升级需重新验证）：
+/// 参数与调用序严格对齐 CarWithin 的 DirectAccessoryTransport.m：
 ///   client      = [ACCTransportClient sharedClient]
-///   connection  = [client createConnectionWithType:2 andIdentifier:<id>]
+///   connection  = [client createConnectionWithType:2 andIdentifier:<id>]   ← 返回连接标识
 ///   endpoint    = [client createEndpointWithTransportType:2 andProtocol:4
-///                    andIdentifier:nil andDataOutHandler:<block>
-///                    forConnectionWithUUID:<uuid> publishConnection:YES]
-///   发送(App→iOS)  = [client processIncomingData:<data> forEndpointWithUUID:<uuid>]
-///   接收(iOS→App)  = dataOutHandler 回调（≤16KB/块）
-///   销毁           = destroyEndpointWithUUID / destroyConnectionWithUUID
+///                    andIdentifier:nil andDataOutHandler:<block 3 参数>
+///                    forConnectionWithUUID:<connection> publishConnection:YES]
+///   发送(App→iOS)  = [client processIncomingData:<data> forEndpointWithUUID:<endpoint>]
+///   接收(iOS→App) = dataOutHandler 第 3 个参数（NSData）
+///   销毁           = destroyEndpointWithUUID:<endpoint> / destroyConnectionWithUUID:<connection>
+/// 之前把新生成的 UUID 当作 connection/endpoint 标识传入，框架会以「拒绝发布」回应。
 final class CPDirectAccessoryTransport {
 
     enum TransportError: LocalizedError, CustomStringConvertible {
@@ -39,12 +40,20 @@ final class CPDirectAccessoryTransport {
     var onData: ((Data) -> Void)?
 
     private var client: AnyObject?
-    private var connection: AnyObject?
-    private var endpointUUID: UUID?
+    private var connection: AnyObject?   /// createConnectionWithType: 返回的连接标识
+    private var endpoint: AnyObject?     /// createEndpointWith… 返回的端点标识
+    private var generation = UUID()
     private var dataOutHandlerBox: Any?
     private(set) var isActive = false
 
     private static var cachedClient: AnyObject?
+
+    /// NSObject 侧的方法签名校验（CarWithin 的 HasMethod 等价实现）。
+    private static func hasMethod(_ object: AnyObject, _ name: String, _ arguments: Int) -> Bool {
+        let selector = NSSelectorFromString(name)
+        guard let target = object as? NSObject, target.responds(to: selector) else { return false }
+        return target.methodSignature(for: selector)?.numberOfArguments == arguments + 2
+    }
 
     /// 加载 CoreAccessories 框架并取出共享 client。
     private static func acquireClient() throws -> AnyObject {
@@ -72,97 +81,104 @@ final class CPDirectAccessoryTransport {
     /// 建立配件端点。`identifier` 是连接标识（用本机稳定 deviceID）。
     func start(withIdentifier identifier: String, transportType: Int) throws {
         stop()
+        guard transportType == 2 || transportType == 8 else {
+            throw TransportError.refused("不支持的传输类型")
+        }
         let client = try Self.acquireClient()
 
-        // connection = [client createConnectionWithType:<type> andIdentifier:<id>]
-        let createConnectionSelector = NSSelectorFromString("createConnectionWithType:andIdentifier:")
-        guard client.responds(to: createConnectionSelector) else {
-            throw TransportError.methodMissing("createConnectionWithType:andIdentifier:")
+        let createName = "createConnectionWithType:andIdentifier:"
+        guard Self.hasMethod(client, createName, 2) else {
+            throw TransportError.methodMissing(createName)
         }
-        let createConnectionMethod = class_getInstanceMethod(object_getClass(client), createConnectionSelector)
+        let createSelector = NSSelectorFromString(createName)
+        let createConnectionMethod = class_getInstanceMethod(object_getClass(client), createSelector)
         typealias CreateConnectionFn = @convention(c) (AnyObject, Selector, Int, AnyObject?) -> Unmanaged<AnyObject>?
         var connectionObject: AnyObject?
         if let imp = createConnectionMethod.map({ method_getImplementation($0) }) {
             let fn = unsafeBitCast(imp, to: CreateConnectionFn.self)
-            connectionObject = fn(client, createConnectionSelector, transportType, identifier as AnyObject)?
+            connectionObject = fn(client, createSelector, 2, identifier as AnyObject)?
                 .takeUnretainedValue()
+            // 类型 2 失败时退回类型 1
             if connectionObject == nil {
-                // 类型 2 失败时退回类型 1
-                connectionObject = fn(client, createConnectionSelector, 1, identifier as AnyObject)?
+                connectionObject = fn(client, createSelector, 1, identifier as AnyObject)?
                     .takeUnretainedValue()
             }
         }
         guard let connection = connectionObject else {
             throw TransportError.refused("连接创建")
         }
+        self.connection = connection
+
+        let endpointName = "createEndpointWithTransportType:andProtocol:andIdentifier:"
+            + "andDataOutHandler:forConnectionWithUUID:publishConnection:"
+        guard Self.hasMethod(client, endpointName, 6) else {
+            throw TransportError.methodMissing(endpointName)
+        }
 
         let generation = UUID()
-        let dataOutHandler: @convention(block) (NSData) -> Void = { [weak self] data in
-            guard let self else { return }
-            self.onData?(data as Data)
+        self.generation = generation
+        // 回调是 3 个参数（来源 NSString / 目标 NSString / 数据 NSData），
+        // 数据固定取第 3 个；用 1 参数 block 会读错寄存器里的对象。
+        let dataOutHandler: @convention(block) (AnyObject?, AnyObject?, NSData?) -> Void = { [weak self] _, _, data in
+            guard let data, data.count <= 65536 else { return }
+            let copy = data as Data
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isActive, self.generation == generation else { return }
+                self.onData?(copy)
+            }
         }
-        // 块对象与 UUID 装箱为 ObjC 对象传入 IMP；同时持有块防释放
         let handlerObject = unsafeBitCast(dataOutHandler, to: AnyObject.self)
         self.dataOutHandlerBox = handlerObject
 
-        // endpoint = [client createEndpointWithTransportType:2 andProtocol:4 andIdentifier:nil
-        //             andDataOutHandler:<block> forConnectionWithUUID:<uuid> publishConnection:YES]
-        let createEndpointSelector = NSSelectorFromString(
-            "createEndpointWithTransportType:andProtocol:andIdentifier:andDataOutHandler:"
-            + "forConnectionWithUUID:publishConnection:")
-        guard client.responds(to: createEndpointSelector) else {
-            throw TransportError.methodMissing("createEndpointWithTransportType:…")
+        let endpointSelector = NSSelectorFromString(endpointName)
+        guard let endpointMethod = class_getInstanceMethod(object_getClass(client), endpointSelector) else {
+            throw TransportError.methodMissing(endpointName)
         }
-        let createEndpointMethod = class_getInstanceMethod(type(of: client), createEndpointSelector)
         typealias CreateEndpointFn = @convention(c) (AnyObject, Selector, Int, Int, AnyObject?, AnyObject?, AnyObject?, Bool) -> Unmanaged<AnyObject>?
-        var endpointObject: AnyObject?
-        if let imp = createEndpointMethod.map({ method_getImplementation($0) }) {
-            let fn = unsafeBitCast(imp, to: CreateEndpointFn.self)
-            endpointObject = fn(client, createEndpointSelector, transportType, 4, NSNull(),
-                                handlerObject, generation as NSUUID, true)?.takeUnretainedValue()
-        }
-        guard let endpoint = endpointObject else {
+        let fn = unsafeBitCast(method_getImplementation(endpointMethod), to: CreateEndpointFn.self)
+        // forConnectionWithUUID 必须是 createConnectionWithType 返回的连接标识，
+        // 不能是新生成的 UUID——否则框架直接拒绝发布 iAP2 endpoint。
+        let endpointObject = fn(client, endpointSelector, transportType, 4,
+                                nil, handlerObject, connection, true)?
+            .takeUnretainedValue()
+        guard let endpointObject else {
+            self.connection = nil
+            self.dataOutHandlerBox = nil
             throw TransportError.refused("iAP2 endpoint 发布")
         }
 
         self.client = client
-        self.connection = connection
-        self.endpointUUID = generation
+        self.endpoint = endpointObject
         self.isActive = true
-        _ = endpoint // 保留 endpoint 引用（框架以 UUID 索引，防提前释放）
     }
 
     /// 向本机 iOS 发送数据（配件 → 手机方向）。
     func send(_ data: Data) throws {
-        guard let client, let endpointUUID, isActive else { throw TransportError.sendFailure }
+        guard let client, let endpoint, isActive else { throw TransportError.sendFailure }
         let selector = NSSelectorFromString("processIncomingData:forEndpointWithUUID:")
-        guard client.responds(to: selector) else {
+        guard Self.hasMethod(client, "processIncomingData:forEndpointWithUUID:", 2) else {
             throw TransportError.methodMissing("processIncomingData:forEndpointWithUUID:")
         }
         guard let nsClient = client as? NSObject else { throw TransportError.sendFailure }
-        nsClient.perform(selector, with: data, with: endpointUUID)
+        nsClient.perform(selector, with: data, with: endpoint)
     }
 
     func stop() {
-        guard isActive else { return }
-        isActive = false
-        if let client {
-            if let endpointUUID {
-                let destroyEndpoint = NSSelectorFromString("destroyEndpointWithUUID:")
-                if client.responds(to: destroyEndpoint) {
-                    client.perform(destroyEndpoint, with: endpointUUID)
-                }
-            }
-            if connection != nil {
-                let destroyConnection = NSSelectorFromString("destroyConnectionWithUUID:")
-                if client.responds(to: destroyConnection) {
-                    client.perform(destroyConnection)
-                }
-            }
+        if let client, let endpoint,
+           Self.hasMethod(client, "destroyEndpointWithUUID:", 1),
+           let nsClient = client as? NSObject {
+            nsClient.perform(NSSelectorFromString("destroyEndpointWithUUID:"), with: endpoint)
         }
+        if let client, let connection,
+           Self.hasMethod(client, "destroyConnectionWithUUID:", 1),
+           let nsClient = client as? NSObject {
+            nsClient.perform(NSSelectorFromString("destroyConnectionWithUUID:"), with: connection)
+        }
+        isActive = false
+        generation = UUID()
         client = nil
         connection = nil
-        endpointUUID = nil
+        endpoint = nil
         dataOutHandlerBox = nil
         onData = nil
     }
