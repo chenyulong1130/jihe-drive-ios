@@ -424,6 +424,10 @@ enum ModelViewerAsset {
         const sun = new THREE.DirectionalLight(0xffffff, 1.6);
         sun.position.set(5, 8, 5);
         scene.add(sun);
+        // 反侧补光（对齐 demo）：只有一盏主光时背光面会明显偏暗，车漆看起来"半黑半白"
+        const fill = new THREE.DirectionalLight(0xffffff, 1.2);
+        fill.position.set(-6, 4, -4);
+        scene.add(fill);
 
         // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
         const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);
