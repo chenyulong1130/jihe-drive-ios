@@ -158,9 +158,12 @@ struct BatteryInfo: Identifiable, Hashable {
         let powerRaw = JSONDig.first(json, keys: ["batteryPower", "power", "chargePower"])
         let power = optionalDouble(powerRaw)
         let type = stringValue(JSONDig.first(json, keys: ["batteryType", "type"]))
-        let rawState = JSONDig.first(json, keys: ["batteryState", "batteryStateStr", "chargeStateStr", "state"])
+        // 键序即优先级：chargeState/chargeStateStr 是真实充电状态（实测充电中 "1"/"充电中"）。
+        // batteryState/batteryPowerState 是恒为 "0" 的无关字段，绝不能排在前面——
+        // 旧键序让它们永远遮蔽真实状态，导致任何版本都显示不出"充电中"。
+        let rawState = JSONDig.first(json, keys: ["chargeStateStr", "batteryStateStr", "chargeState", "batteryState", "state"])
         let powerState = JSONDig.first(json, keys: [
-            "batteryPowerState", "chargeState", "whetherChargeState"
+            "chargeState", "whetherChargeState", "batteryPowerState"
         ])
         let pulled = stringValue(JSONDig.first(json, keys: ["batteryPullOutFlag", "pullOutFlag"]))
         let abnormal = stringValue(JSONDig.first(json, keys: ["batteryAbnormalType", "abnormalType"]))
@@ -194,7 +197,8 @@ struct BatteryInfo: Identifiable, Hashable {
         ]))
 
         let parsedState = stateText(rawState, powerState: powerState)
-        let charging = parsedState.contains("充") || boolCharge(powerState)
+        // 不能用 contains("充")："未充电"也含"充"字，会误判成充电中
+        let charging = parsedState == "充电中" || boolCharge(powerState)
         let online = optionalOnline(JSONDig.first(json, keys: ["onlineStatus", "isOnline", "online"]))
         let soc = level > 0 ? level : grade
 

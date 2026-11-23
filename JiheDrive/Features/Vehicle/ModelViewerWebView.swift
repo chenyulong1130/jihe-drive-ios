@@ -533,9 +533,11 @@ enum ModelViewerAsset {
         function makeBeamCone() {
           const g = new THREE.ConeGeometry(1, 1, 32, 1, true);
           g.translate(0, -0.5, 0); // 锥顶移到原点
+          // 画布是透明背景（露出 SwiftUI 舞台渐变），AdditiveBlending 的颜色会被
+          // alpha 合成吃掉——透明画布上光锥直接消失。必须用普通混合。
           const m = new THREE.MeshBasicMaterial({
-            color: 0xfff2d0, transparent: true, opacity: 0.16,
-            blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false
+            color: 0xfff2d0, transparent: true, opacity: 0.22,
+            blending: THREE.NormalBlending, side: THREE.DoubleSide, depthWrite: false
           });
           return new THREE.Mesh(g, m);
         }
@@ -548,10 +550,11 @@ enum ModelViewerAsset {
           const c = document.createElement('canvas');
           c.width = 256; c.height = 256;
           const g = c.getContext('2d');
-          const grad = g.createRadialGradient(128, 128, 40, 128, 128, 127);
+          // 边缘尽早淡出（0.45 就开始），低视角下地面盘边缘才不会显形成一条灰线
+          const grad = g.createRadialGradient(128, 128, 30, 128, 128, 127);
           grad.addColorStop(0, '#ffffff');
-          grad.addColorStop(0.72, '#ffffff');
-          grad.addColorStop(1, '#000000');
+          grad.addColorStop(0.45, '#ffffff');
+          grad.addColorStop(0.98, '#000000');
           g.fillStyle = grad;
           g.fillRect(0, 0, 256, 256);
           return new THREE.CanvasTexture(c);
@@ -597,8 +600,7 @@ enum ModelViewerAsset {
           if (!beamGroup || !beamOrigin) return;
           const on = lightsState;
           beamGroup.visible = on;
-          hemi.intensity = on ? 0.9 : 1.6;  // 开灯压暗环境光突出光束（demo 夜间模式同款）
-          sun.intensity = on ? 1.0 : 1.6;
+          // 开灯不压暗环境光（用户要求：日间观感一致，光锥靠普通混合保证可见）
           if (!on) return;
           aimBeam(beams.near, beamOrigin, NEAR_DIR, 3.0, 0.55); // 近光：短宽光锥
           beams.near.visible = true;
