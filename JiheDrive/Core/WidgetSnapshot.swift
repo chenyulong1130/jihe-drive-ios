@@ -11,6 +11,10 @@ struct WidgetSnap: Equatable {
     var charging = false
     var locked = true
     var online = false
+    /// 坐垫：1=锁止/关闭，0=已打开，-1=未知（云端没给）
+    var seatClosed = -1
+    /// 坐垫状态采样时刻；0 表示沿用整份快照的 updatedAt
+    var seatAt = 0.0
     var todayKm = 0.0
     var todayMin = 0
     var lastKm = 0.0
@@ -42,6 +46,16 @@ struct WidgetSnap: Equatable {
         max(pointsToday, todaySignScore + (communityDone ? 3 : 0))
     }
 
+    /// 跨进程传递的坐垫状态，超过 10 分钟按未知处理
+    var seatState: SeatState? {
+        guard seatClosed == 0 || seatClosed == 1 else { return nil }
+        let at = seatAt > 0 ? Date(timeIntervalSince1970: seatAt)
+                            : Date(timeIntervalSince1970: updatedAt)
+        return SeatState(isClosed: seatClosed == 1, sampledAt: at)
+    }
+
+    var seatOpen: Bool? { seatState?.isOpen() }
+
     var dictionary: [String: Any] {
         [
             "loggedIn": loggedIn,
@@ -52,6 +66,8 @@ struct WidgetSnap: Equatable {
             "charging": charging,
             "locked": locked,
             "online": online,
+            "seatClosed": seatClosed,
+            "seatAt": seatAt,
             "todayKm": todayKm,
             "todayMin": todayMin,
             "lastKm": lastKm,
@@ -89,6 +105,8 @@ struct WidgetSnap: Equatable {
         snap.charging = bool(raw["charging"])
         snap.locked = bool(raw["locked"], fallback: true)
         snap.online = bool(raw["online"])
+        snap.seatClosed = int(raw["seatClosed"], fallback: -1)
+        snap.seatAt = double(raw["seatAt"])
         snap.todayKm = double(raw["todayKm"])
         snap.todayMin = int(raw["todayMin"])
         snap.lastKm = double(raw["lastKm"])
@@ -211,6 +229,11 @@ enum WidgetSnapshot {
             snap.rangeKm = vehicle.rangeKm
             snap.locked = vehicle.isLocked
             snap.online = vehicle.isOnline
+            // 没拿到就不覆盖旧值：V2 到位前别把已有坐垫状态抹成未知
+            if let seat = vehicle.seat {
+                snap.seatClosed = seat.isClosed ? 1 : 0
+                snap.seatAt = seat.sampledAt?.timeIntervalSince1970 ?? 0
+            }
             snap.charging = vehicle.isCharging
             snap.totalMile = vehicle.totalMileKm
             snap.monthMile = vehicle.monthMileage ?? "--"
@@ -342,6 +365,8 @@ enum WidgetSnapshot {
             snap.charging = old.charging
             snap.locked = old.locked
             snap.online = old.online
+            snap.seatClosed = old.seatClosed
+            snap.seatAt = old.seatAt
             snap.imageURL = old.imageURL
             snap.todayKm = old.todayKm
             snap.todayMin = old.todayMin
@@ -355,6 +380,10 @@ enum WidgetSnapshot {
         if snap.rangeKm <= 0, old.rangeKm > 0 { snap.rangeKm = old.rangeKm }
         if snap.vin.isEmpty { snap.vin = old.vin }
         if snap.name.isEmpty { snap.name = old.name }
+        if snap.seatClosed == -1, old.seatClosed != -1 {
+            snap.seatClosed = old.seatClosed
+            snap.seatAt = old.seatAt
+        }
         if snap.imageURL.isEmpty { snap.imageURL = old.imageURL }
         if snap.todayKm == 0, old.todayKm > 0 { snap.todayKm = old.todayKm }
         if snap.todayMin == 0, old.todayMin > 0 { snap.todayMin = old.todayMin }

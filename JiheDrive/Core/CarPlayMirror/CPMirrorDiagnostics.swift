@@ -26,14 +26,16 @@ enum CPMirrorDiagnostics {
     }
 
     /// 配件身份：直接走 load()——Keychain / 内置资源 / IdentityImport 暂存目录
-    /// 都会被尝试导入，报错信息来自真实失败原因（缺失 / 不完整 / 不配对）。
+    /// 都会被尝试导入，报错信息来自真实失败原因（缺失 / 不完整 / 不配对），
+    /// 并附带构建号与各来源状态，便于区分「装的包没有内置身份」和「导入失败」。
     static func checkIdentity() async -> CheckResult {
         do {
             _ = try CPAccessoryIdentity.load()
             return CheckResult(name: "配件身份", passed: true, detail: "证书链与私钥配对自检通过", warning: false)
         } catch {
             return CheckResult(name: "配件身份", passed: false,
-                               detail: error.localizedDescription, warning: false)
+                               detail: error.localizedDescription + "\n" + CPAccessoryIdentity.diagnosticSummary(),
+                               warning: false)
         }
     }
 

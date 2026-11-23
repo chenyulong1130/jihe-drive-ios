@@ -131,6 +131,19 @@ struct CPAccessoryIdentity {
         }
     }
 
+    /// 诊断摘要：构建号 + 三个身份来源的文件级状态，不触发导入。
+    /// 用于预检失败时定位「包太旧没内置身份」还是「文件在但导入失败」。
+    static func diagnosticSummary() -> String {
+        let build = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "?"
+        let bundled = [
+            Bundle.main.url(forResource: "certificate", withExtension: "p7b"),
+            Bundle.main.url(forResource: "leaf", withExtension: "cer"),
+            Bundle.main.url(forResource: "private", withExtension: "x963"),
+        ].filter { $0 != nil && (try? Data(contentsOf: $0!)) != nil }.count
+        let keychain = readKeychain() != nil
+        return "构建 \(build) · 内置身份 \(bundled)/3 · Keychain \(keychain ? "已有" : "空") · 暂存目录 \(hasStagedFiles() ? "有文件" : "空")"
+    }
+
     private static func query(account: String, returnData: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

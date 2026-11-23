@@ -19,6 +19,14 @@ struct Vehicle3DSheet: View {
 
     private var modelURL: URL? { vehicle.model3DURL }
 
+    /// 云端真实坐垫状态；nil=未拿到或已过期（不拿本地 toggle 冒充）
+    private var realSeatOpen: Bool? { vehicle.seat?.isOpen() }
+
+    private var seatCaption: String {
+        guard let open = realSeatOpen else { return "未知" }
+        return open ? "已打开" : "已关闭"
+    }
+
     var body: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
@@ -30,11 +38,22 @@ struct Vehicle3DSheet: View {
         .background(Theme.groupedBackground.ignoresSafeArea())
         .sheetChrome()
         .task(id: vehicle.vinNo) {
+            // 打开面板先按真实车况摆坐垫，按钮仍然是预览用的开合控制
+            if let open = realSeatOpen {
+                seatOpen = open
+                seatToken += 1
+            }
             if vehicle.isGLBModel {
                 await loadGLB()
             } else {
                 loader.restore(vin: vehicle.vinNo, url: modelURL)
             }
+        }
+        .onChange(of: realSeatOpen) { _, open in
+            // 后台轮询拿到新状态时同步模型；过期/未知时保留当前预览不折腾
+            guard let open, open != seatOpen else { return }
+            seatOpen = open
+            seatToken += 1
         }
     }
 
@@ -219,7 +238,7 @@ struct Vehicle3DSheet: View {
                         .background(Circle().fill(.ultraThinMaterial))
                 }
                 .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-                .accessibilityLabel(seatOpen ? "关闭坐垫" : "开启坐垫")
+                .accessibilityLabel("切换模型坐垫，实际坐垫\(seatCaption)")
             }
 
             if vehicle.model3DURL != nil {
@@ -283,6 +302,12 @@ struct Vehicle3DSheet: View {
                             metric("车锁", vehicle.isLocked ? "已上锁" : "未锁", vehicle.isLocked ? Theme.label : Theme.orange)
                             metric("状态", vehicle.isOnline ? "在线" : "离线", vehicle.isOnline ? Theme.green : Theme.secondary)
                             metric("信号", "\(vehicle.signalLevel) 级", Theme.teal)
+                            metric(
+                                "坐垫",
+                                seatCaption,
+                                realSeatOpen == nil ? Theme.secondary
+                                    : (realSeatOpen == true ? Theme.orange : Theme.label)
+                            )
                         }
                     }
                 }

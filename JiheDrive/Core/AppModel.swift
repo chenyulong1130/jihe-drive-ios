@@ -253,6 +253,8 @@ final class AppModel: ObservableObject {
             async let infoTask = client.get("/v1.0/app/cfmotoserverapp/batteryInfo/\(vin)")
             let v2Res = try? await v2Task
             let infoRes = try? await infoTask
+            // 同一份 V2 还带坐垫锁状态，别浪费一次请求
+            let seat = v2Res.flatMap { Vehicle.parseSeat(from: $0) }
 
             var items = BatteryInfo.parse(infoRes ?? [:])
             let skeleton = BatteryInfo.parse(v2Res ?? [:])
@@ -272,6 +274,14 @@ final class AppModel: ObservableObject {
             }
 
             guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
+            if let seat {
+                if detailVehicle?.vinNo == vin {
+                    detailVehicle = detailVehicle?.withSeat(seat)
+                }
+                if let index = vehicles.firstIndex(where: { WidgetSnapshot.sameVin($0.vinNo, vin) }) {
+                    vehicles[index] = vehicles[index].withSeat(seat)
+                }
+            }
             if items.isEmpty, let vehicle = selectedVehicle, WidgetSnapshot.sameVin(vehicle.vinNo, vin) {
                 items = [BatteryInfo.fallback(from: vehicle)]
             }
@@ -290,6 +300,8 @@ final class AppModel: ObservableObject {
             }
             if items.isEmpty {
                 batteryError = "云端暂未返回电池数据"
+                // 没有电池数据也要把刚到的坐垫状态推给小组件
+                if seat != nil { WidgetSnapshot.publish(from: self) }
             }
         } catch let error as ZeehoError {
             batteryError = error.localizedDescription
@@ -414,6 +426,13 @@ final class AppModel: ObservableObject {
         snap.charging = vehicle.isCharging
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline
+        if let seat = vehicle.seat {
+            snap.seatClosed = seat.isClosed ? 1 : 0
+            snap.seatAt = seat.sampledAt?.timeIntervalSince1970 ?? 0
+        } else if let previous, previous.seatClosed == 0 || previous.seatClosed == 1 {
+            snap.seatClosed = previous.seatClosed
+            snap.seatAt = previous.seatAt
+        }
         snap.imageURL = vehicle.imageURL?.absoluteString ?? previous?.imageURL ?? ""
         snap.imageData = nil
         persistVehicleImage(vehicle)

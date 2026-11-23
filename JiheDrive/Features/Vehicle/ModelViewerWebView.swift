@@ -479,27 +479,22 @@ enum ModelViewerAsset {
         };
 
         // ---------- 灯光：全车灯（不含转向灯），只改材质自发光，不动场景光照 ----------
-        const LAMP_CONF = {
-          'L-LowBeam':   [0xfff2d0, 6],
-          'L-HighBeam':  [0xffffff, 9],
-          'L-TailLight': [0xff1a00, 5],
-          'L-BrakeLight':[0xff1a00, 14]
-        };
-        // 各车型节点命名不一，按节点名/材质名关键词兜底（排除转向灯）
-        const LAMP_SKIP = ['turn', 'indicator', 'blinker', 'winker', 'direction', 'plug', 'lightpoint'];
-        function lampHit(name) {
-          const n = String(name || '').toLowerCase().replace(/[\\s\\-_.]/g, '');
-          if (!n) return false;
-          for (const s of LAMP_SKIP) if (n.indexOf(s) >= 0) return false;
-          return ['lowbeam','highbeam','headlight','headlamp','head','beam','taillight','tail','brake','lamp','light']
-            .some((k) => n.indexOf(k) >= 0);
-        }
-        function lampSpec(name) {
-          const n = String(name || '').toLowerCase();
-          if (n.indexOf('brake') >= 0) return [0xff1a00, 14];
-          if (n.indexOf('tail') >= 0) return [0xff1a00, 5];
-          if (n.indexOf('high') >= 0) return [0xffffff, 9];
-          return [0xfff2d0, 6];
+        // AE4 / AE8 车模已解包核对，灯节点命名一致：L-LowBeam / L-HighBeam /
+        //   L-TailLight / L-BrakeLight / L-TurnSignal-L / L-TurnSignal-R，AE8 另有 L-LightBar / K-Light。
+        // 只认真实灯节点名，不用裸 brake/light 关键词猜——旧逻辑会把 FW/RW-BrakeFlange-T（刹车盘）
+        //   当成刹车灯，深色主题点灯时刹车盘发红光。刹车盘(flange)与转向灯(turn)一律排除。
+        function lampSpec(nodeName) {
+          const n = String(nodeName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (!n) return null;
+          // 灯节点以 L- / K- 开头；刹车盘 FW/RW-BrakeFlange、转向灯 L-TurnSignal 都不是灯
+          if (n.charAt(0) !== 'l' && n.charAt(0) !== 'k') return null;
+          if (n.indexOf('flange') >= 0 || n.indexOf('turn') >= 0) return null;
+          if (n.indexOf('lightbar') >= 0) return [0xfff2d0, 10];
+          if (n.indexOf('brakelight') >= 0) return [0xff1a00, 14];
+          if (n.indexOf('taillight') >= 0 || n === 'klight') return [0xff1a00, 8];
+          if (n.indexOf('highbeam') >= 0) return [0xffffff, 14];
+          if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
+          return null;
         }
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
@@ -536,7 +531,7 @@ enum ModelViewerAsset {
             pivot.add(seat);
             seat.position.sub(HINGE);
           }
-          // 统一收集灯材质：精确节点名优先，节点/材质名关键词兜底。
+          // 统一收集灯材质：只按真实灯节点名（lampSpec），不再用材质名/裸关键词兜底。
           // 材质可能是数组；unlit 材质没有 emissive，要换成标准材质，否则点灯无效。
           gltf.scene.traverse((o) => {
             if (!o.isMesh) return;
@@ -546,8 +541,7 @@ enum ModelViewerAsset {
             const processed = [];
             for (const mat of list) {
               if (!mat) { processed.push(mat); continue; }
-              const spec = LAMP_CONF[o.name] ||
-                ((lampHit(o.name) || lampHit(mat.name)) ? lampSpec((o.name || '') + ' ' + (mat.name || '')) : null);
+              const spec = lampSpec(o.name);
               if (!spec) { processed.push(mat); continue; }
               let m = mat;
               if (!m.emissive) {

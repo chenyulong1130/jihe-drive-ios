@@ -62,6 +62,17 @@ enum WidgetLiveSync {
             snap.online = stored?.online
                 ?? (sameExisting ? existing?.vehicle?.isOnline : nil)
                 ?? false
+            if let stored, stored.seatClosed == 0 || stored.seatClosed == 1 {
+                snap.seatClosed = stored.seatClosed
+                // 没有单独时间戳就钉在旧快照的更新时间，切车后不会被当新鲜状态
+                snap.seatAt = stored.seatAt > 0 ? stored.seatAt : stored.updatedAt
+            } else if let seat = sameExisting ? existing?.vehicle?.seat : nil {
+                snap.seatClosed = seat.isClosed ? 1 : 0
+                snap.seatAt = seat.sampledAt?.timeIntervalSince1970 ?? 0
+            } else {
+                snap.seatClosed = -1
+                snap.seatAt = 0
+            }
             snap.imageURL = stored?.imageURL
                 ?? (sameExisting ? existing?.vehicle?.imageURL?.absoluteString : nil)
                 ?? ""
@@ -81,7 +92,7 @@ enum WidgetLiveSync {
         var vehicle: Vehicle?
         let tire: TireReading?
         let ride: RideTrackService.RideExtra?
-        let battery: (soc: Int, range: Int, charging: Bool)?
+        let battery: (soc: Int, range: Int, charging: Bool, seat: SeatState?)?
         if mode == .reuse, let existingVehicle = existing?.vehicle,
            wantedVin == nil || WidgetSnapshot.sameVin(existingVehicle.vinNo, wantedVin) {
             vehicle = existingVehicle
@@ -193,6 +204,11 @@ enum WidgetLiveSync {
             if battery.soc > 0 { snap.soc = battery.soc }
             if battery.range > 0 { snap.rangeKm = battery.range }
             snap.charging = battery.charging
+            // V2 是坐垫状态的权威来源，覆盖首页接口可能带来的旧值
+            if let seat = battery.seat {
+                snap.seatClosed = seat.isClosed ? 1 : 0
+                snap.seatAt = seat.sampledAt?.timeIntervalSince1970 ?? snap.updatedAt
+            }
         }
         if let cached = cachedSnap, WidgetSnapshot.hasVehicleData(cached) {
             let sameCar = WidgetSnapshot.sameVin(cached.vin, wantedVin ?? snap.vin)
@@ -247,12 +263,13 @@ enum WidgetLiveSync {
 
     // MARK: - Vehicle
 
-    private static func fetchBattery(vin: String?) async -> (soc: Int, range: Int, charging: Bool)? {
+    private static func fetchBattery(vin: String?) async -> (soc: Int, range: Int, charging: Bool, seat: SeatState?)? {
         guard let vin, !vin.isEmpty else { return nil }
         async let v2Task = ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/vehicleHomePageV2/\(vin)")
         async let infoTask = ZeehoClient.shared.get("/v1.0/app/cfmotoserverapp/batteryInfo/\(vin)")
         let v2Res = try? await v2Task
         let infoRes = try? await infoTask
+        let seat = v2Res.flatMap { Vehicle.parseSeat(from: $0) }
         var items = BatteryInfo.parse(infoRes ?? [:])
         let skeleton = BatteryInfo.parse(v2Res ?? [:])
         if let live = items.first, let frame = skeleton.first {
@@ -261,7 +278,7 @@ enum WidgetLiveSync {
             items = skeleton
         }
         guard let battery = items.first else { return nil }
-        return (battery.level, battery.rangeKm ?? 0, battery.isLiveCharging)
+        return (battery.level, battery.rangeKm ?? 0, battery.isLiveCharging, seat)
     }
 
     private static func fetchVehicle(hint: Vehicle?, wanted: String?) async -> Vehicle? {
@@ -330,6 +347,10 @@ enum WidgetLiveSync {
         snap.charging = vehicle.isCharging
         snap.locked = vehicle.isLocked
         snap.online = vehicle.isOnline
+        if let seat = vehicle.seat {
+            snap.seatClosed = seat.isClosed ? 1 : 0
+            snap.seatAt = seat.sampledAt?.timeIntervalSince1970 ?? snap.updatedAt
+        }
         if vehicle.totalMileKm > 0 { snap.totalMile = vehicle.totalMileKm }
         snap.monthMile = vehicle.monthMileage ?? snap.monthMile
         if let url = vehicle.imageURL?.absoluteString, !url.isEmpty {

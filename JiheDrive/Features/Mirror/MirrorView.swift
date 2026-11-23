@@ -2,7 +2,7 @@ import SwiftUI
 import ReplayKit
 
 /// 投屏页：同机 CarPlay / 整屏镜像两种模式。
-/// 布局从上到下：模式 → 状态 → 预览 → 网络 → 仪表 → 自检 → 日志，说明文字压到最少。
+/// 布局从上到下：模式 → 状态（含自检摘要，点开弹窗看详情）→ 连接 → 日志，说明文字压到最少。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
@@ -15,6 +15,7 @@ struct MirrorView: View {
     @State private var exportURL: URL?
     @State private var timer: Timer?
     @State private var showFullscreen = false
+    @State private var showPreflight = false
     @State private var pollTick = 0
 
     var body: some View {
@@ -31,14 +32,8 @@ struct MirrorView: View {
                     previewCard.staggerIn(2)
                 }
 
-                SectionHeader("网络")
-                networkCard.staggerIn(3)
-
-                SectionHeader("仪表")
-                dashboardCard.staggerIn(4)
-
-                SectionHeader("自检")
-                preflightCard.staggerIn(5)
+                SectionHeader("连接")
+                connectionCard.staggerIn(3)
 
                 if !controller.logs.isEmpty {
                     SectionHeader("日志")
@@ -67,6 +62,9 @@ struct MirrorView: View {
                 ActivitySheet(url: exportURL)
             }
         }
+        .sheet(isPresented: $showPreflight) {
+            preflightSheet
+        }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
         }
@@ -87,7 +85,7 @@ struct MirrorView: View {
 
     private var statusCard: some View {
         AppleCard(padding: 18) {
-            VStack(spacing: 16) {
+            VStack(spacing: 14) {
                 HStack(spacing: 12) {
                     Image(systemName: statusIcon)
                         .font(.system(size: 26, weight: .semibold))
@@ -114,15 +112,37 @@ struct MirrorView: View {
                     }
                 }
 
-                if let hint = store.identityHint {
-                    SoftBanner(text: hint, icon: "key.horizontal.fill", tone: Theme.orange)
-                }
-
                 if mode == "carplay" {
                     startButton
                 } else {
                     broadcastButton
                 }
+
+                // 自检摘要：一行带过，点开弹窗看逐项详情
+                Button {
+                    showPreflight = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: preflightSummaryIcon)
+                            .font(.system(size: 15))
+                            .foregroundStyle(preflightSummaryColor)
+                        Text(preflightSummaryText)
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text("详情")
+                            .font(Theme.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.brand)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                    .padding(.top, 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(runningChecks)
             }
         }
     }
@@ -182,12 +202,13 @@ struct MirrorView: View {
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
     }
 
-    /// 启动前预检：硬性失败（身份缺失/无本机地址）不启动，其余提示后允许启动。
+    /// 启动前预检：硬性失败（身份缺失/无本机地址）不启动，自动弹出自检详情展示原因。
     private func startCarPlayAfterPreflight() async {
         let results = await runChecks()
         let hardFailures = results.filter { !$0.passed && !$0.warning }
         guard hardFailures.isEmpty else {
             controller.stop()
+            await MainActor.run { showPreflight = true }
             return
         }
         store.commitWiFi()
@@ -222,11 +243,12 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 网络卡
+    // MARK: - 连接卡（网络 + 仪表合并，减少碎卡）
 
-    private var networkCard: some View {
+    private var connectionCard: some View {
         AppleCard(padding: 18) {
             VStack(spacing: 14) {
+                // 网络
                 HStack(spacing: 10) {
                     Image(systemName: "wifi")
                         .foregroundStyle(Theme.brand)
@@ -268,15 +290,10 @@ struct MirrorView: View {
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
                 }
-            }
-        }
-    }
 
-    // MARK: - 仪表卡
+                HairLine()
 
-    private var dashboardCard: some View {
-        AppleCard(padding: 18) {
-            VStack(spacing: 14) {
+                // 仪表
                 HStack(spacing: 10) {
                     Image(systemName: "gauge.with.needle")
                         .foregroundStyle(Theme.brand)
@@ -314,74 +331,95 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 自检卡（通过项一行带过，失败项才展开详情）
+    // MARK: - 自检：摘要行 + 详情弹窗（不再占页面位置）
 
-    private var preflightCard: some View {
-        AppleCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(runningChecks ? "正在自检…" : "共 \(checks.count) 项")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                    Spacer(minLength: 0)
-                    Button {
-                        Task { await runChecks() }
-                    } label: {
-                        if runningChecks {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Theme.secondary)
-                                .frame(width: 32, height: 32)
-                                .background(Circle().fill(Theme.surfaceAlt))
+    private var preflightSummaryText: String {
+        if runningChecks { return "正在自检…" }
+        if checks.isEmpty { return "尚未自检" }
+        let failed = checks.filter { !$0.passed }
+        if failed.isEmpty { return "自检全部通过（\(checks.count) 项）" }
+        let names = failed.map(\.name).joined(separator: "、")
+        return "自检 \(checks.count - failed.count)/\(checks.count) 未全过：\(names)"
+    }
+
+    private var preflightSummaryIcon: String {
+        if runningChecks || checks.isEmpty { return "circle.dotted" }
+        let failed = checks.filter { !$0.passed }
+        if failed.isEmpty { return "checkmark.circle.fill" }
+        return failed.contains { !$0.warning } ? "xmark.circle.fill" : "exclamationmark.triangle.fill"
+    }
+
+    private var preflightSummaryColor: Color {
+        if runningChecks || checks.isEmpty { return Theme.secondary }
+        let failed = checks.filter { !$0.passed }
+        if failed.isEmpty { return Theme.green }
+        return failed.contains { !$0.warning } ? Theme.red : Color(hex: 0xFF9F0A)
+    }
+
+    /// 自检详情弹窗：逐项展开（通过项也显示明细，如 SSID / 本机 IP）
+    private var preflightSheet: some View {
+        SheetShell(
+            title: "启动自检",
+            subtitle: preflightSummaryText,
+            onClose: { showPreflight = false },
+            trailing: {
+                Button {
+                    Task { await runChecks() }
+                } label: {
+                    if runningChecks {
+                        ProgressView()
+                    } else {
+                        Text("重新自检")
+                            .font(Theme.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.brand)
+                    }
+                }
+                .disabled(runningChecks)
+            }
+        ) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if checks.isEmpty {
+                        Text(runningChecks ? "正在自检…" : "尚未自检")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 60)
+                    } else {
+                        ForEach(checks) { result in
+                            preflightDetailRow(result)
                         }
                     }
-                    .disabled(runningChecks)
                 }
-
-                if checks.allSatisfy(\.passed) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Theme.green)
-                            .font(.system(size: 15))
-                        Text("全部通过")
-                            .font(Theme.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.label)
-                        Spacer(minLength: 0)
-                    }
-                } else {
-                    ForEach(checks) { result in
-                        preflightRow(result)
-                    }
-                }
+                .padding(.horizontal, Theme.page)
+                .padding(.top, 16)
+                .padding(.bottom, 40)
             }
         }
     }
 
+    /// 弹窗里的详情行：每项名称 + 完整 detail（无论通过与否）
     @ViewBuilder
-    private func preflightRow(_ result: CPMirrorDiagnostics.CheckResult) -> some View {
-        let failed = !result.passed
-        HStack(alignment: failed ? .top : .center, spacing: 10) {
+    private func preflightDetailRow(_ result: CPMirrorDiagnostics.CheckResult) -> some View {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: result.passed ? "checkmark.circle.fill" :
                     (result.warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill"))
                 .foregroundStyle(result.passed ? Theme.green :
                                     (result.warning ? Color(hex: 0xFF9F0A) : Theme.red))
                 .font(.system(size: 15))
-            VStack(alignment: .leading, spacing: failed ? 4 : 0) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(result.name)
                     .font(Theme.footnote.weight(.semibold))
                     .foregroundStyle(Theme.label)
-                if failed {
-                    Text(result.detail)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(result.detail)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
+        .padding(.vertical, 4)
     }
 
     private func runChecks() async -> [CPMirrorDiagnostics.CheckResult] {

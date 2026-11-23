@@ -146,7 +146,7 @@ struct JiheDriveWidgetEntryView: View {
                     }
                     progress
                         .frame(maxWidth: 128)
-                    Text(snap.charging ? "充电中" : "未充电")
+                    Text("\(snap.charging ? "充电中" : "未充电") · \(seatStatusText)")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color(hex: 0x94A3B8))
                     Spacer(minLength: 4)
@@ -243,7 +243,7 @@ struct JiheDriveWidgetEntryView: View {
                             .foregroundStyle(Color(hex: 0x6B7280))
                     }
                     progress
-                    Text(snap.charging ? "充电中" : "未充电")
+                    Text("\(snap.charging ? "充电中" : "未充电") · \(seatStatusText)")
                         .font(.system(size: 11))
                         .foregroundStyle(Color(hex: 0x94A3B8))
                     controlBar
@@ -268,6 +268,9 @@ struct JiheDriveWidgetEntryView: View {
                 Text(snap.locked ? "已关锁" : "未关锁")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(snap.locked ? Color(hex: 0x166534) : Color(hex: 0xB45309))
+                Text(seatStatusText)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x64748B))
                 Spacer()
                 Text(snap.online ? "在线" : "离线")
                     .font(.system(size: 11))
@@ -408,6 +411,12 @@ struct JiheDriveWidgetEntryView: View {
         return "盲盒\(snap.lotteryLeft)天"
     }
 
+    /// 真实坐垫状态：nil 代表云端没给或已过期，不拿按钮当状态
+    private var seatStatusText: String {
+        guard let open = snap.seatOpen else { return "坐垫未知" }
+        return open ? "坐垫已开" : "坐垫已关"
+    }
+
     private var progress: some View {
         GeometryReader { geo in
             let width = snap.soc <= 0
@@ -436,8 +445,10 @@ struct JiheDriveWidgetEntryView: View {
             controlButton(
                 intent: WidgetCushionIntent(),
                 symbol: "carseat.right.fill",
-                tint: Color(hex: 0x334155),
-                label: "坐垫"
+                tint: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155),
+                label: "\(seatStatusText)，点击解锁坐垫",
+                badge: snap.seatOpen == true ? Color(hex: 0xEA580C)
+                    : (snap.seatOpen == false ? Color(hex: 0x166534) : nil)
             )
             controlButton(
                 intent: WidgetFindIntent(),
@@ -452,13 +463,22 @@ struct JiheDriveWidgetEntryView: View {
         intent: I,
         symbol: String,
         tint: Color,
-        label: String
+        label: String,
+        badge: Color? = nil
     ) -> some View {
         Button(intent: intent) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
+                .overlay(alignment: .bottomTrailing) {
+                    if let badge {
+                        Circle()
+                            .fill(badge)
+                            .frame(width: 6, height: 6)
+                            .offset(x: 1, y: 1)
+                    }
+                }
                 .contentShape(Rectangle())
                 .accessibilityLabel(label)
         }

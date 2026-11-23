@@ -1,5 +1,21 @@
 import Foundation
 
+/// 坐垫状态：来自 vehicleHomePageV2 的 seatLockState + refreshTime。
+/// 云端是轮询快照，不是实时推送，超过 10 分钟（接口 refreshRate）不再当真。
+struct SeatState: Hashable {
+    /// true=锁止/关闭，false=已打开（与 headLockState 1=已锁同编码）
+    let isClosed: Bool
+    /// 云端采样时刻；nil 表示接口没给时间，只能按拉取时刻算新鲜度
+    let sampledAt: Date?
+
+    func isOpen(maxAgeSeconds: TimeInterval = 600) -> Bool? {
+        if let sampledAt, Date().timeIntervalSince(sampledAt) > maxAgeSeconds {
+            return nil
+        }
+        return !isClosed
+    }
+}
+
 struct Vehicle: Identifiable, Hashable {
     let vinNo: String
     let name: String
@@ -39,6 +55,8 @@ struct Vehicle: Identifiable, Hashable {
     /// 是否车主（carMaster != "0"）
     let isCarMaster: Bool
     let shareNickName: String?
+    /// 真实坐垫状态（可变，便于 V2 轮询到位后原地补丁）
+    var seat: SeatState?
 
     var id: String { vinNo }
 
@@ -76,8 +94,16 @@ struct Vehicle: Identifiable, Hashable {
             model3DURL: model3DURL,
             wallpaperOutlines: wallpaperOutlines,
             isCarMaster: isCarMaster,
-            shareNickName: shareNickName
+            shareNickName: shareNickName,
+            seat: seat
         )
+    }
+
+    /// V2 轮询结果到位后只补坐垫字段，不动电量/锁车等其他状态
+    func withSeat(_ seat: SeatState?) -> Vehicle {
+        var copy = self
+        copy.seat = seat
+        return copy
     }
 
 #if !WIDGET_EXTENSION
@@ -111,7 +137,8 @@ struct Vehicle: Identifiable, Hashable {
             model3DURL: model3DURL,
             wallpaperOutlines: wallpaperOutlines,
             isCarMaster: isCarMaster,
-            shareNickName: shareNickName
+            shareNickName: shareNickName,
+            seat: seat
         )
     }
 #endif
@@ -161,8 +188,17 @@ struct Vehicle: Identifiable, Hashable {
             model3DURL: detail.model3DURL ?? model3DURL,
             wallpaperOutlines: detail.wallpaperOutlines ?? wallpaperOutlines,
             isCarMaster: isCarMaster && detail.isCarMaster,
-            shareNickName: detail.shareNickName ?? shareNickName
+            shareNickName: detail.shareNickName ?? shareNickName,
+            seat: Self.preferSeat(detail.seat, seat)
         )
+    }
+
+    /// 列表/详情/V2 三个来源取采样时间更新的那份，避免旧值盖掉新值
+    private static func preferSeat(_ lhs: SeatState?, _ rhs: SeatState?) -> SeatState? {
+        if let lhs, let rhs {
+            return (lhs.sampledAt ?? .distantPast) >= (rhs.sampledAt ?? .distantPast) ? lhs : rhs
+        }
+        return lhs ?? rhs
     }
 }
 
@@ -311,6 +347,46 @@ extension Vehicle {
         self.wallpaperOutlines = WallpaperOutlines.parse(
             json["subjectWallpaperConfig"] ?? json["wallpaperConfig"]
         )
+        self.seat = Self.seatState(json, iot)
+    }
+
+    /// 从 V2 响应直接取坐垫状态，不依赖完整的 Vin 模型解析
+    static func parseSeat(from response: [String: Any]) -> SeatState? {
+        let data = (response["data"] as? [String: Any]) ?? response
+        return seatState(data, iotProperties(data["iotProperties"]))
+    }
+
+    private static func seatState(_ json: [String: Any], _ iot: [String: Any]) -> SeatState? {
+        guard let raw = json["seatLockState"] ?? iot["SeatLockState"] ?? iot["seatLockState"] else {
+            return nil
+        }
+        let text = "\(raw)".trimmingCharacters(in: .whitespacesAndNewlines)
+        let isClosed: Bool
+        if text == "1" {
+            isClosed = true
+        } else if text == "0" {
+            isClosed = false
+        } else {
+            return nil
+        }
+        let time = json["refreshTime"] ?? json["seatStateUpdateTime"] ?? iot["SeatStateTime"]
+        return SeatState(isClosed: isClosed, sampledAt: seatTimestamp(time))
+    }
+
+    private static func seatTimestamp(_ raw: Any?) -> Date? {
+        guard let raw, !(raw is NSNull) else { return nil }
+        let text = "\(raw)".trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text != "<null>" else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        // 接口给的是北京时间，别按设备时区解读，否则新鲜度会差几小时
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        if let date = formatter.date(from: text) { return date }
+        if let number = Double(text), number > 1_000_000_000 {
+            return Date(timeIntervalSince1970: number > 1_000_000_000_000 ? number / 1000 : number)
+        }
+        return ISO8601DateFormatter().date(from: text)
     }
 
     /// 在整份响应里递归找模型文件地址（不同车型字段名不统一）
