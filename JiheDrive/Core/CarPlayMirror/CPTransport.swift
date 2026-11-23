@@ -52,7 +52,9 @@ final class CPDirectAccessoryTransport {
     private static func hasMethod(_ object: AnyObject, _ name: String, _ arguments: Int) -> Bool {
         let selector = NSSelectorFromString(name)
         guard let target = object as? NSObject, target.responds(to: selector) else { return false }
-        return target.methodSignature(for: selector)?.numberOfArguments == arguments + 2
+        // Swift 无法调用 NSObject.methodSignature(for:)，直接用 runtime 读取 selector 的参数个数。
+        guard let method = class_getInstanceMethod(object_getClass(target), selector) else { return false }
+        return method_getNumberOfArguments(method) == UInt32(arguments + 2)
     }
 
     /// 加载 CoreAccessories 框架并取出共享 client。
