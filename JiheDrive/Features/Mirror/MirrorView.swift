@@ -1,11 +1,8 @@
 import SwiftUI
 import ReplayKit
 
-/// 投屏页：两种模式
-/// ① 同机 CarPlay → 极核仪表（需要配件身份三件套）
-/// ② 整屏镜像（ReplayKit 广播，可投任意 App）→ 极核仪表
-/// WiFi 名称自动检测、密码按 SSID 记忆、支持一键加入仪表热点；
-/// 启动前自动预检（身份 / Wi-Fi / 本机地址 / 仪表可达），日志可导出。
+/// 投屏页：同机 CarPlay / 整屏镜像两种模式。
+/// 布局从上到下：模式 → 状态 → 预览 → 网络 → 仪表 → 自检 → 日志，说明文字压到最少。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
@@ -22,7 +19,6 @@ struct MirrorView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            // 10pt 基础间距：选择器/状态卡之间不再贴死；分组标题自带 24pt 上边距，叠加后约 34pt 一组
             VStack(spacing: 10) {
                 LargeTitle("投屏")
                     .staggerIn(0)
@@ -32,12 +28,8 @@ struct MirrorView: View {
                 statusCard.staggerIn(1)
 
                 if mode == "carplay" && controller.phase.isRunning {
-                    SectionHeader("CarPlay 预览")
                     previewCard.staggerIn(2)
                 }
-
-                SectionHeader("预检")
-                preflightCard.staggerIn(2)
 
                 SectionHeader("网络")
                 networkCard.staggerIn(3)
@@ -45,8 +37,8 @@ struct MirrorView: View {
                 SectionHeader("仪表")
                 dashboardCard.staggerIn(4)
 
-                SectionHeader("使用步骤")
-                guideCard.staggerIn(5)
+                SectionHeader("自检")
+                preflightCard.staggerIn(5)
 
                 if !controller.logs.isEmpty {
                     SectionHeader("日志")
@@ -62,7 +54,6 @@ struct MirrorView: View {
             store.detectSSID()
             store.recheckIdentity()
             startPolling()
-            // 进页自动预检一次，身份/网络状态不用手动点「重新预检」才知道
             if checks.isEmpty {
                 Task { await runChecks() }
             }
@@ -109,6 +100,7 @@ struct MirrorView: View {
                         Text(subtitle)
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
+                            .lineLimit(2)
                     }
 
                     Spacer(minLength: 0)
@@ -120,6 +112,10 @@ struct MirrorView: View {
                     } else {
                         StatusPill(text: "就绪", color: Theme.secondary)
                     }
+                }
+
+                if let hint = store.identityHint {
+                    SoftBanner(text: hint, icon: "key.horizontal.fill", tone: Theme.orange)
                 }
 
                 if mode == "carplay" {
@@ -149,10 +145,10 @@ struct MirrorView: View {
 
     private var subtitle: String {
         if mode == "screen" {
-            return "可投任意 App（高德 / 苹果地图等），音频留在手机"
+            return "可投任意 App，熄屏即停止"
         }
         if case .identityMissing = controller.phase {
-            return "需要苹果签发的 CarPlay 配件身份三件套"
+            return "需要 CarPlay 配件身份"
         }
         if let ssid = store.currentSSID {
             return "当前 Wi-Fi：\(ssid)"
@@ -172,7 +168,7 @@ struct MirrorView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: controller.phase.isRunning ? "stop.fill" : "play.fill")
-                Text(controller.phase.isRunning ? "停止投屏" : "启动 CarPlay 投屏")
+                Text(controller.phase.isRunning ? "停止投屏" : "启动投屏")
                     .font(Theme.headline)
             }
             .foregroundStyle(.white)
@@ -203,7 +199,7 @@ struct MirrorView: View {
     // MARK: - 广播按钮（整屏镜像模式）
 
     private var broadcastButton: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             BroadcastPickerView(preferredExtension: "com.liruixin.jihedrive.mirror")
                 .frame(height: 48)
                 .frame(maxWidth: .infinity)
@@ -214,29 +210,117 @@ struct MirrorView: View {
                 .overlay(
                     HStack(spacing: 8) {
                         Image(systemName: "record.circle")
-                        Text("开始整屏镜像（屏幕录制）")
+                        Text("开始整屏镜像")
                             .font(Theme.headline)
                     }
                     .foregroundStyle(.white)
                     .allowsHitTesting(false)
                 )
-            Text("在弹出的系统面板中选择「极核投屏」；仪表未就绪时扩展会自动重试约 1 分钟。")
+            Text("在系统面板选择「极核投屏」")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.secondary)
-                .multilineTextAlignment(.center)
         }
     }
 
-    // MARK: - 预检卡
+    // MARK: - 网络卡
+
+    private var networkCard: some View {
+        AppleCard(padding: 18) {
+            VStack(spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "wifi")
+                        .foregroundStyle(Theme.brand)
+                    Text(store.currentSSID ?? "未检测到 Wi-Fi")
+                        .font(Theme.headline)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button {
+                        store.detectSSID()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Theme.surfaceAlt))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                }
+
+                SecureField("热点密码（开放网络留空）", text: $store.wifiPassword)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+
+                Button {
+                    store.commitWiFi()
+                    store.joinDashboardHotspot(ssid: store.currentSSID,
+                                               password: store.wifiPassword)
+                } label: {
+                    Text("加入此网络")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                }
+                .buttonStyle(.borderedProminent)
+
+                if let status = store.hotspotStatus {
+                    Text(status)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - 仪表卡
+
+    private var dashboardCard: some View {
+        AppleCard(padding: 18) {
+            VStack(spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "gauge.with.needle")
+                        .foregroundStyle(Theme.brand)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("极核 6.2 寸仪表")
+                            .font(Theme.headline)
+                            .foregroundStyle(Theme.label)
+                        Text("1024×480 · H.264 25帧")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 8) {
+                    Text("IP")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.secondary)
+                    TextField("192.168.0.1", text: $store.dashboardIP)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.decimalPad)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+
+                Picker("裁剪", selection: $store.cropMode) {
+                    Text("居中裁剪").tag("crop")
+                    Text("完整画面").tag("fit")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: store.cropMode) { _, _ in
+                    store.commitCropMode()
+                }
+            }
+        }
+    }
+
+    // MARK: - 自检卡（通过项一行带过，失败项才展开详情）
 
     private var preflightCard: some View {
         AppleCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 14) {
-                if let hint = store.identityHint {
-                    SoftBanner(text: hint, icon: "key.horizontal.fill", tone: Theme.orange)
-                }
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text(runningChecks ? "正在预检…" : (checks.isEmpty ? "启动前自动预检身份、网络与仪表" : "最近一次预检结果"))
+                    Text(runningChecks ? "正在自检…" : "共 \(checks.count) 项")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.secondary)
                     Spacer(minLength: 0)
@@ -246,38 +330,57 @@ struct MirrorView: View {
                         if runningChecks {
                             ProgressView()
                         } else {
-                            Text("重新预检").font(Theme.captionStrong)
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.secondary)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Theme.surfaceAlt))
                         }
                     }
                     .disabled(runningChecks)
                 }
-                HairLine()
-                ForEach(checks) { result in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: result.passed ? "checkmark.circle.fill" :
-                                (result.warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill"))
-                            .foregroundStyle(result.passed ? Theme.green :
-                                                (result.warning ? Color(hex: 0xFF9F0A) : Theme.red))
+
+                if checks.allSatisfy(\.passed) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.green)
                             .font(.system(size: 15))
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(result.name)
-                                .font(Theme.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.label)
-                            Text(result.detail)
-                                .font(Theme.caption)
-                                .foregroundStyle(Theme.secondary)
-                                .lineSpacing(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text("全部通过")
+                            .font(Theme.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.label)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    ForEach(checks) { result in
+                        preflightRow(result)
                     }
                 }
-                if checks.isEmpty {
-                    Text("点「重新预检」立即检查，或直接启动投屏时自动执行。")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func preflightRow(_ result: CPMirrorDiagnostics.CheckResult) -> some View {
+        let failed = !result.passed
+        HStack(alignment: failed ? .top : .center, spacing: 10) {
+            Image(systemName: result.passed ? "checkmark.circle.fill" :
+                    (result.warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill"))
+                .foregroundStyle(result.passed ? Theme.green :
+                                    (result.warning ? Color(hex: 0xFF9F0A) : Theme.red))
+                .font(.system(size: 15))
+            VStack(alignment: .leading, spacing: failed ? 4 : 0) {
+                Text(result.name)
+                    .font(Theme.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.label)
+                if failed {
+                    Text(result.detail)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -354,164 +457,13 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 网络卡
-
-    private var networkCard: some View {
-        AppleCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    Image(systemName: "wifi")
-                        .foregroundStyle(Theme.brand)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(store.currentSSID ?? "未检测到 Wi-Fi")
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                        Text(store.locationDenied
-                             ? "在系统设置允许定位后可自动获取 Wi-Fi 名称"
-                             : "已自动获取当前 Wi-Fi 名称")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Button("重新检测") {
-                        store.detectSSID()
-                    }
-                    .font(Theme.footnote)
-                }
-
-                HairLine()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Wi-Fi 密码（按名称自动记忆）")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                    SecureField("开放网络可留空", text: $store.wifiPassword)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-
-                HStack(spacing: 12) {
-                    Button {
-                        store.commitWiFi()
-                    } label: {
-                        Text("保存密码")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        store.commitWiFi()
-                        store.joinDashboardHotspot(ssid: store.currentSSID,
-                                                   password: store.wifiPassword)
-                    } label: {
-                        Text("加入此网络")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-
-                if let status = store.hotspotStatus {
-                    Text(status)
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                }
-            }
-        }
-    }
-
-    // MARK: - 仪表卡
-
-    private var dashboardCard: some View {
-        AppleCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    Image(systemName: "gauge.with.needle")
-                        .foregroundStyle(Theme.brand)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("极核 6.2 寸仪表（AE4 MAX2+）")
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                        Text("1024×480 · H.264 25帧 2.5Mbps · 拉帧式 PXC 协议")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                HStack(spacing: 8) {
-                    Text("仪表 IP")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                    TextField("192.168.0.1", text: $store.dashboardIP)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.decimalPad)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-
-                Picker("裁剪", selection: $store.cropMode) {
-                    Text("居中裁剪（导航区）").tag("crop")
-                    Text("完整画面").tag("fit")
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: store.cropMode) { _, _ in
-                    store.commitCropMode()
-                }
-
-                Text("iPhone 需加入仪表热点；默认地址 192.168.0.1。整屏镜像时「居中裁剪」会取屏幕中部横幅区域填满仪表。")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.secondary)
-            }
-        }
-    }
-
-    // MARK: - 指引卡
-
-    private var guideCard: some View {
-        AppleCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 12) {
-                guideRow(1, "把 iPhone 加入仪表热点（或点上方「加入此网络」）")
-                guideRow(2, "在仪表上打开「投屏」功能页")
-                if mode == "carplay" {
-                    guideRow(3, "点「启动 CarPlay 投屏」，等待状态变为「正在投屏」")
-                    guideRow(4, "CarPlay 画面出现在仪表上；导航语音仍由手机播放")
-                } else {
-                    guideRow(3, "点「开始整屏镜像」并在系统面板选择「极核投屏」")
-                    guideRow(4, "任意 App 画面实时出现在仪表上；熄屏即停止")
-                }
-                HairLine()
-                Text("身份三件套放入「文件」App → JiheDrive → IdentityImport/ 后重进本页自动导入。音视频仅在本机与局域网内处理，不经过任何服务器。")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.secondary)
-                    .lineSpacing(3)
-            }
-        }
-    }
-
-    private func guideRow(_ index: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(index)")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 21, height: 21)
-                .background(Circle().fill(Theme.brand))
-            Text(text)
-                .font(Theme.callout)
-                .foregroundStyle(Theme.label)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     // MARK: - 日志卡
 
     private var logCard: some View {
         AppleCard(padding: 18) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("最近事件（本地保存 7 天，可导出反馈问题）")
+                    Text("最近事件（7 天）")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.secondary)
                     Spacer(minLength: 0)
@@ -521,22 +473,25 @@ struct MirrorView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 14))
+                            .foregroundStyle(Theme.secondary)
                     }
-                    .padding(.trailing, 8)
+                    .padding(.trailing, 4)
                     Button {
                         controller.clearLogs()
                         MirrorLogStore.clearAll()
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 14))
+                            .foregroundStyle(Theme.secondary)
                     }
                 }
 
-                ForEach(Array(controller.logs.suffix(12).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(controller.logs.suffix(8).enumerated()), id: \.offset) { _, line in
                     Text(line)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.head)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
