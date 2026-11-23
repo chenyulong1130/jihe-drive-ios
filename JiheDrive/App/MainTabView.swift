@@ -301,8 +301,9 @@ extension EnvironmentValues {
 }
 
 extension Motion {
-    /// 翻页：略拉长、高阻尼，跟手结束后更顺，少弹一下
-    static let page: Animation = .interactiveSpring(response: 0.42, dampingFraction: 0.90, blendDuration: 0.12)
+    /// 翻页：重页面（WebGL/视频层）跟手拖动时合成开销大，动画拖得越长卡顿越明显；
+    /// 收紧到 0.35/0.88，切页更干脆，重层被拖动的时间窗口更短。
+    static let page: Animation = .interactiveSpring(response: 0.35, dampingFraction: 0.88, blendDuration: 0.1)
     /// 保留旧名给别处，避免编译炸
     static let liqid: Animation = page
 }

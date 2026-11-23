@@ -911,6 +911,27 @@ final class ModelSchemeHandler: NSObject, WKURLSchemeHandler {
 
 // MARK: - GLB 下载缓存
 
+extension ModelViewerWebView {
+    /// 后台预热 3D 弹层网页：提前创建 WKWebView 并加载车模（首帧渲染后即空闲），
+    /// 打开弹层时直接从池里取现成页面——首次打开不再有 1~2 秒的解析等待。
+    /// 注意必须 interactive:true：弹层复用此页面时不会重新 load，交互开关在 JS 里是模块级常量。
+    static func prewarm(reuseKey key: String, glbFile: URL) {
+        guard !key.isEmpty else { return }
+        if let existing = ModelViewerPool.view(for: key),
+           ModelViewerPool.file(for: key) == glbFile,
+           !ModelViewerPool.isStale(key) {
+            return // 已预热且文件没变
+        }
+        let configuration = WKWebViewConfiguration()
+        let coordinator = Coordinator()
+        configuration.userContentController.add(coordinator, name: "orbit")
+        configuration.setURLSchemeHandler(coordinator.scheme, forURLScheme: ModelSchemeHandler.scheme)
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
+        coordinator.load(into: view, glbFile: glbFile, interactive: true, autoRotate: false)
+        ModelViewerPool.store(view, for: key, file: glbFile)
+    }
+}
+
 enum GLBModelStore {
     /// 缓存名带 strip 版本号，节点清洗规则变更时自动换文件
     private static let stripTag = "s2"

@@ -201,6 +201,8 @@ struct Vehicle3DSheet: View {
                 .overlay {
                     ModelViewerWebView(
                         glbFile: glbFile,
+                        // 按车复用：弹层关了 WebView 留在池里，下次打开秒开（不用重新解析 6MB 车模）
+                        reuseKey: "sheet3d-\(vehicle.vinNo)",
                         interactive: true,
                         autoRotate: false,
                         resetToken: resetToken,

@@ -339,6 +339,8 @@ struct VehicleView: View {
             if let file {
                 readyGLBVins.insert(vin)
                 heroGLB = file
+                // hero 车模就绪后顺手预热 3D 弹层网页：首次打开弹层也接近秒开
+                ModelViewerWebView.prewarm(reuseKey: "sheet3d-\(vin)", glbFile: file)
             }
         } else {
             heroGLB = nil
