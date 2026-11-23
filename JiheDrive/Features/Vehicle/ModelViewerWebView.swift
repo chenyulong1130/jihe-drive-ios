@@ -451,12 +451,31 @@ enum ModelViewerAsset {
         if (window.ResizeObserver) new ResizeObserver(resize).observe(host);
         resize();
 
-        // ---------- 坐垫：FR-Seat-T 挂 SeatPivot 铰链节点，0.6s 缓动开合 ----------
-        const SEAT_NODE = 'FR-Seat-T';
+        // ---------- 坐垫：挂 SeatPivot 铰链节点，0.6s 缓动开合 ----------
+        // 节点名随车型：AE4=FR-Seat-T；AE8=SEAT-Seat-T（与 SEAT-SeatTex-T 同挂 SEAT 组，转父组才整体掀）
+        // 车头朝 -x（AE4/AE8 世界坐标实测：大灯/前轮 x<0，尾灯/后轮 x>0），坐垫沿 x 长 0.7~0.8m，
+        // 铰链 = 坐垫包围盒前缘(min.x) + 底部(min.y) + 横向中点(z)，绕 z 轴正转尾部上抬。
         const OPEN_ANGLE = 55 * D2R;
-        const HINGE = new THREE.Vector3(-0.277, 0.60, 0);
         let pivot = null;
         let seatAnim = null;
+        let seatTarget = false; // 最近一次 jhSetSeat 的目标，模型就绪前先记下
+
+        function setupSeat(root) {
+          const node = root.getObjectByName('FR-Seat-T') || root.getObjectByName('SEAT-Seat-T');
+          if (!node) return;
+          const seat = (node.name === 'SEAT-Seat-T' && node.parent) ? node.parent : node;
+          seat.updateWorldMatrix(true, false);
+          const box = new THREE.Box3().setFromObject(seat);
+          const hingeWorld = new THREE.Vector3(box.min.x, box.min.y, (box.min.z + box.max.z) / 2);
+          pivot = new THREE.Object3D();
+          pivot.name = 'SeatPivot';
+          const parent = seat.parent;
+          pivot.position.copy(parent.worldToLocal(hingeWorld.clone()));
+          parent.add(pivot);
+          parent.remove(seat);
+          pivot.add(seat);
+          seat.position.sub(pivot.position);
+        }
 
         function applySeat(progress) {
           const t = Math.min(Math.max(progress, 0), 1);
@@ -464,13 +483,16 @@ enum ModelViewerAsset {
           pivot.rotation.z = OPEN_ANGLE * e;
           needsRender = true;
         }
-        window.jhSetSeat = (open) => {
-          if (!pivot) return;
-          const want = !!open;
+        function driveSeat(want) {
           const from = pivot.rotation.z / OPEN_ANGLE;
           if ((from > 0.05) === want && !seatAnim) return; // 状态一致不重复播
           seatAnim = { from: from, target: want ? 1 : 0, t: 0, report: 0 };
           post({ seatOpen: want, progress: want ? 1 : 0, phase: 'start' }); // 目标状态即时上报
+        }
+        window.jhSetSeat = (open) => {
+          seatTarget = !!open;
+          if (!pivot) return; // 模型未就绪：记下目标，setupSeat 后补挂
+          driveSeat(seatTarget);
         };
         window.jhSeatState = () => {
           if (!pivot) return { ready: false };
@@ -497,7 +519,8 @@ enum ModelViewerAsset {
           return null;
         }
         // ---------- 近光光域：大灯向车头前方投出可见光锥、真实聚光与地面光斑 ----------
-        // 车头朝 +z（GLB 实测：前轮 FW z≈+0.06、后轮 RW z≈-0.08），模型已在归一化后调用。
+        // 车头朝 -x（AE4/AE8 世界坐标实测：大灯 L-LowBeam x≈-0.5、尾灯 x≈+0.8，前轮 x<0 后轮 x>0），
+        // 地面 y=0（Shadow 平面），模型已在归一化后调用。
         function buildBeam(root) {
           if (beamGroup) return;
           const lampNode = root.getObjectByName('L-LowBeam');
@@ -508,8 +531,8 @@ enum ModelViewerAsset {
           const from = new THREE.Vector3();
           lampNode.getWorldPosition(from);
           const groundY = box.min.y;
-          const reach = Math.max(2.2, size.z * 1.3);
-          const to = new THREE.Vector3(from.x, groundY, from.z + reach);
+          const reach = Math.max(2.2, size.x * 1.15);
+          const to = new THREE.Vector3(from.x - reach, groundY, from.z);
           const dir = to.clone().sub(from);
           const dist = dir.length();
 
@@ -586,17 +609,10 @@ enum ModelViewerAsset {
 
         new GLTFLoader().load('model.glb', (gltf) => {
           scene.add(gltf.scene);
-          const seat = gltf.scene.getObjectByName(SEAT_NODE);
-          if (seat) {
-            pivot = new THREE.Object3D();
-            pivot.name = 'SeatPivot';
-            const parent = seat.parent;
-            pivot.position.copy(HINGE);
-            pivot.updateMatrixWorld(true);
-            parent.add(pivot);
-            parent.remove(seat);
-            pivot.add(seat);
-            seat.position.sub(HINGE);
+          setupSeat(gltf.scene);
+          // 模型加载晚于页面下发：补挂最近的坐垫目标状态（灯光同理见下方 applyLights）
+          if (pivot && ((pivot.rotation.z / OPEN_ANGLE) > 0.05) !== seatTarget) {
+            driveSeat(seatTarget);
           }
           // 统一收集灯材质：只按真实灯节点名（lampSpec），不再用材质名/裸关键词兜底。
           // 材质可能是数组；unlit 材质没有 emissive，要换成标准材质，否则点灯无效。
