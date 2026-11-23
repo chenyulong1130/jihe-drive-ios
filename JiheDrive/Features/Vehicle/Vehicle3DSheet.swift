@@ -39,14 +39,17 @@ struct Vehicle3DSheet: View {
         }
         seatBusy = true
         defer { seatBusy = false }
+        // 模型立即响应（乐观更新），真实指令异步发——别让网络往返拖住动画
+        seatOpen = true
+        seatToken += 1
         do {
             try await model.openCushion(live)
-            seatOpen = true
-            seatToken += 1
             seatHint = "已发送开坐垫指令"
             // 尽快拉一次真实状态，让模型与实车对齐
             await model.loadBattery(vin: live.vinNo, quiet: true)
         } catch {
+            seatOpen = realSeatOpen == true
+            seatToken += 1
             seatHint = "开坐垫失败：\(error.localizedDescription)"
         }
     }
