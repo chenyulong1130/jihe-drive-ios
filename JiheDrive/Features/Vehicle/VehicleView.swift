@@ -18,6 +18,7 @@ struct VehicleView: View {
     @State private var busy: String?
     @State private var toast: String?
 
+    @State private var seatSyncToken = 0 // 云端坐垫状态变化计数，驱动主页 3D 模型
     @State private var rideExtra: RideTrackService.RideExtra?
     @State private var rideLoading = false
     @State private var resolvedAddress: String?
@@ -182,6 +183,12 @@ struct VehicleView: View {
         .onChange(of: model.selectedVehicle?.isCharging) { _, _ in
             syncChargeIsland()
         }
+        .onChange(of: model.liveBatteryOfSelected?.seat) { _, _ in
+            seatSyncToken += 1 // 云端坐垫状态变化：主页 3D 模型跟着开/合
+        }
+        .onChange(of: model.selectedVehicle?.vinNo) { _, _ in
+            seatSyncToken += 1 // 切车后也要按新车状态摆坐垫
+        }
         .onReceive(model3D.$state) { state in
             if case .ready = state, let vin = model.selectedVehicle?.vinNo {
                 snapshotMarkerIfNeeded(vin: vin)
@@ -227,6 +234,8 @@ struct VehicleView: View {
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
+            seatOpen: model.liveBatteryOfSelected?.seat?.isOpen() == true,
+            seatSyncToken: seatSyncToken,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             tireFrontTemp: model.tire?.frontTemp,
@@ -255,6 +264,13 @@ struct VehicleView: View {
             },
             onOpenCushion: {
                 run("cushion") { try await model.openCushion(vehicle) }
+                // 开坐垫后尽快拉状态，让主页/弹层的 3D 模型跟上（云端上报有延迟，多试几轮）
+                Task {
+                    for delay in [8.0, 20.0, 40.0] {
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        await model.loadBattery(vin: vehicle.vinNo, quiet: true)
+                    }
+                }
             },
             onOpenTire: {
                 showTire = true

@@ -39,6 +39,10 @@ struct HeroStage: View {
     var lightsOn: Bool? = nil
     /// 实时电池充电态；列表里的充电标记不再当默认
     var liveCharging: Bool? = nil
+    /// 真实坐垫状态：开→3D 模型坐垫自动打开，关→自动合上
+    var seatOpen: Bool = false
+    /// 状态变化计数，变化时触发 jhSetSeat 下发
+    var seatSyncToken: Int = 0
     /// 官方胎压接口读数（bar），优先于车辆详情里的字段
     var tireFrontBar: Double? = nil
     var tireRearBar: Double? = nil
@@ -327,6 +331,8 @@ struct HeroStage: View {
                                     resetToken: cameraReset + localReset,
                                     active: screenActive,
                                     lightsOn: lightsOn,
+                                    seatOpen: seatOpen,
+                                    seatToken: seatSyncToken,
                                     onDrag: { dragging in
                                         if dragging { modelRotated = true }
                                         onInteract?(dragging)
