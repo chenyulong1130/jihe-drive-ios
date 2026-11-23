@@ -31,6 +31,10 @@ final class CPVideoTranscoder {
     private var sps: Data?
     private var pps: Data?
     private var formatDirty = false
+    /// 优先硬解（又快又省电）；硬解会话创建/解码连续失败时自动降级软解。
+    /// 之所以以前一律软解：锁屏/切后台硬解可能被系统回收后停摆——用失败降级兜住这个坑。
+    private var preferHardwareDecode = true
+    private var hardwareDecodeFailures = 0
 
     // 最新画面
     private let bufferLock = NSLock()
@@ -43,8 +47,8 @@ final class CPVideoTranscoder {
     private var encoder: VTCompressionSession?
     private var encoderParamSets: [Data]?
     private var encodedResult: Result<Data, Error>?
-    private lazy var compositor = CIContext(options: [.useSoftwareRenderer: true,
-                                                      .cacheIntermediates: false])
+    // 缩放走 GPU：软渲染下每帧整幅 CI 缩放会吃掉几十毫秒，直接导致录屏掉帧发卡。
+    private lazy var compositor = CIContext(options: [.cacheIntermediates: false])
     private var lastCodecFailure: TimeInterval = -1000
 
     // MARK: - 输入：CarPlay Annex-B 访问单元
@@ -58,8 +62,14 @@ final class CPVideoTranscoder {
 
     /// 输入：广播扩展的系统编码帧（带格式描述的 CMSampleBuffer）。
     func append(sampleBuffer: CMSampleBuffer) {
-        guard CMSampleBufferGetNumSamples(sampleBuffer) > 0,
-              let format = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
+        guard CMSampleBufferGetNumSamples(sampleBuffer) > 0 else { return }
+        // ReplayKit 广播给的常常已经是解码后的像素缓冲，直接入库；
+        // 再走一次性 VT 解码是纯浪费（每帧多几毫秒，录屏就卡了）。
+        if let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            store(imageBuffer: pixel)
+            return
+        }
+        guard let format = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
         decodeQueue.async { [weak self] in
             guard let self else { return }
             self.decode(sampleBuffer: sampleBuffer, format: format as CMVideoFormatDescription)
@@ -257,18 +267,32 @@ final class CPVideoTranscoder {
             return false
         }
         decoderFormat = format
-        // 解码输出经逐帧 completionHandler 回来，会话不挂全局回调
-        var session: VTDecompressionSession?
-        let decodeStatus = VTDecompressionSessionCreate(
-            allocator: kCFAllocatorDefault,
-            formatDescription: format,
-            // 与 CarWithin 一致关闭硬解：锁屏/切后台时硬解会被系统回收且可能永久停摆。
-            decoderSpecification: [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false] as CFDictionary,
-            imageBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferOpenGLCompatibilityKey: true,
-            ] as CFDictionary,
-            decompressionSessionOut: &session)
+        // 解码输出经逐帧 completionHandler 回来，会话不挂全局回调。
+        // 像素格式用 420v（编码器输入也是 420v），省掉 BGRA 互转。
+        let attributes = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+        ] as CFDictionary
+
+        func makeSession(enableHardware: Bool) -> (OSStatus, VTDecompressionSession?) {
+            var session: VTDecompressionSession?
+            let spec = [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder:
+                            enableHardware] as CFDictionary
+            let status = VTDecompressionSessionCreate(
+                allocator: kCFAllocatorDefault,
+                formatDescription: format,
+                decoderSpecification: spec,
+                imageBufferAttributes: attributes,
+                decompressionSessionOut: &session)
+            return (status, session)
+        }
+
+        var (decodeStatus, session) = makeSession(enableHardware: preferHardwareDecode)
+        if decodeStatus != noErr, preferHardwareDecode {
+            preferHardwareDecode = false
+            (decodeStatus, session) = makeSession(enableHardware: false)
+            MirrorLogStore.append("硬解会话创建失败（\(decodeStatus)），改用软解")
+        }
         guard decodeStatus == noErr, let session else {
             MirrorLogStore.append("创建解码会话失败（\(decodeStatus)）")
             return false
@@ -304,6 +328,12 @@ final class CPVideoTranscoder {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastCodecFailure >= 0.5 else { return }
         lastCodecFailure = now
+        // 硬解连续失败（锁屏/切后台被回收的典型表现）就永久降到软解，避免反复黑屏
+        hardwareDecodeFailures += 1
+        if preferHardwareDecode, hardwareDecodeFailures >= 3 {
+            preferHardwareDecode = false
+            MirrorLogStore.append("硬解连续失败，降级软解")
+        }
         MirrorLogStore.append("解码失败（\(status)），等待关键帧重建")
         invalidate()
         onKeyframeNeeded?()
