@@ -25,20 +25,15 @@ enum CPMirrorDiagnostics {
         return await [identity, wifi, local, dashboard]
     }
 
-    /// 配件身份：存在 + 可加载 + 证书私钥自检通过。
+    /// 配件身份：直接走 load()——Keychain / 内置资源 / IdentityImport 暂存目录
+    /// 都会被尝试导入，报错信息来自真实失败原因（缺失 / 不完整 / 不配对）。
     static func checkIdentity() async -> CheckResult {
-        guard CPAccessoryIdentity.hasIdentity() else {
-            return CheckResult(name: "配件身份",
-                passed: false,
-                detail: "未找到三件套（certificate.p7b / leaf.cer / private.x963）。放入「文件」App → JiheDrive → IdentityImport/ 后重进本页。",
-                warning: false)
-        }
         do {
             _ = try CPAccessoryIdentity.load()
             return CheckResult(name: "配件身份", passed: true, detail: "证书链与私钥配对自检通过", warning: false)
         } catch {
             return CheckResult(name: "配件身份", passed: false,
-                               detail: "加载失败：\(error.localizedDescription)", warning: false)
+                               detail: error.localizedDescription, warning: false)
         }
     }
 

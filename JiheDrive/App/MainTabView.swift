@@ -245,8 +245,8 @@ private struct LiquidTabBar: View {
                 )
         )
         .shadow(color: Theme.softShadow, radius: 24, x: 0, y: 10)
-        .frame(maxWidth: 320)
-        .padding(.horizontal, 20)
+        .frame(maxWidth: 360)
+        .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
 
@@ -255,31 +255,27 @@ private struct LiquidTabBar: View {
         return Button {
             withAnimation(Motion.page) { tab = item }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: selected ? item.activeIcon : item.icon)
                     .font(.system(size: 15, weight: .semibold))
 
                 if selected {
                     Text(item.title)
                         .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                        .fixedSize()
                         .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
             }
             .foregroundStyle(selected ? Color.white : Theme.secondary)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .frame(height: 44)
             // 胶囊只在内容宽度内绘制，视觉保持紧凑
             .background {
                 if selected {
                     Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Theme.brand, Color(hex: 0x4B5BFF)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: Theme.brand.opacity(0.45), radius: 12, x: 0, y: 5)
+                        .fill(Theme.brand)
+                        .shadow(color: Theme.brand.opacity(0.30), radius: 10, x: 0, y: 4)
                         .matchedGeometryEffect(id: "liqid-pill", in: pill)
                 }
             }

@@ -22,7 +22,8 @@ struct MirrorView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            // 10pt 基础间距：选择器/状态卡之间不再贴死；分组标题自带 24pt 上边距，叠加后约 34pt 一组
+            VStack(spacing: 10) {
                 LargeTitle("投屏")
                     .staggerIn(0)
 
@@ -61,6 +62,10 @@ struct MirrorView: View {
             store.detectSSID()
             store.recheckIdentity()
             startPolling()
+            // 进页自动预检一次，身份/网络状态不用手动点「重新预检」才知道
+            if checks.isEmpty {
+                Task { await runChecks() }
+            }
         }
         .onDisappear {
             timer?.invalidate()
@@ -90,14 +95,14 @@ struct MirrorView: View {
     // MARK: - 状态卡
 
     private var statusCard: some View {
-        AppleCard {
-            VStack(spacing: 14) {
+        AppleCard(padding: 18) {
+            VStack(spacing: 16) {
                 HStack(spacing: 12) {
                     Image(systemName: statusIcon)
                         .font(.system(size: 26, weight: .semibold))
                         .foregroundStyle(runningOrExt ? Theme.brand : Theme.secondary)
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(statusText)
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
@@ -175,9 +180,7 @@ struct MirrorView: View {
             .frame(height: 48)
             .background(
                 RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
-                    .fill(controller.phase.isRunning ? AnyShapeStyle(Theme.red) : AnyShapeStyle(
-                        LinearGradient(colors: [Theme.brand, Color(hex: 0x4B5BFF)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    .fill(controller.phase.isRunning ? AnyShapeStyle(Theme.red) : AnyShapeStyle(Theme.brand))
             )
         }
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
@@ -206,8 +209,7 @@ struct MirrorView: View {
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
-                        .fill(LinearGradient(colors: [Theme.brand, Color(hex: 0x4B5BFF)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .fill(Theme.brand)
                 )
                 .overlay(
                     HStack(spacing: 8) {
@@ -228,8 +230,11 @@ struct MirrorView: View {
     // MARK: - 预检卡
 
     private var preflightCard: some View {
-        AppleCard {
-            VStack(alignment: .leading, spacing: 12) {
+        AppleCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                if let hint = store.identityHint {
+                    SoftBanner(text: hint, icon: "key.horizontal.fill", tone: Theme.orange)
+                }
                 HStack {
                     Text(runningChecks ? "正在预检…" : (checks.isEmpty ? "启动前自动预检身份、网络与仪表" : "最近一次预检结果"))
                         .font(Theme.footnote)
@@ -246,23 +251,31 @@ struct MirrorView: View {
                     }
                     .disabled(runningChecks)
                 }
+                HairLine()
                 ForEach(checks) { result in
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: 12) {
                         Image(systemName: result.passed ? "checkmark.circle.fill" :
                                 (result.warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill"))
                             .foregroundStyle(result.passed ? Theme.green :
                                                 (result.warning ? Color(hex: 0xFF9F0A) : Theme.red))
-                            .font(.system(size: 14))
-                        VStack(alignment: .leading, spacing: 2) {
+                            .font(.system(size: 15))
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(result.name)
-                                .font(Theme.captionStrong)
+                                .font(Theme.footnote.weight(.semibold))
                                 .foregroundStyle(Theme.label)
                             Text(result.detail)
                                 .font(Theme.caption)
                                 .foregroundStyle(Theme.secondary)
+                                .lineSpacing(3)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                }
+                if checks.isEmpty {
+                    Text("点「重新预检」立即检查，或直接启动投屏时自动执行。")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -344,8 +357,8 @@ struct MirrorView: View {
     // MARK: - 网络卡
 
     private var networkCard: some View {
-        AppleCard {
-            VStack(alignment: .leading, spacing: 14) {
+        AppleCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {
                     Image(systemName: "wifi")
                         .foregroundStyle(Theme.brand)
@@ -368,7 +381,7 @@ struct MirrorView: View {
 
                 HairLine()
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Wi-Fi 密码（按名称自动记忆）")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.secondary)
@@ -378,7 +391,7 @@ struct MirrorView: View {
                         .textInputAutocapitalization(.never)
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     Button {
                         store.commitWiFi()
                     } label: {
@@ -412,8 +425,8 @@ struct MirrorView: View {
     // MARK: - 仪表卡
 
     private var dashboardCard: some View {
-        AppleCard {
-            VStack(alignment: .leading, spacing: 14) {
+        AppleCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 10) {
                     Image(systemName: "gauge.with.needle")
                         .foregroundStyle(Theme.brand)
@@ -458,8 +471,8 @@ struct MirrorView: View {
     // MARK: - 指引卡
 
     private var guideCard: some View {
-        AppleCard {
-            VStack(alignment: .leading, spacing: 10) {
+        AppleCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 12) {
                 guideRow(1, "把 iPhone 加入仪表热点（或点上方「加入此网络」）")
                 guideRow(2, "在仪表上打开「投屏」功能页")
                 if mode == "carplay" {
@@ -473,28 +486,30 @@ struct MirrorView: View {
                 Text("身份三件套放入「文件」App → JiheDrive → IdentityImport/ 后重进本页自动导入。音视频仅在本机与局域网内处理，不经过任何服务器。")
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondary)
+                    .lineSpacing(3)
             }
         }
     }
 
     private func guideRow(_ index: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             Text("\(index)")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
+                .frame(width: 21, height: 21)
                 .background(Circle().fill(Theme.brand))
             Text(text)
                 .font(Theme.callout)
                 .foregroundStyle(Theme.label)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     // MARK: - 日志卡
 
     private var logCard: some View {
-        AppleCard {
-            VStack(alignment: .leading, spacing: 8) {
+        AppleCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("最近事件（本地保存 7 天，可导出反馈问题）")
                         .font(Theme.footnote)

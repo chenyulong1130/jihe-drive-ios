@@ -116,7 +116,19 @@ struct CPAccessoryIdentity {
     }
 
     static func hasIdentity() -> Bool {
-        readKeychain() != nil || readBundle() != nil
+        readKeychain() != nil || readBundle() != nil || hasStagedFiles()
+    }
+
+    /// 「文件」App 暂存目录里是否放了任意一个身份文件（可能不完整）。
+    /// hasIdentity 要把它算进去：用户照报错提示把文件放进 IdentityImport/ 后
+    /// 重进页面，预检必须走 load() 真正导入，而不是继续报「未找到」。
+    static func hasStagedFiles() -> Bool {
+        guard let directory = try? stagingDirectory(),
+              FileManager.default.fileExists(atPath: directory.path) else { return false }
+        let names = ["certificate.p7b", "leaf.cer", "private.x963"]
+        return names.contains {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
     }
 
     private static func query(account: String, returnData: Bool) -> [String: Any] {

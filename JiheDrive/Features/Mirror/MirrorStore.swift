@@ -29,10 +29,7 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         cropMode = group?.string(forKey: "mirror.crop") == "fit" ? "fit" : "crop"
         super.init()
         locationManager.delegate = self
-        identityReady = CPAccessoryIdentity.hasIdentity()
-        if !identityReady {
-            identityHint = "未找到 CarPlay 配件身份。请把 certificate.p7b、leaf.cer、private.x963 三个文件放入「文件」App → JiheDrive → IdentityImport/ 目录，重新进入本页自动导入。"
-        }
+        recheckIdentity()
         detectSSID()
     }
 
@@ -188,20 +185,15 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         return text
     }
 
-    /// 重新检查身份（导入三件套后调用）。
+    /// 重新检查身份（进入页面时调用；IdentityImport/ 里有三件套会在这里真正导入）。
     func recheckIdentity() {
-        identityReady = CPAccessoryIdentity.hasIdentity()
-        if identityReady {
+        do {
+            _ = try CPAccessoryIdentity.load()
+            identityReady = true
             identityHint = nil
-            do {
-                _ = try CPAccessoryIdentity.load()
-                identityHint = nil
-            } catch {
-                identityHint = error.localizedDescription
-                identityReady = false
-            }
-        } else {
-            identityHint = "未找到 CarPlay 配件身份。请把 certificate.p7b、leaf.cer、private.x963 三个文件放入「文件」App → JiheDrive → IdentityImport/ 目录，重新进入本页自动导入。"
+        } catch {
+            identityReady = false
+            identityHint = error.localizedDescription
         }
     }
 }
