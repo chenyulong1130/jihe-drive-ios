@@ -519,15 +519,15 @@ enum ModelViewerAsset {
           if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
           return null;
         }
-        // ---------- 大灯光域：可见光锥 + 聚光照地（参数对齐 demo_seat/index.html） ----------
-        // 车头朝 -x（AE4/AE8 世界坐标实测：大灯 x≈-0.5、尾灯 x≈+0.8，地面 y=0）。
+        // ---------- 大灯光域：可见光锥（参数对齐 demo_seat/index.html） ----------
+        // 车头朝 -x（AE4 世界坐标实测：大灯 x≈-0.5、尾灯 x≈+0.8）。
         // 灯口取 L-HighBeam/L-LowBeam 包围盒中心——节点原点≠灯面中心（灯节点位移挂在父级上）。
-        // 真实地面圆盘接收聚光形成自然光斑，边缘径向淡出融入舞台；开灯压暗环境光，光束才出得来。
+        // 不铺深色地面盘：舞台本身是 SwiftUI 渐变，加盘会在浅色/深色下都露出一块深色地面，
+        // 用户要求开灯时地面保持透明，只用光锥表现光照范围。
         const NEAR_DIR = new THREE.Vector3(-1, -0.22, 0); // 近光下压
         const FAR_DIR  = new THREE.Vector3(-1, -0.08, 0); // 远光平射
         let beamGroup = null;
         let beamOrigin = null;
-        let beamGround = null;
         const beams = {};
         let beamSpot = null;
         function makeBeamCone() {
@@ -546,44 +546,17 @@ enum ModelViewerAsset {
           cone.position.copy(from);
           cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
         }
-        function makeGroundFade() {
-          const c = document.createElement('canvas');
-          c.width = 256; c.height = 256;
-          const g = c.getContext('2d');
-          // 边缘尽早淡出（0.45 就开始），低视角下地面盘边缘才不会显形成一条灰线
-          const grad = g.createRadialGradient(128, 128, 30, 128, 128, 127);
-          grad.addColorStop(0, '#ffffff');
-          grad.addColorStop(0.45, '#ffffff');
-          grad.addColorStop(0.98, '#000000');
-          g.fillStyle = grad;
-          g.fillRect(0, 0, 256, 256);
-          return new THREE.CanvasTexture(c);
-        }
         function buildBeam(root) {
           const lampNode = root.getObjectByName('L-HighBeam') || root.getObjectByName('L-LowBeam');
           if (!lampNode) return;
           root.updateMatrixWorld(true);
           beamOrigin = new THREE.Box3().setFromObject(lampNode).getCenter(new THREE.Vector3());
-          const groundY = new THREE.Box3().setFromObject(root).min.y;
-          if (beamGroup) { // 复用页换模型：只更新灯口与地面高度
-            beamGround.position.y = groundY - 0.004;
+          if (beamGroup) { // 复用页换模型：只更新灯口
             applyBeam();
             return;
           }
           beamGroup = new THREE.Group();
           beamGroup.name = 'HeadBeamFX';
-
-          // 地面圆盘：接收聚光形成光斑（demo 同款思路，加 alphaMap 边缘淡出适配透明画布）
-          beamGround = new THREE.Mesh(
-            new THREE.CircleGeometry(6, 48),
-            new THREE.MeshStandardMaterial({
-              color: 0x10141b, roughness: 0.95, metalness: 0,
-              transparent: true, alphaMap: makeGroundFade(), depthWrite: false
-            })
-          );
-          beamGround.rotation.x = -Math.PI / 2;
-          beamGround.position.set(0, groundY - 0.004, 0);
-          beamGroup.add(beamGround);
 
           beams.near = makeBeamCone();
           beams.far = makeBeamCone();

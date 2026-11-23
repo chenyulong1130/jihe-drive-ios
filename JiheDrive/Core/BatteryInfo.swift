@@ -96,16 +96,57 @@ struct BatteryInfo: Identifiable, Hashable {
     static func parse(_ response: [String: Any]) -> [BatteryInfo] {
         let data = response["data"] ?? response
 
+        // batteryInfo 的响应同时有顶层字段和 batteryInfoList：
+        // 顶层才是实时电气（voltage / current / chargeState / chargeStateStr / chargeTimeString），
+        // 列表项只有每包的 bmssoc / bmsVoltage / batteryTemp。旧代码看到数组就只用列表项，
+        // 顶层被整个丢掉——于是电流功率永远空、充电中永远显示"待机"。
+        let top = (data as? [String: Any]).flatMap { make($0, index: 0) }
+
         if let items = array(in: data) {
             let parsed = items.enumerated().compactMap { index, item -> BatteryInfo? in
-                make(item, index: index)
+                guard let one = make(item, index: index) else { return nil }
+                guard let top else { return one }
+                return one.mergingTopLevel(top)
             }
             if !parsed.isEmpty { return parsed }
         }
-        if let single = data as? [String: Any], let one = make(single, index: 0) {
-            return [one]
-        }
+        if let top { return [top] }
         return []
+    }
+
+    /// 列表项 + 顶层补全：每包的 soc/电压/温度以列表项为准，实时电气与充电态以顶层为准。
+    private func mergingTopLevel(_ top: BatteryInfo) -> BatteryInfo {
+        BatteryInfo(
+            id: id,
+            name: name,
+            level: level > 0 ? level : top.level,
+            voltage: voltage > 0 ? voltage : top.voltage,
+            temperature: temperature != 0 ? temperature : top.temperature,
+            current: top.current ?? current,
+            power: top.power ?? power,
+            type: type == "锂电池" ? top.type : type,
+            stateText: top.stateText,
+            isCharging: isCharging || top.isCharging,
+            isPulledOut: isPulledOut || top.isPulledOut,
+            abnormal: abnormal ?? top.abnormal,
+            chargeMinutes: top.chargeMinutes ?? chargeMinutes,
+            fullChargeText: top.fullChargeText ?? fullChargeText,
+            chargeTimeString: top.chargeTimeString ?? chargeTimeString,
+            etaFullText: top.etaFullText ?? etaFullText,
+            cycleCount: cycleCount ?? top.cycleCount,
+            capacity: capacity ?? top.capacity,
+            soh: soh ?? top.soh,
+            score: top.score ?? score,
+            rangeKm: top.rangeKm ?? rangeKm,
+            refreshTime: top.refreshTime ?? refreshTime,
+            powerUseToday: top.powerUseToday ?? powerUseToday,
+            powerUseMonth: top.powerUseMonth ?? powerUseMonth,
+            powerChargeMonth: top.powerChargeMonth ?? powerChargeMonth,
+            chargeCount: top.chargeCount ?? chargeCount,
+            isOnline: isOnline ?? top.isOnline,
+            batteryLevel: batteryLevel ?? top.batteryLevel,
+            detailId: detailId ?? top.detailId
+        )
     }
 
     static func fallback(from vehicle: Vehicle) -> BatteryInfo {
