@@ -476,7 +476,7 @@ enum ModelViewerAsset {
         // 节点名随车型：AE4=FR-Seat-T；AE8=SEAT-Seat-T（与 SEAT-SeatTex-T 同挂 SEAT 组，转父组才整体掀）
         // 车头朝 -x（AE4/AE8 世界坐标实测：大灯/前轮 x<0，尾灯/后轮 x>0），坐垫沿 x 长 0.7~0.8m，
         // 铰链 = 坐垫包围盒前缘(min.x) + 底部(min.y) + 横向中点(z)，绕 z 轴正转尾部上抬。
-        const OPEN_ANGLE = 55 * D2R;
+        const OPEN_ANGLE = 38 * D2R; // 55° 时尾巴前扫过大，观感像坐垫往前飞
         let pivot = null;
         let seatAnim = null;
         let seatTarget = false; // 最近一次 jhSetSeat 的目标，模型就绪前先记下
@@ -507,7 +507,12 @@ enum ModelViewerAsset {
           const seat = (node.name === 'SEAT-Seat-T' && node.parent) ? node.parent : node;
           seat.updateWorldMatrix(true, false);
           const box = new THREE.Box3().setFromObject(seat);
-          const hingeWorld = new THREE.Vector3(box.min.x, box.min.y, (box.min.z + box.max.z) / 2);
+          // 铰链不能放在 bbox 最前缘：坐垫总成前缘伸进踏板区，绕它转整块坐垫会往前扫
+          // 30cm+（用户看到"向前移动"）。收到 15% 长度处，前扫收敛到 ~12cm，观感贴近真车。
+          const hingeWorld = new THREE.Vector3(
+            box.min.x + (box.max.x - box.min.x) * 0.15,
+            box.min.y,
+            (box.min.z + box.max.z) / 2);
           pivot = new THREE.Object3D();
           pivot.name = 'SeatPivot';
           const parent = seat.parent;
