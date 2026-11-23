@@ -331,8 +331,6 @@ struct HeroStage: View {
                                     resetToken: cameraReset + localReset,
                                     active: screenActive,
                                     lightsOn: lightsOn,
-                                    seatOpen: seatOpen,
-                                    seatToken: seatSyncToken,
                                     onDrag: { dragging in
                                         if dragging { modelRotated = true }
                                         onInteract?(dragging)
@@ -340,7 +338,9 @@ struct HeroStage: View {
                                     onOrbitChanged: { rotated in
                                         modelRotated = rotated
                                     },
-                                    onReady: { glbRevealed = true }
+                                    onReady: { glbRevealed = true },
+                                    seatOpen: seatOpen,
+                                    seatToken: seatSyncToken
                                 )
                                 .id(vehicle.vinNo)
                                 .padding(.top, glbTopPad)

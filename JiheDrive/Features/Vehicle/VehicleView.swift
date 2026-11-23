@@ -183,7 +183,7 @@ struct VehicleView: View {
         .onChange(of: model.selectedVehicle?.isCharging) { _, _ in
             syncChargeIsland()
         }
-        .onChange(of: model.liveBatteryOfSelected?.seat) { _, _ in
+        .onChange(of: model.selectedVehicle?.seat) { _, _ in
             seatSyncToken += 1 // 云端坐垫状态变化：主页 3D 模型跟着开/合
         }
         .onChange(of: model.selectedVehicle?.vinNo) { _, _ in
@@ -234,7 +234,7 @@ struct VehicleView: View {
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
-            seatOpen: model.liveBatteryOfSelected?.seat?.isOpen() == true,
+            seatOpen: model.selectedVehicle?.seat?.isOpen() == true,
             seatSyncToken: seatSyncToken,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
