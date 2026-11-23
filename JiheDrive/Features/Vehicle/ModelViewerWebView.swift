@@ -396,11 +396,12 @@ enum ModelViewerAsset {
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
-        // 环境反射（金属漆面）+ 两盏基础灯；深浅主题下光照一致，不做夜间压暗
+        // 环境反射（金属漆面）+ 两盏基础灯；深浅主题下光照一致，开灯时压暗突出光束
         const pmrem = new THREE.PMREMGenerator(renderer);
         scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
         pmrem.dispose();
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 1.6));
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x555555, 1.6);
+        scene.add(hemi);
         const sun = new THREE.DirectionalLight(0xffffff, 1.6);
         sun.position.set(5, 8, 5);
         scene.add(sun);
@@ -518,75 +519,103 @@ enum ModelViewerAsset {
           if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
           return null;
         }
-        // ---------- 近光光域：大灯向车头前方投出可见光锥、真实聚光与地面光斑 ----------
-        // 车头朝 -x（AE4/AE8 世界坐标实测：大灯 L-LowBeam x≈-0.5、尾灯 x≈+0.8，前轮 x<0 后轮 x>0），
-        // 地面 y=0（Shadow 平面），模型已在归一化后调用。
+        // ---------- 大灯光域：可见光锥 + 聚光照地（参数对齐 demo_seat/index.html） ----------
+        // 车头朝 -x（AE4/AE8 世界坐标实测：大灯 x≈-0.5、尾灯 x≈+0.8，地面 y=0）。
+        // 灯口取 L-HighBeam/L-LowBeam 包围盒中心——节点原点≠灯面中心（灯节点位移挂在父级上）。
+        // 真实地面圆盘接收聚光形成自然光斑，边缘径向淡出融入舞台；开灯压暗环境光，光束才出得来。
+        const NEAR_DIR = new THREE.Vector3(-1, -0.22, 0); // 近光下压
+        const FAR_DIR  = new THREE.Vector3(-1, -0.08, 0); // 远光平射
+        let beamGroup = null;
+        let beamOrigin = null;
+        let beamGround = null;
+        const beams = {};
+        let beamSpot = null;
+        function makeBeamCone() {
+          const g = new THREE.ConeGeometry(1, 1, 32, 1, true);
+          g.translate(0, -0.5, 0); // 锥顶移到原点
+          const m = new THREE.MeshBasicMaterial({
+            color: 0xfff2d0, transparent: true, opacity: 0.16,
+            blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false
+          });
+          return new THREE.Mesh(g, m);
+        }
+        function aimBeam(cone, from, dir, len, radius) {
+          cone.scale.set(radius, len, radius);
+          cone.position.copy(from);
+          cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
+        }
+        function makeGroundFade() {
+          const c = document.createElement('canvas');
+          c.width = 256; c.height = 256;
+          const g = c.getContext('2d');
+          const grad = g.createRadialGradient(128, 128, 40, 128, 128, 127);
+          grad.addColorStop(0, '#ffffff');
+          grad.addColorStop(0.72, '#ffffff');
+          grad.addColorStop(1, '#000000');
+          g.fillStyle = grad;
+          g.fillRect(0, 0, 256, 256);
+          return new THREE.CanvasTexture(c);
+        }
         function buildBeam(root) {
-          if (beamGroup) return;
-          const lampNode = root.getObjectByName('L-LowBeam');
+          const lampNode = root.getObjectByName('L-HighBeam') || root.getObjectByName('L-LowBeam');
           if (!lampNode) return;
           root.updateMatrixWorld(true);
-          const box = new THREE.Box3().setFromObject(root);
-          const size = box.getSize(new THREE.Vector3());
-          const from = new THREE.Vector3();
-          lampNode.getWorldPosition(from);
-          const groundY = box.min.y;
-          const reach = Math.max(2.2, size.x * 1.15);
-          const to = new THREE.Vector3(from.x - reach, groundY, from.z);
-          const dir = to.clone().sub(from);
-          const dist = dir.length();
-
+          beamOrigin = new THREE.Box3().setFromObject(lampNode).getCenter(new THREE.Vector3());
+          const groundY = new THREE.Box3().setFromObject(root).min.y;
+          if (beamGroup) { // 复用页换模型：只更新灯口与地面高度
+            beamGround.position.y = groundY - 0.004;
+            applyBeam();
+            return;
+          }
           beamGroup = new THREE.Group();
-          beamGroup.name = 'LowBeamFX';
+          beamGroup.name = 'HeadBeamFX';
 
-          // 真实聚光：照亮前轮 / 挡泥板与落地点附近
-          const spot = new THREE.SpotLight(0xffedd0, 45, dist * 2.4, 0.46, 0.55, 1.6);
-          spot.position.copy(from);
-          spot.target.position.copy(to);
-          beamGroup.add(spot);
-          beamGroup.add(spot.target);
-
-          // 可见光锥：灯口细、落点宽的半透明加色圆台
-          const cone = new THREE.Mesh(
-            new THREE.CylinderGeometry(reach * 0.26, 0.04, dist, 28, 1, true),
-            new THREE.MeshBasicMaterial({
-              color: 0xffe6b0, transparent: true, opacity: 0.10,
-              blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+          // 地面圆盘：接收聚光形成光斑（demo 同款思路，加 alphaMap 边缘淡出适配透明画布）
+          beamGround = new THREE.Mesh(
+            new THREE.CircleGeometry(6, 48),
+            new THREE.MeshStandardMaterial({
+              color: 0x10141b, roughness: 0.95, metalness: 0,
+              transparent: true, alphaMap: makeGroundFade(), depthWrite: false
             })
           );
-          cone.position.copy(from).addScaledVector(dir, 0.5);
-          cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-          beamGroup.add(cone);
+          beamGround.rotation.x = -Math.PI / 2;
+          beamGround.position.set(0, groundY - 0.004, 0);
+          beamGroup.add(beamGround);
 
-          // 地面光斑：径向渐变贴图压平成椭圆
-          const cnv = document.createElement('canvas');
-          cnv.width = 128; cnv.height = 128;
-          const g2 = cnv.getContext('2d');
-          const grad = g2.createRadialGradient(64, 64, 4, 64, 64, 62);
-          grad.addColorStop(0, 'rgba(255,238,186,0.55)');
-          grad.addColorStop(0.55, 'rgba(255,226,156,0.20)');
-          grad.addColorStop(1, 'rgba(255,220,140,0)');
-          g2.fillStyle = grad;
-          g2.fillRect(0, 0, 128, 128);
-          const tex = new THREE.CanvasTexture(cnv);
-          tex.colorSpace = THREE.SRGBColorSpace;
-          const pool = new THREE.Mesh(
-            new THREE.CircleGeometry(reach * 0.26, 40),
-            new THREE.MeshBasicMaterial({
-              map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
-            })
-          );
-          pool.rotation.x = -Math.PI / 2;
-          pool.position.set(to.x, groundY + 0.006, to.z);
-          pool.scale.set(0.8, 1.5, 1);
-          beamGroup.add(pool);
+          beams.near = makeBeamCone();
+          beams.far = makeBeamCone();
+          beamGroup.add(beams.near, beams.far);
 
-          beamGroup.visible = lightsState;
+          beamSpot = new THREE.SpotLight(0xfff2d0, 0, 12, 0.4, 0.5, 1.4);
+          beamSpot.visible = false;
+          beamGroup.add(beamSpot, beamSpot.target);
+          beamGroup.visible = false;
           scene.add(beamGroup);
+        }
+        function applyBeam() {
+          needsRender = true;
+          if (!beamGroup || !beamOrigin) return;
+          const on = lightsState;
+          beamGroup.visible = on;
+          hemi.intensity = on ? 0.9 : 1.6;  // 开灯压暗环境光突出光束（demo 夜间模式同款）
+          sun.intensity = on ? 1.0 : 1.6;
+          if (!on) return;
+          aimBeam(beams.near, beamOrigin, NEAR_DIR, 3.0, 0.55); // 近光：短宽光锥
+          beams.near.visible = true;
+          aimBeam(beams.far, beamOrigin, FAR_DIR, 6.5, 0.75);   // 远光：细长光锥
+          beams.far.visible = true;
+          // app 全车灯包含远光，两者同亮时聚光取远光参数（对齐 demo onFar 分支）
+          beamSpot.color.setHex(0xffffff);
+          beamSpot.angle = 0.32;
+          beamSpot.distance = 16;
+          beamSpot.intensity = 300;
+          beamSpot.visible = true;
+          beamSpot.position.copy(beamOrigin);
+          beamSpot.target.position.copy(beamOrigin.clone().add(FAR_DIR.clone().multiplyScalar(14)));
+          beamSpot.target.updateMatrixWorld();
         }
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
-        let beamGroup = null;    // 近光光域（可见光锥 + 聚光 + 地面光斑），随灯开关
         function applyLights(on) {
           for (const m of lampMats) {
             if (on) {
@@ -597,8 +626,7 @@ enum ModelViewerAsset {
               m.emissiveIntensity = 0;
             }
           }
-          if (beamGroup) beamGroup.visible = !!on;
-          needsRender = true;
+          applyBeam();
         }
         window.jhSetLights = (on) => {
           lightsState = !!on;
