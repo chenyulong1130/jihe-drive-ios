@@ -16,10 +16,40 @@ struct Vehicle3DSheet: View {
     @State private var seatOpen = false
     @State private var seatToken = 0
     /// 坐垫挂载诊断文本（真机排查"点了没反应"用）
-    @State private var seatDebug = "" 
+    @State private var seatDebug = ""
+    /// 坐垫操作提示（真实指令结果）
+    @State private var seatHint = ""
+    @State private var seatBusy = false
 
     /// 深色主题 → 全车灯点亮（不含转向灯）；浅色 → 熄灭。只改车灯自发光，不改场景光照。
     private var lightsOn: Bool { appearance.resolvedScheme == .dark }
+
+    // MARK: - 坐垫（真实指令 + 模型跟随）
+
+    /// 座桶锁是电控释放：能远程"开"，关靠手动。所以：
+    /// 关着时点 → 发真实解锁指令，成功后模型打开并等云端确认；
+    /// 已开时点 → 只把模型合上做预览（硬件不支持远程关）。
+    private func toggleSeat() async {
+        guard !seatBusy else { return }
+        if realSeatOpen == true {
+            seatOpen = false
+            seatToken += 1
+            seatHint = "坐垫需手动关闭，模型已预览合上"
+            return
+        }
+        seatBusy = true
+        defer { seatBusy = false }
+        do {
+            try await model.openCushion(live)
+            seatOpen = true
+            seatToken += 1
+            seatHint = "已发送开坐垫指令"
+            // 尽快拉一次真实状态，让模型与实车对齐
+            await model.loadBattery(vin: live.vinNo, quiet: true)
+        } catch {
+            seatHint = "开坐垫失败：\(error.localizedDescription)"
+        }
+    }
 
     // MARK: - 舞台配色跟随主题（浅色下不再是深色底）
 
@@ -65,7 +95,7 @@ struct Vehicle3DSheet: View {
         .background(Theme.groupedBackground.ignoresSafeArea())
         .sheetChrome()
         .task(id: vehicle.vinNo) {
-            // 打开面板先按真实车况摆坐垫，按钮仍然是预览用的开合控制
+            // 打开面板先按真实车况摆坐垫
             if let open = realSeatOpen {
                 seatOpen = open
                 seatToken += 1
@@ -75,9 +105,15 @@ struct Vehicle3DSheet: View {
             } else {
                 loader.restore(vin: vehicle.vinNo, url: modelURL)
             }
+            // 面板打开期间主动刷新车况：坐垫是云端状态，靠车辆页 90 秒轮询太慢，
+            // 手动开/关坐垫后模型要能在一二十秒内跟上。
+            while !Task.isCancelled {
+                await model.loadBattery(vin: vehicle.vinNo, quiet: true)
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
         }
         .onChange(of: realSeatOpen) { _, open in
-            // 后台轮询拿到新状态时同步模型；过期/未知时保留当前预览不折腾
+            // 真实坐垫状态变化：开→模型打开，关→模型关闭
             guard let open, open != seatOpen else { return }
             seatOpen = open
             seatToken += 1
@@ -252,8 +288,7 @@ struct Vehicle3DSheet: View {
 
             if live.isGLBModel {
                 Button {
-                    seatOpen.toggle()
-                    seatToken += 1   // 触发 jhSetSeat，3D 立即开合；JS 完成后回传终态
+                    Task { await toggleSeat() }
                 } label: {
                     Image(systemName: "figure.seated.side")
                         .font(.system(size: 14, weight: .semibold))
@@ -312,6 +347,18 @@ struct Vehicle3DSheet: View {
     private var controls: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 12) {
+                if !seatHint.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.car.fill").font(.system(size: 11))
+                        Text(seatHint).font(.system(size: 11.5, weight: .medium))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.orange)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Theme.orange.opacity(0.12)))
+                }
                 AppleCard(padding: 14) {
                     VStack(spacing: 12) {
                         CardTitle(text: "整车状态", icon: "cube.transparent", tint: Theme.brand)
