@@ -64,7 +64,7 @@ final class CPBootstrap {
             schedule(after: 0.1) { [weak self] in
                 guard let self, self.active else { return }
                 do {
-                    let bytes = syn.encoded()
+                    let bytes = try syn.encoded()
                     try self.transport.send(bytes)
                     self.stage("已发送 iAP2 SYN（\(bytes.count) 字节）")
                 } catch {
