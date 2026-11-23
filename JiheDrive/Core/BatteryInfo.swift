@@ -38,13 +38,16 @@ struct BatteryInfo: Identifiable, Hashable {
     var hasLiveElectrical: Bool { voltage > 0 || current != nil || power != nil }
 
     /// 以电池接口实时状态为准：有实测电流/功率就是充电中；
-    /// 只有"充"状态文案而没有实时电气数据（电池服务过期、数据断流）不算
+    /// 只有"充"状态文案而没有实时电气数据（电池服务过期、数据断流）不算。
+    /// 注意："未充电"也含"充"字，必须用精确等于，不能用 contains。
+    /// 未充电的车 current 会返回 "0.0"（非 nil），旧逻辑会把它当成"有实时电气"→
+    /// 配合 contains("充") 把每台车都判成充电中（车辆主页/小组件/灵动岛全线误报）。
     var isLiveCharging: Bool {
         if isPulledOut { return false }
-        if stateText.contains("放电") { return false }
-        if let current, abs(current) > 0.3 { return true }
+        if stateText == "未充电" || stateText == "放电中" { return false }
+        if let current, current > 0.3 { return true }
         if let power, power > 10 { return true }
-        guard stateText.contains("充") else { return false }
+        guard stateText == "充电中" else { return false }
         return current != nil || power != nil
     }
 
