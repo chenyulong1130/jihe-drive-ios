@@ -144,7 +144,7 @@ struct VehicleView: View {
 
             // 充电中约 20 秒刷电池；平时约 90 秒。离开车辆 Tab 不刷
             while !Task.isCancelled {
-                let charging = model.batteries.first { !$0.id.hasPrefix("vehicle-") }?.isLiveCharging == true
+                let charging = model.liveBatteryOfSelected?.isLiveCharging == true
                 try? await Task.sleep(nanoseconds: charging ? 20_000_000_000 : 90_000_000_000)
                 guard !Task.isCancelled else { break }
                 guard scenePhase == .active, activeMainTab == .vehicle else { continue }
@@ -226,7 +226,7 @@ struct VehicleView: View {
             prefers3D: vehicle.model3DURL != nil,
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
-            liveCharging: model.batteries.first { !$0.id.hasPrefix("vehicle-") }?.isLiveCharging,
+            liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
             tireFrontTemp: model.tire?.frontTemp,
@@ -379,7 +379,7 @@ struct VehicleView: View {
 
     private func syncChargeIsland() {
         guard let vehicle = model.selectedVehicle else { return }
-        let live = model.batteries.first { !$0.id.hasPrefix("vehicle-") }
+        let live = model.liveBatteryOfSelected
         ChargeLiveActivityController.sync(vehicle: vehicle, battery: live)
     }
 

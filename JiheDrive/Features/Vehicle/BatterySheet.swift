@@ -76,7 +76,8 @@ struct BatterySheet: View {
 
     // MARK: - 数据
 
-    private var battery: BatteryInfo? { model.batteries.first }
+    // 只认属于当前选中车的电池：切车瞬间不能把上一台车的电压/充电态显示过来
+    private var battery: BatteryInfo? { model.batteriesBelongToSelected ? model.batteries.first : nil }
 
     private var hasData: Bool {
         battery != nil || vehicle.soc > 0 || !samples.isEmpty
@@ -716,7 +717,7 @@ struct BatterySheet: View {
     }
 
     private func sampleNow() {
-        let live = model.batteries.first
+        let live = model.batteriesBelongToSelected ? model.batteries.first : nil
         let value = live?.level ?? vehicle.soc
         let p: Double? = {
             if let w = live?.power { return w }

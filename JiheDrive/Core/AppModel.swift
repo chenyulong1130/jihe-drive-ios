@@ -8,6 +8,21 @@ final class AppModel: ObservableObject {
     @Published private(set) var isLoggedIn: Bool
     @Published private(set) var vehicles: [Vehicle] = []
     @Published private(set) var batteries: [BatteryInfo] = []
+    /// batteries 属于哪台车。充电态是**按车**的，切车瞬间/加载空窗期不能把上一台车的
+    /// 电池套到当前车上（否则会出现"所有车都在充电"）。视图与灵动岛都必须先校验这个。
+    @Published private(set) var batteriesVin: String?
+
+    /// 当前 batteries 是否确实属于选中车辆
+    var batteriesBelongToSelected: Bool {
+        guard let batteriesVin, let vin = selectedVehicle?.vinNo else { return false }
+        return WidgetSnapshot.sameVin(batteriesVin, vin)
+    }
+
+    /// 只属于当前车的电池（充电态展示、灵动岛、充电 UI 的唯一入口）
+    var liveBatteryOfSelected: BatteryInfo? {
+        guard batteriesBelongToSelected else { return nil }
+        return batteries.first { !$0.id.hasPrefix("vehicle-") }
+    }
     @Published private(set) var batteryLoading = false
     @Published var batteryError: String?
     @Published private(set) var tire: TireReading?
@@ -19,8 +34,9 @@ final class AppModel: ObservableObject {
             WidgetSnapshot.persistSelectedVin(selectedVin)
             guard oldValue != selectedVin else { return }
             seedWidgetSnap(for: selectedVin)
-            // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度
+            // 换车后旧电池数据必须清掉，否则详情页会显示上一台车的电压温度/充电态
             batteries = []
+            batteriesVin = nil
             batteryError = nil
             tire = nil
             detailVehicle = nil
@@ -286,6 +302,7 @@ final class AppModel: ObservableObject {
                 items = [BatteryInfo.fallback(from: vehicle)]
             }
             batteries = items
+            batteriesVin = vin
             if let battery = items.first, let current = selectedVehicle, WidgetSnapshot.sameVin(current.vinNo, vin) {
                 let patched = current.withBattery(battery)
                 if detailVehicle?.vinNo == vin {
@@ -316,6 +333,7 @@ final class AppModel: ObservableObject {
 
     func clearBattery() {
         batteries = []
+        batteriesVin = nil
         batteryError = nil
     }
 

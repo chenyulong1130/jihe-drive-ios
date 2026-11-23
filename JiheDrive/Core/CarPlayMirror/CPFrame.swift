@@ -103,6 +103,16 @@ enum CPAnnexB {
         return output
     }
 
+    /// NAL 单元数组 → AVCC（4 字节长度前缀），供 AVSampleBufferDisplayLayer / VideoToolbox 使用。
+    static func lengthPrefixed(_ units: [Data]) -> Data {
+        var output = Data()
+        for unit in units {
+            output.putBE32(UInt32(unit.count))
+            output.append(unit)
+        }
+        return output
+    }
+
     /// 切分 Annex-B 流里的 NAL 单元（保留起始码前的去重逻辑由调用方处理）。
     static func units(in data: Data) throws -> [Data] {
         var units: [Data] = []

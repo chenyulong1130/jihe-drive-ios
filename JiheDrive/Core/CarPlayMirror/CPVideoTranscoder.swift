@@ -20,6 +20,8 @@ final class CPVideoTranscoder {
     let bitrate: Int = 2_500_000
 
     var scaleMode: ScaleMode = .fit
+    /// 解码失效时由上层请求系统重发关键帧（对齐 CarWithin 的恢复闭环）。
+    var onKeyframeNeeded: (() -> Void)?
 
     // 解码状态
     private let decodeQueue = DispatchQueue(label: "cp.transcode.decode")
@@ -127,6 +129,13 @@ final class CPVideoTranscoder {
         case .failure: return nil
         case nil: return nil
         }
+    }
+
+    /// 是否已有可供重编码的解码帧。喂帧循环在首帧到达前不要消耗仪表的 0x72 拉帧请求。
+    var hasDecodedFrame: Bool {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        return latestBuffer != nil
     }
 
     /// 预览用：取最新解码帧（buffer 与递增帧号；帧号用于预览层去重）。
@@ -253,7 +262,8 @@ final class CPVideoTranscoder {
         let decodeStatus = VTDecompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             formatDescription: format,
-            decoderSpecification: [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: true] as CFDictionary,
+            // 与 CarWithin 一致关闭硬解：锁屏/切后台时硬解会被系统回收且可能永久停摆。
+            decoderSpecification: [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false] as CFDictionary,
             imageBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferOpenGLCompatibilityKey: true,
@@ -278,16 +288,25 @@ final class CPVideoTranscoder {
             flags: infoFlags,
             infoFlagsOut: &flagsOut,
             completionHandler: { [weak self] status, _, imageBuffer, _, _, _ in
-                guard status == noErr, let imageBuffer else { return }
-                self?.store(imageBuffer: imageBuffer)
+                guard let self else { return }
+                guard status == noErr, let imageBuffer else {
+                    self.handleDecodeFailure(status)
+                    return
+                }
+                self.store(imageBuffer: imageBuffer)
             })
         if status != noErr {
-            MirrorLogStore.append("解码失败（\(status)）")
-            // 解码器失效时从关键帧重建
-            if status == kVTVideoDecoderMalfunctionErr {
-                invalidate()
-            }
+            handleDecodeFailure(status)
         }
+    }
+
+    private func handleDecodeFailure(_ status: OSStatus) {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastCodecFailure >= 0.5 else { return }
+        lastCodecFailure = now
+        MirrorLogStore.append("解码失败（\(status)），等待关键帧重建")
+        invalidate()
+        onKeyframeNeeded?()
     }
 
     private func store(imageBuffer: CVBuffer) {
@@ -374,6 +393,9 @@ final class CPVideoTranscoder {
             kVTCompressionPropertyKey_ExpectedFrameRate: fps,
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
+            // 每秒一个 IDR：仪表/浏览器中途接入或丢帧后可快速重新同步。
+            kVTCompressionPropertyKey_MaxKeyFrameInterval: Int32(fps),
+            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 1,
         ]
         guard VTSessionSetProperties(session, propertyDictionary: properties as CFDictionary) == noErr,
               VTCompressionSessionPrepareToEncodeFrames(session) == noErr else {

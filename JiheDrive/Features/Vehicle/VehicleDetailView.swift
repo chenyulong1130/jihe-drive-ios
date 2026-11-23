@@ -11,7 +11,7 @@ struct VehicleDetailView: View {
     @State private var showSettings = false
     @State private var showNavOptions = false
 
-    private var battery: BatteryInfo? { model.batteries.first }
+    private var battery: BatteryInfo? { model.batteriesBelongToSelected ? model.batteries.first : nil }
 
     var body: some View {
         SheetShell(title: "车辆详情", subtitle: vehicle.name, onClose: { dismiss() }) {

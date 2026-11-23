@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// 线程安全的「最新视频帧」槽：CarPlay 收帧线程写入，仪表拉帧线程取走。
 final class CPFrameBox {
@@ -80,6 +81,8 @@ final class CPMirrorController: ObservableObject {
     }
 
     private let videoBox = CPFrameBox()
+    /// 原始视频帧广播：预览层直接订阅，避免依赖转码器自解码。
+    let frameHub = CPVideoFrameHub()
     /// 兼容性重编码管线（与 CarWithin 验证参数一致：1024×480@25fps/2.5Mbps/Baseline）
     let transcoder = CPVideoTranscoder()
     private var bootstrap: CPBootstrap?
@@ -104,6 +107,7 @@ final class CPMirrorController: ObservableObject {
         guard !phase.isRunning else { return }
         let token = UUID()
         startToken = token
+        UIApplication.shared.isIdleTimerDisabled = true
         DispatchQueue.main.async { [weak self] in
             self?.logs.removeAll(keepingCapacity: true)
         }
@@ -112,6 +116,7 @@ final class CPMirrorController: ObservableObject {
         self.castToZeeho = castToZeeho
         self.localVideoReceived = false
         self.pendingControlConnected = false
+        self.transcoder.onKeyframeNeeded = { [weak self] in self?.requestKeyFrame() }
         self.zeehoStatus = castToZeeho ? "等待连接" : "未启用"
         setCropMode(UserDefaults(suiteName: MirrorLogStore.appGroupID)?.string(forKey: "mirror.crop") ?? "crop")
 
@@ -139,8 +144,11 @@ final class CPMirrorController: ObservableObject {
         let receiver = CPReceiver()
         receiver.onLog = { [weak self] in self?.appendLog($0) }
         receiver.onVideo = { [weak self] data, codec in
-            guard codec == .h264, let self else { return }
+            guard let self else { return }
             self.videoBox.store(data)
+            // 预览直接吃原始访问单元；转码器只服务于后续极核输出。
+            self.frameHub.publish(.frame(data, codec))
+            guard codec == .h264 else { return }
             self.transcoder.appendAnnexB(data)
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.localVideoReceived else { return }
@@ -177,6 +185,7 @@ final class CPMirrorController: ObservableObject {
 
     func stop() {
         startToken = UUID()
+        UIApplication.shared.isIdleTimerDisabled = false
         feederTask?.cancel()
         feederTask = nil
         bootstrap?.stop()
@@ -186,6 +195,7 @@ final class CPMirrorController: ObservableObject {
         zeehoLink?.stop()
         zeehoLink = nil
         videoBox.clear()
+        frameHub.publish(.reset)
         transcoder.invalidate()
         stateLock.lock()
         firstFrameSent = false
@@ -309,6 +319,11 @@ final class CPMirrorController: ObservableObject {
             var first = true
             var nextFrameTime: TimeInterval = 0
             while !Task.isCancelled, let link, !link.isClosed, let self {
+                // 极核是拉帧模式：首帧未解出前不要消耗 0x72，否则仪表可能一直黑屏。
+                while !Task.isCancelled, !self.transcoder.hasDecodedFrame {
+                    Thread.sleep(forTimeInterval: 0.02)
+                }
+                guard !Task.isCancelled, !link.isClosed else { break }
                 guard link.waitForFrameRequest() else {
                     Thread.sleep(forTimeInterval: 0.1)
                     continue
@@ -321,7 +336,15 @@ final class CPMirrorController: ObservableObject {
                     continue
                 }
                 nextFrameTime = ProcessInfo.processInfo.systemUptime + 1.0 / 25.0
-                guard let frame = self.transcoder.encodeLatest(forceKeyframe: first) else {
+                // 一次拉帧对应一次回帧：编码失败时在本次拉取内重试，别把请求吞掉。
+                var frame: Data?
+                for _ in 0..<20 {
+                    frame = self.transcoder.encodeLatest(forceKeyframe: first)
+                    if frame != nil { break }
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                guard let frame else {
+                    self.requestKeyFrame()
                     continue
                 }
                 link.sendVideoFrame(frame, isFirstFrame: first)
@@ -379,6 +402,9 @@ final class CPMirrorController: ObservableObject {
     func pressBack() { receiver?.pressKnob(back: true) }
     func pressSelect() { receiver?.pressKnob(select: true) }
     func requestSiri() { receiver?.requestSiri() }
+
+    /// 显示层/转码器需要重新同步时，请系统立即编码一个关键帧。
+    func requestKeyFrame() { receiver?.requestKeyFrame() }
 
     // MARK: - 状态
 

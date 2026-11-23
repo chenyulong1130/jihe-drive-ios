@@ -247,7 +247,7 @@ struct SettingsView: View {
                 row(
                     icon: "battery.75percent",
                     title: "电池信息",
-                    detail: model.batteries.first.map { "\($0.level)% · \($0.stateText)" } ?? "未读取"
+                    detail: (model.batteriesBelongToSelected ? model.batteries.first : nil).map { "\($0.level)% · \($0.stateText)" } ?? "未读取"
                 ) {
                     showBattery = true
                 }
