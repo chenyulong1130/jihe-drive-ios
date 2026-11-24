@@ -152,7 +152,7 @@ struct ModelViewerWebView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, UIGestureRecognizerDelegate, WKScriptMessageHandler {
-        let scheme = ModelSchemeHandler()
+        let scheme = ModelSchemeHandler.shared
         var onDrag: ((Bool) -> Void)?
         var onOrbitChanged: ((Bool) -> Void)?
         var onReady: (() -> Void)?
@@ -894,18 +894,32 @@ enum ModelViewerAsset {
 final class ModelSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "jhmodel"
 
+    /// 全局共享单例：池化 WebView 的 scheme handler 无法在创建后更换，
+    /// 之前每个 coordinator 一个实例，池复用/进程死亡后 force reload 时
+    /// 新 coordinator 的 replace 写进自己的 scheme，视图仍向旧实例要数据 → 404 空白
+    /// （"A→B→A 切车模型不加载"的根因）。token 化路径 + 共享单例彻底消除串台。
+    static let shared = ModelSchemeHandler()
+
     private var files: [String: (data: Data, mime: String)] = [:]
+    /// 保留最近 N 次加载的资源（每份 glb 6~8MB，不能无限堆）
+    private var tokenOrder: [String] = []
+    private let maxTokens = 4
     private let lock = NSLock()
 
     func replace(token: String, glb: Data, script: Data, extra: [String: (data: Data, mime: String)] = [:]) {
         lock.lock()
-        // 先清空：上一份 glb 有 6~8MB，不清理会随每次切车线性吃内存
-        files.removeAll()
         let prefix = "/\(token)"
         files["\(prefix)/model.glb"] = (glb, "model/gltf-binary")
         files["\(prefix)/model-viewer.min.js"] = (script, "text/javascript")
         files["\(prefix)/index.html"] = (Data(), "text/html")
         for (path, entry) in extra { files["\(prefix)\(path)"] = entry }
+        tokenOrder.removeAll { $0 == token }
+        tokenOrder.append(token)
+        // 只淘汰最旧的 token；还在池里的页面最多保留最近 4 次加载的资源
+        while tokenOrder.count > maxTokens, let old = tokenOrder.first {
+            tokenOrder.removeFirst()
+            files = files.filter { !$0.key.hasPrefix("/\(old)/") }
+        }
         lock.unlock()
     }
 

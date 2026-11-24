@@ -23,6 +23,12 @@ struct WidgetSnap: Equatable {
     var brake = 0
     var maxSpeed = 0
     var tireText = ""
+    /// 胎压前后分列（车图下方居中左右排版用），如 "前 2.0bar"
+    var tireFrontText = ""
+    var tireRearText = ""
+    /// 充电功率/电流文本（充电时显示，如 "450W"、"2.1A"）
+    var chargePowerText = ""
+    var chargeCurrentText = ""
     var tireBound = false
     var signedToday = false
     var communityDone = false
@@ -76,6 +82,10 @@ struct WidgetSnap: Equatable {
             "brake": brake,
             "maxSpeed": maxSpeed,
             "tireText": tireText,
+            "tireFrontText": tireFrontText,
+            "tireRearText": tireRearText,
+            "chargePowerText": chargePowerText,
+            "chargeCurrentText": chargeCurrentText,
             "tireBound": tireBound,
             "signedToday": signedToday,
             "communityDone": communityDone,
@@ -115,6 +125,10 @@ struct WidgetSnap: Equatable {
         snap.brake = int(raw["brake"])
         snap.maxSpeed = int(raw["maxSpeed"])
         snap.tireText = string(raw["tireText"])
+        snap.tireFrontText = string(raw["tireFrontText"])
+        snap.tireRearText = string(raw["tireRearText"])
+        snap.chargePowerText = string(raw["chargePowerText"])
+        snap.chargeCurrentText = string(raw["chargeCurrentText"])
         snap.tireBound = bool(raw["tireBound"]) || !snap.tireText.isEmpty
         snap.signedToday = bool(raw["signedToday"])
         snap.communityDone = bool(raw["communityDone"])
@@ -258,6 +272,25 @@ enum WidgetSnapshot {
             let formatted = WidgetSnapshot.tireCaption(tire)
             snap.tireText = formatted.text
             snap.tireBound = formatted.bound
+            snap.tireFrontText = Self.tireSideText(tire.frontBar, tire.frontTemp, label: "前")
+            snap.tireRearText = Self.tireSideText(tire.rearBar, tire.rearTemp, label: "后")
+        }
+        // 充电中显示功率/电流（未充电时清空，避免旧值残留）
+        if let battery = model.liveBatteryOfSelected, battery.isLiveCharging {
+            let watts: Double? = {
+                if let p = battery.power { return p }
+                if let a = battery.current, battery.voltage > 0 { return abs(a) * battery.voltage }
+                return nil
+            }()
+            if let watts, watts > 0 {
+                snap.chargePowerText = "\(Int(watts.rounded()))W"
+            }
+            if let amps = battery.current {
+                snap.chargeCurrentText = String(format: "%.1fA", amps)
+            }
+        } else {
+            snap.chargePowerText = ""
+            snap.chargeCurrentText = ""
         }
         if let signin {
             snap.signedToday = signin.signedToday
@@ -391,6 +424,8 @@ enum WidgetSnapshot {
             snap.tireText = old.tireText
             snap.tireBound = old.tireBound
         }
+        if snap.tireFrontText.isEmpty, !old.tireFrontText.isEmpty { snap.tireFrontText = old.tireFrontText }
+        if snap.tireRearText.isEmpty, !old.tireRearText.isEmpty { snap.tireRearText = old.tireRearText }
         if snap.totalMile == 0, old.totalMile > 0 { snap.totalMile = old.totalMile }
         if snap.monthMile == "--", old.monthMile != "--" { snap.monthMile = old.monthMile }
     }
@@ -551,6 +586,18 @@ enum WidgetSnapshot {
             return String(format: "%.1fbar", bar)
         }
         return ("\(one(front, reading?.frontTemp)) / \(one(rear, reading?.rearTemp))", true)
+    }
+
+    /// 单侧胎压文案（车图下方左右排版用），无效读数返回空串
+    private static func tireSideText(_ bar: Double?, _ temp: Double?, label: String) -> String {
+        guard let bar, bar > 0.3 else { return "" }
+        var text = label + " "
+        if let temp, temp != 0 {
+            text += String(format: "%.1fbar %.0f°", bar, temp)
+        } else {
+            text += String(format: "%.1fbar", bar)
+        }
+        return text
     }
 
     static func snapshotURL() -> URL? {

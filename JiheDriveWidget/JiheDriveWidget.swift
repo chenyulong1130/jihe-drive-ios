@@ -146,7 +146,7 @@ struct JiheDriveWidgetEntryView: View {
                     }
                     progress
                         .frame(maxWidth: 128)
-                    Text("\(snap.charging ? "充电中" : "未充电") · \(seatStatusText)")
+                    Text(chargingLine)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color(hex: 0x94A3B8))
                     Spacer(minLength: 4)
@@ -157,12 +157,20 @@ struct JiheDriveWidgetEntryView: View {
                 VStack(spacing: 4) {
                     vehicleImage
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if !tireLabel.isEmpty {
-                        Text(tireLabel)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Color(hex: 0x94A3B8))
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    if !snap.tireFrontText.isEmpty || !snap.tireRearText.isEmpty {
+                        // 胎压：车图正下方，前/后左右分布
+                        HStack(spacing: 0) {
+                            Text(snap.tireFrontText.isEmpty ? "前 --" : snap.tireFrontText)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Color(hex: 0x94A3B8))
+                                .monospacedDigit()
+                            Spacer(minLength: 8)
+                            Text(snap.tireRearText.isEmpty ? "后 --" : snap.tireRearText)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Color(hex: 0x94A3B8))
+                                .monospacedDigit()
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(width: 168)
@@ -243,7 +251,7 @@ struct JiheDriveWidgetEntryView: View {
                             .foregroundStyle(Color(hex: 0x6B7280))
                     }
                     progress
-                    Text("\(snap.charging ? "充电中" : "未充电") · \(seatStatusText)")
+                    Text(chargingLine)
                         .font(.system(size: 11))
                         .foregroundStyle(Color(hex: 0x94A3B8))
                     controlBar
@@ -254,10 +262,19 @@ struct JiheDriveWidgetEntryView: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     vehicleImage
                         .frame(maxWidth: .infinity, maxHeight: 120)
-                    if !tireLabel.isEmpty {
-                        Text("胎压 \(tireLabel)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color(hex: 0x9AA4B2))
+                    if !snap.tireFrontText.isEmpty || !snap.tireRearText.isEmpty {
+                        HStack(spacing: 0) {
+                            Text(snap.tireFrontText.isEmpty ? "前 --" : snap.tireFrontText)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color(hex: 0x9AA4B2))
+                                .monospacedDigit()
+                            Spacer(minLength: 8)
+                            Text(snap.tireRearText.isEmpty ? "后 --" : snap.tireRearText)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color(hex: 0x9AA4B2))
+                                .monospacedDigit()
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(width: 168)
@@ -397,11 +414,6 @@ struct JiheDriveWidgetEntryView: View {
         .minimumScaleFactor(0.7)
     }
 
-    private var tireLabel: String {
-        if snap.tireBound, !snap.tireText.isEmpty { return snap.tireText }
-        return ""
-    }
-
     private var lotteryPillText: String {
         if snap.lotteryLeft == 0 || snap.lotteryClaimed {
             if snap.lotteryText.contains("盲盒") { return snap.lotteryText }
@@ -434,6 +446,17 @@ struct JiheDriveWidgetEntryView: View {
         .frame(height: 7)
     }
 
+    /// 电池下方一行：充电时显示功率/电流，不带坐垫状态（坐垫在控制条图标上）
+    private var chargingLine: String {
+        if snap.charging {
+            var parts: [String] = []
+            if !snap.chargePowerText.isEmpty { parts.append(snap.chargePowerText) }
+            if !snap.chargeCurrentText.isEmpty { parts.append(snap.chargeCurrentText) }
+            return parts.isEmpty ? "充电中" : "充电中 · " + parts.joined(separator: " ")
+        }
+        return "未充电"
+    }
+
     private var controlBar: some View {
         HStack(spacing: 14) {
             controlButton(
@@ -444,12 +467,15 @@ struct JiheDriveWidgetEntryView: View {
             )
             controlButton(
                 intent: WidgetCushionIntent(),
-                symbol: "carseat.right.fill",
                 tint: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155),
                 label: "\(seatStatusText)，点击解锁坐垫",
                 badge: snap.seatOpen == true ? Color(hex: 0xEA580C)
                     : (snap.seatOpen == false ? Color(hex: 0x166534) : nil)
-            )
+            ) {
+                WidgetSeatIcon(open: snap.seatOpen == true,
+                               color: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155))
+                    .frame(width: 26, height: 17)
+            }
             controlButton(
                 intent: WidgetFindIntent(),
                 symbol: "light.beacon.max.fill",
@@ -466,10 +492,22 @@ struct JiheDriveWidgetEntryView: View {
         label: String,
         badge: Color? = nil
     ) -> some View {
-        Button(intent: intent) {
+        controlButton(intent: intent, tint: tint, label: label, badge: badge) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(tint)
+        }
+    }
+
+    private func controlButton<I: AppIntent>(
+        intent: I,
+        tint: Color,
+        label: String,
+        badge: Color? = nil,
+        @ViewBuilder icon: () -> some View
+    ) -> some View {
+        Button(intent: intent) {
+            icon()
                 .frame(width: 28, height: 28)
                 .overlay(alignment: .bottomTrailing) {
                     if let badge {
@@ -557,5 +595,64 @@ struct JiheDriveHomeWidget: Widget {
         .description("今日骑行、电量、积分、签到与社区")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
+    }
+}
+
+/// 小组件坐垫图标（按参考图重画）：侧视座垫 + 托盘底盘线稿；
+/// 开启态座垫绕前铰链上抬并带支撑杆，关闭态座垫平放。
+struct WidgetSeatIcon: View {
+    var open: Bool
+    var color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width
+            let h = size.height
+
+            // 座垫（填充）：闭合侧视轮廓，鼻部在前（左）、尾部加厚（右）
+            var cushion = Path()
+            cushion.move(to: CGPoint(x: 0.06 * w, y: 0.44 * h))
+            cushion.addCurve(to: CGPoint(x: 0.86 * w, y: 0.30 * h),
+                             control1: CGPoint(x: 0.16 * w, y: 0.10 * h),
+                             control2: CGPoint(x: 0.58 * w, y: 0.08 * h))
+            cushion.addCurve(to: CGPoint(x: 0.12 * w, y: 0.54 * h),
+                             control1: CGPoint(x: 0.94 * w, y: 0.42 * h),
+                             control2: CGPoint(x: 0.52 * w, y: 0.58 * h))
+            cushion.closeSubpath()
+            if open {
+                // 绕前铰链（约 0.24, 0.5）上抬 22°
+                let pivot = CGPoint(x: 0.24 * w, y: 0.50 * h)
+                var transform = CGAffineTransform(translationX: pivot.x, y: pivot.y)
+                transform = transform.rotated(by: -.pi * 0.122).translatedBy(x: -pivot.x, y: -pivot.y)
+                cushion = cushion.applying(transform)
+                    .applying(CGAffineTransform(translationX: 0, y: 0.04 * h))
+            }
+            context.fill(cushion, with: .color(color))
+
+            let line = StrokeStyle(lineWidth: min(w, h) * 0.075, lineCap: .round, lineJoin: .round)
+
+            // 底盘（描边）：浅托盘轮廓，右侧上翘
+            var base = Path()
+            base.move(to: CGPoint(x: 0.94 * w, y: 0.56 * h))
+            base.addLine(to: CGPoint(x: 0.94 * w, y: 0.86 * h))
+            base.addCurve(to: CGPoint(x: 0.88 * w, y: 0.93 * h),
+                          control1: CGPoint(x: 0.94 * w, y: 0.92 * h),
+                          control2: CGPoint(x: 0.92 * w, y: 0.93 * h))
+            base.addLine(to: CGPoint(x: 0.12 * w, y: 0.93 * h))
+            base.addCurve(to: CGPoint(x: 0.06 * w, y: 0.86 * h),
+                          control1: CGPoint(x: 0.08 * w, y: 0.93 * h),
+                          control2: CGPoint(x: 0.06 * w, y: 0.92 * h))
+            base.addLine(to: CGPoint(x: 0.06 * w, y: 0.56 * h))
+            context.stroke(base, with: .color(color), style: line)
+
+            if open {
+                // 支撑杆：底盘中部顶到座垫尾部
+                var strut = Path()
+                strut.move(to: CGPoint(x: 0.50 * w, y: 0.88 * h))
+                strut.addLine(to: CGPoint(x: 0.72 * w, y: 0.34 * h))
+                context.stroke(strut, with: .color(color), style: line)
+            }
+        }
+        .aspectRatio(100 / 62, contentMode: .fit)
     }
 }

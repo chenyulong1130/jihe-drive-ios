@@ -725,7 +725,7 @@ final class ReplayMapGLBView: WKWebView {
     private var lastYaw = Double.nan
 
     static func make() -> ReplayMapGLBView {
-        let handler = ModelSchemeHandler()
+        let handler = ModelSchemeHandler.shared
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(handler, forURLScheme: mapScheme)
         return ReplayMapGLBView(handler: handler, configuration: config)
