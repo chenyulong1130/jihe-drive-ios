@@ -236,6 +236,8 @@ struct ModelViewerWebView: UIViewRepresentable {
             if let d = ModelViewerAsset.shared.threeData { extra["/three.module.min.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.gltfLoaderData { extra["/GLTFLoader.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.orbitControlsData { extra["/OrbitControls.js"] = (d, "text/javascript") }
+            if let d = ModelViewerAsset.shared.rgbeLoaderData { extra["/RGBELoader.js"] = (d, "text/javascript") }
+            if let d = ModelViewerAsset.shared.neutralHdrData { extra["/neutral.hdr"] = (d, "application/octet-stream") }
             if let d = ModelViewerAsset.shared.roomEnvironmentData { extra["/RoomEnvironment.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.bufferUtilsData { extra["/BufferGeometryUtils.js"] = (d, "text/javascript") }
             // 每次加载用唯一 token 子路径：所有页面曾经共用 jhmodel://local/model.glb，
@@ -361,6 +363,8 @@ enum ModelViewerAsset {
         let orbitControlsData: Data?
         let roomEnvironmentData: Data?
         let bufferUtilsData: Data?
+        let rgbeLoaderData: Data?          // HDR 环境加载器
+        let neutralHdrData: Data?          // 官方 model-viewer neutral 环境贴图
 
         init() {
             func load(_ name: String, _ ext: String) -> Data? {
@@ -373,6 +377,8 @@ enum ModelViewerAsset {
             orbitControlsData = load("OrbitControls", "js")
             roomEnvironmentData = load("RoomEnvironment", "js")
             bufferUtilsData = load("BufferGeometryUtils", "js")
+            rgbeLoaderData = load("RGBELoader", "js")
+            neutralHdrData = load("neutral", "hdr")
         }
     }
 
@@ -405,6 +411,7 @@ enum ModelViewerAsset {
         import * as THREE from 'three';
         import { GLTFLoader } from './GLTFLoader.js';
         import { OrbitControls } from './OrbitControls.js';
+        import { RGBELoader } from './RGBELoader.js';
 
         const INTERACTIVE = \(interactive);
         const AUTO_ROTATE = \(autoRotate);
@@ -415,49 +422,24 @@ enum ModelViewerAsset {
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setClearColor(0x000000, 0);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.0;
+        renderer.toneMappingExposure = 1.05;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
-        // 金属漆车身（metalness 高）的颜色几乎全靠环境反射成像，漫射灯（方向光/半球光）
-        // 对它基本无效——这就是之前怎么加补光都治不了"侧边死黑"的原因。
-        // RoomEnvironment 自带窗户与明暗面，车侧转到背对亮窗的方向就反射出深色。
-        // 换成四面均匀的渐变摄影棚环境球（底 0.6 → 顶 1.05）+ 三条高亮"软箱"灯带：
-        // 金属件靠软箱高光出亮泽，哑光件不受影响；材质参数一律不动
-        // （不做 envMapIntensity/曝光干预），配色以模型贴图为准。
+        // 官方 model-viewer neutral 环境贴图（与构建 69 前的 model-viewer 完全同源）：
+        // 原始配色/银色漆按贴图原样呈现，无任何额外干预。neutral 本身是低反差
+        // 预过滤环境，四面受光均匀，不会出现"背光侧死黑"。HDR 未就绪前用弱半球光兜底。
         const pmrem = new THREE.PMREMGenerator(renderer);
-        const envScene = new THREE.Scene();
-        const envGeo = new THREE.SphereGeometry(10, 32, 16);
-        const envPos = envGeo.attributes.position;
-        const envColors = [];
-        for (let i = 0; i < envPos.count; i++) {
-          const t = (envPos.getY(i) / 10 + 1) / 2; // 0=底部 → 1=顶部
-          const v = 0.6 + 0.45 * t;
-          envColors.push(v, v, v);
-        }
-        envGeo.setAttribute('color', new THREE.Float32BufferAttribute(envColors, 3));
-        envScene.add(new THREE.Mesh(envGeo,
-          new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
-        function addSoftbox(angleDeg, elevDeg, intensity) {
-          const mesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(6, 3),
-            new THREE.MeshBasicMaterial({
-              color: new THREE.Color(intensity, intensity, intensity),
-              side: THREE.DoubleSide
-            })
-          );
-          const a = angleDeg * Math.PI / 180, e = elevDeg * Math.PI / 180, r = 9;
-          mesh.position.set(Math.sin(a) * Math.cos(e) * r, Math.sin(e) * r, Math.cos(a) * Math.cos(e) * r);
-          mesh.lookAt(0, 0, 0);
-          envScene.add(mesh);
-        }
-        addSoftbox(0, 55, 4.5); // 相机正上方主灯（用户反馈银色偏白灰，软箱收敛）
-        addSoftbox(120, 40, 3.2); // 左后补光
-        addSoftbox(240, 40, 3.2); // 右后补光
-        scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-        pmrem.dispose();
-        // 半球光只提供上下过渡（顶白地灰），不放任何方向光——方向光必然造成明暗面
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 1.2));
+        const fallback = new THREE.HemisphereLight(0xffffff, 0x555555, 1.2);
+        scene.add(fallback);
+        new RGBELoader().load('neutral.hdr', (hdr) => {
+          hdr.mapping = THREE.EquirectangularReflectionMapping;
+          scene.environment = pmrem.fromEquirectangular(hdr).texture;
+          hdr.dispose();
+          pmrem.dispose();
+          scene.remove(fallback); // 官方环境到位后撤掉兜底灯，保持原始观感
+          needsRender = true;
+        }, undefined, () => { pmrem.dispose(); });
 
         // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
         const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);
