@@ -2,6 +2,19 @@ import SwiftUI
 import UIKit
 import WebKit
 
+/// WKWebView 子类：进入视图层级后把外层 SwiftUI 滚动视图的 pan 挂上「必须先失败」依赖。
+/// 首页整页滚动后主视觉进了 ScrollView——外层 pan 一起手就取消 WKWebView 的触摸，
+/// JS 收不到 touchmove，OrbitControls 转不动（"3D 拖不动"根因）。
+/// 挂上依赖后：触摸落在车模上 → 3D 旋转优先、页面不滚；触摸在别处不影响滚动。
+final class ModelWebView: WKWebView {
+    var onEnterHierarchy: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { onEnterHierarchy?() }
+    }
+}
+
 /// 用 model-viewer 渲染 GLB 车模（与安卓版同一套资源与相机参数）。
 /// GLB 通过自定义 scheme 提供，避免 file:// 的跨域限制。
 struct ModelViewerWebView: UIViewRepresentable {
@@ -56,7 +69,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         configuration.userContentController.add(context.coordinator, name: "orbit")
         configuration.setURLSchemeHandler(context.coordinator.scheme, forURLScheme: ModelSchemeHandler.scheme)
 
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = ModelWebView(frame: .zero, configuration: configuration)
         view.isOpaque = false
         view.backgroundColor = .clear
         view.clipsToBounds = false
@@ -139,12 +152,31 @@ struct ModelViewerWebView: UIViewRepresentable {
         pan.cancelsTouchesInView = false
         pan.delegate = coordinator
         view.addGestureRecognizer(pan)
+        coordinator.modelPan = pan
 
         let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         tap.numberOfTapsRequired = 2
         tap.cancelsTouchesInView = false
         tap.delegate = coordinator
         view.addGestureRecognizer(tap)
+
+        // 链接外层滚动视图：makeUIView 时视图还没进层级，等 didMoveToWindow 再找
+        if let modelView = view as? ModelWebView {
+            modelView.onEnterHierarchy = { [weak modelView, weak coordinator] in
+                guard let modelView, let coordinator, let pan = coordinator.modelPan else { return }
+                var node: UIView? = modelView
+                while let parent = node?.superview {
+                    node = parent
+                    if let outer = parent as? UIScrollView {
+                        // 触摸在车模上时外层滚动必须等本 pan 失败——本 pan 任何位移都会起手，
+                        // 于是页面不滚、JS 触摸不被取消，OrbitControls 正常接管
+                        coordinator.linkedOuterScroll = outer
+                        outer.panGestureRecognizer.require(toFail: pan)
+                        break
+                    }
+                }
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -171,6 +203,10 @@ struct ModelViewerWebView: UIViewRepresentable {
         private var loadedInteractive: Bool?
         var processDied = false
         var currentFile: URL? { loadedFile }
+        /// 车模区 pan（require(toFail:) 的依赖方，页面滚动须让它先失败）
+        var modelPan: UIPanGestureRecognizer?
+        /// 外层宿主滚动视图（首页整页滚动/弹层 ScrollView），兜底转发时用
+        weak var linkedOuterScroll: UIScrollView?
 
         /// 坐垫/灯光状态即时下发；force=true 用于页面就绪/复用后补发
         func applyDesired(_ view: WKWebView, force: Bool) {
@@ -207,6 +243,21 @@ struct ModelViewerWebView: UIViewRepresentable {
             switch gesture.state {
             case .began, .changed:
                 onDrag?(true)
+                // 兜底：外层滚动 pan 抢到手势时（require(toFail:) 未生效的环境），
+                // JS 侧触摸已被取消，直接把位移转发给 JS 驱动相机，车模至少能转。
+                // 正常路径触摸不被取消，OrbitControls 原生接管，不走这里。
+                if let outer = linkedOuterScroll,
+                   outer.panGestureRecognizer.state == .began || outer.panGestureRecognizer.state == .changed,
+                   let view = gesture.view as? WKWebView {
+                    let t = gesture.translation(in: view)
+                    gesture.setTranslation(.zero, in: view)
+                    if t.x != 0 || t.y != 0 {
+                        view.evaluateJavaScript(
+                            "window.jhOrbitDelta && window.jhOrbitDelta(\(t.x),\(t.y))",
+                            completionHandler: nil
+                        )
+                    }
+                }
             default:
                 onDrag?(false)
             }
@@ -750,6 +801,26 @@ enum ModelViewerAsset {
         }
         loop();
 
+        // ---------- 原生兜底：宿主滚动视图抢到触摸（JS 收不到事件）时，原生 pan 转发位移驱动相机 ----------
+        let orbitIdleTimer = { value: null };
+        window.jhOrbitDelta = (dx, dy) => {
+          if (!INTERACTIVE) return;
+          const offset = camera.position.clone().sub(controls.target);
+          const sph = new THREE.Spherical().setFromVector3(offset);
+          sph.theta -= dx * 0.005;
+          sph.phi = Math.min(Math.max(sph.phi - dy * 0.005, 84 * D2R), 94 * D2R);
+          offset.setFromSpherical(sph);
+          camera.position.copy(controls.target).add(offset);
+          camera.lookAt(controls.target);
+          needsRender = true;
+          if (!window.__jhOrbitMoved) { window.__jhOrbitMoved = true; post({ rotated: true }); }
+          if (orbitIdleTimer.value) clearTimeout(orbitIdleTimer.value);
+          orbitIdleTimer.value = setTimeout(() => {
+            window.__jhOrbitMoved = false;
+            post({ rotated: false });
+          }, 700);
+        };
+
         // ---------- 相机复位（原生双击 / resetToken 触发） ----------
         let resetFrame = 0;
         window.jhResetOrbit = () => {
@@ -934,7 +1005,7 @@ extension ModelViewerWebView {
         let coordinator = Coordinator()
         configuration.userContentController.add(coordinator, name: "orbit")
         configuration.setURLSchemeHandler(coordinator.scheme, forURLScheme: ModelSchemeHandler.scheme)
-        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
+        let view = ModelWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
         coordinator.load(into: view, glbFile: glbFile, interactive: true, autoRotate: false)
         ModelViewerPool.store(view, for: key, file: glbFile)
     }
