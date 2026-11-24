@@ -808,7 +808,7 @@ enum ReplayClock {
         if track.realTimestamps.count == track.points.count,
            track.realTimestamps.contains(where: isUnix) {
             let sample = sampleValue(
-                track.realTimestamps.map(Double.init),
+                track.realTimestamps.map { Double($0) },
                 times: clock.times,
                 duration: clock.duration,
                 progress: progress
