@@ -4,7 +4,6 @@ import SwiftUI
 struct RideHomeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.activeMainTab) private var activeMainTab
 
     var showsClose: Bool = false
 
@@ -17,11 +16,18 @@ struct RideHomeView: View {
     @State private var picked: Set<String> = []
     @State private var replayBundle: RideReplayBundle?
     @State private var loadedKey: String?
+    /// 上拉加载更多：滚到底部自动往前追加更早的月份
+    @State private var loadingMore = false
+    @State private var noMoreOlder = false
+    /// 已追加到的最早月份（nil=还没追加过，从 monthAnchor 往前走）
+    @State private var oldestMonth: Date?
+    /// 月度统计卡只用当前锚月的数据，不随追加更早月份变化
+    @State private var heroGroups: [RideDayGroup] = []
 
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     header
                     monthChip
                         .padding(.top, 8)
@@ -49,10 +55,27 @@ struct RideHomeView: View {
                             .foregroundStyle(Theme.tertiary)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 48)
+                        if !noMoreOlder {
+                            Button {
+                                Task { await loadOlder() }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("看看更早的骑行")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(Theme.brand)
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 12)
+                        }
                     } else {
                         ForEach(groups) { group in
                             daySection(group)
                         }
+                        loadMoreFooter
                     }
                 }
                 .padding(.horizontal, Theme.page)
@@ -215,9 +238,9 @@ struct RideHomeView: View {
     }
 
     private var monthHero: some View {
-        let km = groups.reduce(0.0) { $0 + $1.totalKm }
-        let days = groups.filter { !$0.tracks.isEmpty }.count
-        let peak = groups.map(\.totalKm).max() ?? 0
+        let km = heroGroups.reduce(0.0) { $0 + $1.totalKm }
+        let days = heroGroups.filter { !$0.tracks.isEmpty }.count
+        let peak = heroGroups.map(\.totalKm).max() ?? 0
         let avg = days > 0 ? km / Double(days) : 0
         return VStack(alignment: .leading, spacing: 12) {
             Text("本月里程")
@@ -408,9 +431,9 @@ struct RideHomeView: View {
 
     // MARK: - Data
 
-    /// 底栏切到骑行页，或从车辆页全屏打开行程列表时才拉月数据。
+    /// 骑行 Tab 已移除：RideHomeView 只从车辆页全屏打开（showsClose=true）。
     private var shouldLoadRides: Bool {
-        showsClose || activeMainTab == .ride
+        showsClose
     }
 
     private var monthTitle: String {
@@ -439,6 +462,82 @@ struct RideHomeView: View {
         guard let next = Calendar.current.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
         if delta > 0, !canGoNextMonth { return }
         monthAnchor = next
+    }
+
+    /// 上拉加载尾部：加载中转圈、没有更早的给提示、否则放透明哨兵（出现即触发追加）
+    @ViewBuilder
+    private var loadMoreFooter: some View {
+        if loadingMore {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("加载更早的骑行")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.tertiary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 14)
+        } else if noMoreOlder {
+            Text("没有更早的骑行了")
+                .font(Theme.footnote)
+                .foregroundStyle(Theme.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 14)
+        } else {
+            // LazyVStack 下哨兵滚进视口才创建，onAppear 触发追加上一月
+            Color.clear
+                .frame(height: 1)
+                .onAppear { Task { await loadOlder() } }
+        }
+    }
+
+    /// 滚到底部自动往前追加月份；连续两个月没数据就判定"没有更早的了"。
+    /// 每次最多往前找 2 个月，避免空月份链拉出长串请求。
+    private func loadOlder() async {
+        guard !loadingMore, !noMoreOlder else { return }
+        guard let vehicle = model.selectedVehicle else { return }
+        loadingMore = true
+        defer { loadingMore = false }
+
+        var emptyStreak = 0
+        var anchor = oldestMonth ?? monthAnchor
+        defer { oldestMonth = anchor }
+
+        for _ in 0..<2 {
+            guard let prev = Calendar.current.date(byAdding: .month, value: -1, to: anchor) else {
+                noMoreOlder = true
+                return
+            }
+            anchor = prev
+
+            async let daysTask = RideTrackService.monthInfo(vin: vehicle.vinNo, month: prev)
+            let tracksResult = await RideTrackService.monthTracks(vin: vehicle.vinNo, month: prev)
+            let days = await daysTask ?? []
+            if Task.isCancelled { return }
+
+            var tracks = tracksResult ?? []
+            let known = Set(tracks.compactMap(\.dayKey))
+            let missing = days.filter { $0.mileage > 0 && !known.contains($0.date) }
+            if !missing.isEmpty {
+                let extra = await Self.tracksForDays(vin: vehicle.vinNo, days: missing)
+                var seen = Set(tracks.map(\.id))
+                for track in extra where seen.insert(track.id).inserted {
+                    tracks.append(track)
+                }
+            }
+
+            guard !tracks.isEmpty else {
+                emptyStreak += 1
+                if emptyStreak >= 2 { noMoreOlder = true; return }
+                continue
+            }
+
+            let older = Self.buildGroups(days: days, tracks: tracks)
+            withAnimation(Motion.quick) {
+                groups.append(contentsOf: older)
+            }
+            return
+        }
     }
 
     private func loadMonth(force: Bool = true) async {
@@ -470,9 +569,16 @@ struct RideHomeView: View {
                 errorText = "行程明细加载失败，下拉刷新"
             }
             groups = []
+            heroGroups = []
+            oldestMonth = monthAnchor
+            noMoreOlder = false
             return
         }
-        groups = Self.buildGroups(days: days, tracks: tracks)
+        let built = Self.buildGroups(days: days, tracks: tracks)
+        groups = built
+        heroGroups = built
+        oldestMonth = monthAnchor
+        noMoreOlder = false
         loadedKey = key
     }
 

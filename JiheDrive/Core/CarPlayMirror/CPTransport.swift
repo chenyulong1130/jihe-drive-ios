@@ -109,7 +109,8 @@ final class CPDirectAccessoryTransport {
                     .takeUnretainedValue()
             }
         }
-        guard let connection = connectionObject else {
+        guard let connection = connectionObject as? NSString else {
+            // CarWithin：返回值必须是 NSString，否则是框架拒绝（可能返回错误码对象）。
             throw TransportError.refused("连接创建")
         }
         self.connection = connection
@@ -122,9 +123,10 @@ final class CPDirectAccessoryTransport {
 
         let generation = UUID()
         self.generation = generation
-        // 回调是 3 个参数（来源 NSString / 目标 NSString / 数据 NSData），
+        // 回调是 3 个参数（来源 NSString / 目标 NSString / 数据 NSData）——
+        // 与 CarWithin 的 `void (^)(NSString *, NSString *, NSData *)` 完全一致（签名 v32@?0@"NSString"8@"NSString"16@"NSData"24）。
         // 数据固定取第 3 个；用 1 参数 block 会读错寄存器里的对象。
-        let dataOutHandler: @convention(block) (AnyObject?, AnyObject?, NSData?) -> Void = { [weak self] _, _, data in
+        let dataOutHandler: @convention(block) (NSString?, NSString?, NSData?) -> Void = { [weak self] _, _, data in
             guard let data, data.count <= 65536 else { return }
             let copy = data as Data
             DispatchQueue.main.async { [weak self] in
@@ -146,14 +148,15 @@ final class CPDirectAccessoryTransport {
         let endpointObject = fn(client, endpointSelector, transportType, 4,
                                 nil, handlerObject, connection, true)?
             .takeUnretainedValue()
-        guard let endpointObject else {
+        guard let endpoint = endpointObject as? NSString else {
+            // 同上：非 NSString 说明框架拒绝了 endpoint 发布，不能当成功继续。
             self.connection = nil
             self.dataOutHandlerBox = nil
             throw TransportError.refused("iAP2 endpoint 发布")
         }
 
         self.client = client
-        self.endpoint = endpointObject
+        self.endpoint = endpoint
         self.isActive = true
     }
 

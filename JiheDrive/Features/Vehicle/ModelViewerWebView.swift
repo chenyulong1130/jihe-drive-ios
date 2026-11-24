@@ -373,7 +373,7 @@ enum ModelViewerAsset {
 
     /// three.js 自绘 viewer（three r160 + GLTFLoader + OrbitControls + RoomEnvironment）。
     /// 相机参数与原 model-viewer 对齐：orbit 0deg 90deg 4.35m / target 0.02 0.74 / fov 26。
-    /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯,含近光光域,不含转向灯) / jhResetOrbit。
+    /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯自发光,不含转向灯,无光锥) / jhResetOrbit。
     static func html(interactive: Bool, autoRotate: Bool) -> String {
         return """
         <!DOCTYPE html>
@@ -400,7 +400,6 @@ enum ModelViewerAsset {
         import * as THREE from 'three';
         import { GLTFLoader } from './GLTFLoader.js';
         import { OrbitControls } from './OrbitControls.js';
-        import { RoomEnvironment } from './RoomEnvironment.js';
 
         const INTERACTIVE = \(interactive);
         const AUTO_ROTATE = \(autoRotate);
@@ -415,17 +414,28 @@ enum ModelViewerAsset {
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
-        // 环境反射（金属漆面）+ 两盏基础灯；深浅主题下光照一致，开灯时压暗突出光束
+        // 金属漆车身（metalness 高）的颜色几乎全靠环境反射成像，漫射灯（方向光/半球光）
+        // 对它基本无效——这就是之前怎么加补光都治不了"侧边死黑"的原因。
+        // RoomEnvironment 自带窗户与明暗面，车侧转到背对亮窗的方向就反射出深色。
+        // 换成四面均匀的渐变摄影棚环境球：顶部白 1.0 → 底部灰 0.45，
+        // 任何朝向都有反射光，无方向性阴影（对齐 model-viewer neutral 的观感）。
         const pmrem = new THREE.PMREMGenerator(renderer);
-        scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+        const envGeo = new THREE.SphereGeometry(10, 32, 16);
+        const envPos = envGeo.attributes.position;
+        const envColors = [];
+        for (let i = 0; i < envPos.count; i++) {
+          const t = (envPos.getY(i) / 10 + 1) / 2; // 0=底部 → 1=顶部
+          const v = 0.45 + 0.55 * t;
+          envColors.push(v, v, v);
+        }
+        envGeo.setAttribute('color', new THREE.Float32BufferAttribute(envColors, 3));
+        const envScene = new THREE.Scene();
+        envScene.add(new THREE.Mesh(envGeo,
+          new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+        scene.environment = pmrem.fromScene(envScene, 0.04).texture;
         pmrem.dispose();
-        const hemi = new THREE.HemisphereLight(0xffffff, 0x555555, 1.6);
-        scene.add(hemi);
-        // 不放主光（用户要求）：单方向主光会让背光面明显偏暗（"半黑半白"）。
-        // 只留半球光 + RoomEnvironment 环境反射 + 反侧弱补光，整体均匀柔和。
-        const fill = new THREE.DirectionalLight(0xffffff, 1.0);
-        fill.position.set(-6, 4, -4);
-        scene.add(fill);
+        // 半球光只提供上下过渡（顶白地灰），不放任何方向光——方向光必然造成明暗面
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 1.2));
 
         // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
         const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);
@@ -574,76 +584,8 @@ enum ModelViewerAsset {
           if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
           return null;
         }
-        // ---------- 大灯光域：可见光锥（参数对齐 demo_seat/index.html） ----------
-        // 车头朝 -x（AE4 世界坐标实测：大灯 x≈-0.5、尾灯 x≈+0.8）。
-        // 灯口取 L-HighBeam/L-LowBeam 包围盒中心——节点原点≠灯面中心（灯节点位移挂在父级上）。
-        // 不铺深色地面盘：舞台本身是 SwiftUI 渐变，加盘会在浅色/深色下都露出一块深色地面，
-        // 用户要求开灯时地面保持透明，只用光锥表现光照范围。
-        const NEAR_DIR = new THREE.Vector3(-1, -0.22, 0); // 近光下压
-        const FAR_DIR  = new THREE.Vector3(-1, -0.08, 0); // 远光平射
-        let beamGroup = null;
-        let beamOrigin = null;
-        const beams = {};
-        let beamSpot = null;
-        function makeBeamCone() {
-          const g = new THREE.ConeGeometry(1, 1, 32, 1, true);
-          g.translate(0, -0.5, 0); // 锥顶移到原点
-          // 画布是透明背景（露出 SwiftUI 舞台渐变），AdditiveBlending 的颜色会被
-          // alpha 合成吃掉——透明画布上光锥直接消失。必须用普通混合。
-          const m = new THREE.MeshBasicMaterial({
-            color: 0xfff2d0, transparent: true, opacity: 0.22,
-            blending: THREE.NormalBlending, side: THREE.DoubleSide, depthWrite: false
-          });
-          return new THREE.Mesh(g, m);
-        }
-        function aimBeam(cone, from, dir, len, radius) {
-          cone.scale.set(radius, len, radius);
-          cone.position.copy(from);
-          cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
-        }
-        function buildBeam(root) {
-          const lampNode = root.getObjectByName('L-HighBeam') || root.getObjectByName('L-LowBeam');
-          if (!lampNode) return;
-          root.updateMatrixWorld(true);
-          beamOrigin = new THREE.Box3().setFromObject(lampNode).getCenter(new THREE.Vector3());
-          if (beamGroup) { // 复用页换模型：只更新灯口
-            applyBeam();
-            return;
-          }
-          beamGroup = new THREE.Group();
-          beamGroup.name = 'HeadBeamFX';
-
-          beams.near = makeBeamCone();
-          beams.far = makeBeamCone();
-          beamGroup.add(beams.near, beams.far);
-
-          beamSpot = new THREE.SpotLight(0xfff2d0, 0, 12, 0.4, 0.5, 1.4);
-          beamSpot.visible = false;
-          beamGroup.add(beamSpot, beamSpot.target);
-          beamGroup.visible = false;
-          scene.add(beamGroup);
-        }
-        function applyBeam() {
-          needsRender = true;
-          if (!beamGroup || !beamOrigin) return;
-          const on = lightsState;
-          beamGroup.visible = on;
-          // 开灯不压暗环境光（用户要求：日间观感一致，光锥靠普通混合保证可见）
-          if (!on) return;
-          aimBeam(beams.near, beamOrigin, NEAR_DIR, 3.0, 0.55); // 近光：短宽光锥
-          beams.near.visible = true;
-          aimBeam(beams.far, beamOrigin, FAR_DIR, 6.5, 0.75);   // 远光：细长光锥
-          beams.far.visible = true;
-          // app 全车灯包含远光，两者同亮时聚光取远光参数（对齐 demo onFar 分支）
-          beamSpot.color.setHex(0xffffff);
-          beamSpot.angle = 0.32;
-          beamSpot.distance = 16;
-          beamSpot.intensity = 300;
-          beamSpot.visible = true;
-          beamSpot.position.copy(beamOrigin);
-          beamSpot.target.position.copy(beamOrigin.clone().add(FAR_DIR.clone().multiplyScalar(14)));
-          beamSpot.target.updateMatrixWorld();
-        }
+        // ---------- 大灯光锥 FX：已移除（用户反馈"两个光球、光往两边散"）----------
+        // 开灯只保留灯面自发光（lampSpec 控制颜色/强度），不再做可见光锥和聚光灯。
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
         function applyLights(on) {
@@ -656,7 +598,7 @@ enum ModelViewerAsset {
               m.emissiveIntensity = 0;
             }
           }
-          applyBeam();
+          needsRender = true;
         }
         window.jhSetLights = (on) => {
           lightsState = !!on;
@@ -718,7 +660,6 @@ enum ModelViewerAsset {
           gltf.scene.position.x += 0.02 - center.x;
           gltf.scene.position.z += 0 - center.z;
           gltf.scene.position.y += 0.74 - center.y;
-          buildBeam(gltf.scene);
           needsRender = true;
           window.__jhModelReady = true;
           readyPending = true; // 首帧渲染完成后再上报 ready，避免揭掉 loading 后还有空窗

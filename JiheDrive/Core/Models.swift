@@ -343,7 +343,7 @@ extension Vehicle {
             "arModelUrl", "vehicleModel", "model3d", "3dModelUrl", "threeDUrl",
             "sceneUrl", "modelPath", "modelAddress", "carModelUrl", "gltfUrl"
         ]).flatMap(URL.init(string:))
-        self.model3DURL = explicitModel ?? Self.findModelURL(in: json)
+        self.model3DURL = explicitModel ?? Self.pickModelURL(from: json, modelName: self.modelName)
         self.wallpaperOutlines = WallpaperOutlines.parse(
             json["subjectWallpaperConfig"] ?? json["wallpaperConfig"]
         )
@@ -389,28 +389,56 @@ extension Vehicle {
         return ISO8601DateFormatter().date(from: text)
     }
 
-    /// 在整份响应里递归找模型文件地址（不同车型字段名不统一）
-    private static func findModelURL(in value: Any) -> URL? {
+    /// 在整份响应里递归收集模型文件地址（不同车型字段名不统一）。
+    /// 旧版"取第一个命中"的缺陷：响应里若带共享的车型模型列表（多台车/多个
+    /// 车型的 glb 都在），每台车都会解析成数组第一个元素——表现为
+    /// "切车后 3D 还是第一台车的模型"。现在收集全部候选：
+    /// 唯一地址直接用；多个地址时按车型名（字母数字段）归属本车的；
+    /// 归属不上才退回第一个（兼容单模型列表的老接口）。
+    private static func pickModelURL(from value: Any, modelName: String?) -> URL? {
+        var raw: [String] = []
+        collectModelURLs(in: value, into: &raw)
+        var candidates: [String] = []
+        for u in raw where !candidates.contains(u) { candidates.append(u) }
+        guard !candidates.isEmpty else { return nil }
+        guard candidates.count > 1 else { return URL(string: candidates[0]) }
+
+        // 从车型名里拆出字母数字段（如 "极核AE4-MAX2plus" → ["ae4", "max2plus"]），
+        // 任一段在 URL 里出现即认为该地址属于本车
+        let nameNorm = (modelName ?? "").lowercased()
+        let tokens = nameNorm.split(whereSeparator: { !$0.isNumber && !($0.isLetter && $0.isASCII) })
+            .map { String($0) }
+            .filter { $0.count >= 2 }
+        if let hit = candidates.first(where: { url in
+            let u = url.lowercased()
+            return tokens.contains { u.contains($0) }
+        }) {
+            return URL(string: hit)
+        }
+        return URL(string: candidates[0])
+    }
+
+    private static func collectModelURLs(in value: Any, into urls: inout [String]) {
         if let text = value as? String {
             let lower = text.lowercased()
-            guard lower.hasPrefix("http") || lower.hasPrefix("/") else { return nil }
+            guard lower.hasPrefix("http") || lower.hasPrefix("/") else { return }
             let extensions = [".glb", ".gltf", ".usdz", ".usd", ".obj", ".dae", ".ply", ".scn"]
-            guard extensions.contains(where: { lower.contains($0) }) else { return nil }
-            return URL(string: text)
+            guard extensions.contains(where: { lower.contains($0) }) else { return }
+            urls.append(text)
+            return
         }
         if let dict = value as? [String: Any] {
             for child in dict.values {
-                if let hit = findModelURL(in: child) { return hit }
+                collectModelURLs(in: child, into: &urls)
             }
-            return nil
+            return
         }
         if let array = value as? [Any] {
             for child in array {
-                if let hit = findModelURL(in: child) { return hit }
+                collectModelURLs(in: child, into: &urls)
             }
-            return nil
+            return
         }
-        return nil
     }
 
     /// 顶层字段 + iot 字段合并，便于按关键字模糊匹配
