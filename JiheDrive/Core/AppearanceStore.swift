@@ -69,14 +69,28 @@ final class AppearanceStore: ObservableObject {
     }
 
     /// 回前台只涂窗口底色。再写 overrideUserInterfaceStyle 会触发整页重建，看起来就是白屏。
+    /// 「跟随系统」模式下不写覆盖样式——写了 override，窗口 trait 就永远是我们上次
+    /// 解析的值，系统切深浅色时再也读不到真实系统样式（跟随失效的根因）；
+    /// 解除覆盖后动态颜色 / preferredColorScheme(nil) 原生跟随系统实时切换。
     func applyToWindows(setStyle: Bool = false) {
         let dark = resolvedScheme == .dark
-        let style: UIUserInterfaceStyle = dark ? .dark : .light
-        let canvas = dark ? Self.darkCanvas : Self.lightCanvas
+        let followSystem = mode == .system
         UIView.performWithoutAnimation {
             for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
                 for window in scene.windows where Self.shouldPaint(window) {
-                    Self.paint(window, style: style, canvas: canvas, setStyle: setStyle)
+                    if followSystem {
+                        if window.overrideUserInterfaceStyle != .unspecified {
+                            window.overrideUserInterfaceStyle = .unspecified
+                        }
+                        let winDark = window.traitCollection.userInterfaceStyle == .dark
+                        let canvas = winDark ? Self.darkCanvas : Self.lightCanvas
+                        window.backgroundColor = canvas
+                        window.layer.backgroundColor = canvas.cgColor
+                    } else {
+                        let style: UIUserInterfaceStyle = dark ? .dark : .light
+                        let canvas = dark ? Self.darkCanvas : Self.lightCanvas
+                        Self.paint(window, style: style, canvas: canvas, setStyle: setStyle)
+                    }
                 }
             }
         }

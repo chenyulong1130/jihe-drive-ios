@@ -31,7 +31,7 @@ struct RootView: View {
         .environmentObject(appearance)
         .environmentObject(messages)
         .environmentObject(seatLinkage)
-        .preferredColorScheme(appearance.resolvedScheme)
+        .preferredColorScheme(appearance.mode == .system ? nil : appearance.resolvedScheme)
         .tint(Theme.brand)
         .animation(Motion.spring, value: model.isLoggedIn)
         .animation(nil, value: appearance.resolvedScheme)

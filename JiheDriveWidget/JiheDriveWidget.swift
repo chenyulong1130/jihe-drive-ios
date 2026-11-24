@@ -252,9 +252,11 @@ struct JiheDriveWidgetEntryView: View {
                     }
                     progress
                     electricalSparkRow
-                    Text(chargingLine)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color(hex: 0x94A3B8))
+                    if snap.charging {
+                        Text("充电中")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(hex: 0x94A3B8))
+                    }
                     controlBar
                         .padding(.top, 8)
                 }
@@ -453,13 +455,6 @@ struct JiheDriveWidgetEntryView: View {
         if snap.soc <= 15 { return Color(hex: 0xEF4444) }
         if snap.soc <= 30 { return Color(hex: 0xF59E0B) }
         return Color(uiColor: .systemBlue)
-    }
-
-    /// 电池下方一行：充电时显示功率/电流，不带坐垫状态（坐垫在控制条图标上）。
-    /// 功率/电流数值移到下方折线行，这里只保留充放电状态文案
-    private var chargingLine: String {
-        if snap.charging { return "充电中" }
-        return "未充电"
     }
 
     /// 电量进度条下面的两段装饰折线（电流/功率），右边跟着实时数值。

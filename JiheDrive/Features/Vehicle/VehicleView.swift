@@ -741,14 +741,6 @@ struct VehicleView: View {
                         .foregroundStyle(Theme.label)
                     Spacer(minLength: 0)
                     Button {
-                        withAnimation(Motion.quick) { hideLocation.toggle() }
-                    } label: {
-                        Image(systemName: hideLocation ? "eye.slash" : "eye")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(hideLocation ? Theme.orange : Theme.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    Button {
                         navigate(vehicle)
                     } label: {
                         Text("导航")
@@ -782,6 +774,23 @@ struct VehicleView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
+        }
+        // 小眼睛挪到卡片右上角（地图区上方）：隐私遮挡开关
+        .overlay(alignment: .topTrailing) {
+            Button {
+                withAnimation(Motion.quick) { hideLocation.toggle() }
+            } label: {
+                Image(systemName: hideLocation ? "eye.slash" : "eye")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(hideLocation ? Theme.orange : Theme.secondary)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.white.opacity(0.72)))
+                    .shadow(color: Color.black.opacity(0.10), radius: 5, y: 1)
+            }
+            .buttonStyle(PressableStyle(scale: 0.88, brightness: 0))
+            .padding(.top, 8)
+            .padding(.trailing, 8)
+            .accessibilityLabel(hideLocation ? "显示位置" : "隐藏位置")
         }
         .shadow(color: Theme.cardShadow, radius: 12, x: 0, y: 4)
     }

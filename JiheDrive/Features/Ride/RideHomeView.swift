@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 全部行程：按日分组列表，对齐官方「全部行程」页
 struct RideHomeView: View {
@@ -87,11 +88,22 @@ struct RideHomeView: View {
         .offset(x: backDrag)
         .animation(backDragging ? nil : Motion.quick, value: backDrag)
         .overlay(alignment: .leading) {
-            // 左边缘滑动返回（与系统返回手势同向）：全屏 cover 没有自带手势
+            // 左边缘滑动返回（与系统返回手势同向）：全屏 cover 没有自带手势。
+            // 顶部留出 header + 月份选择条的高度，别把返回按钮和月份切换挡住
             Color.clear
                 .frame(width: 32)
+                .padding(.top, 118)
                 .contentShape(Rectangle())
                 .gesture(edgeBackGesture)
+        }
+        .onAppear {
+            // 全屏 cover 不会重置全局状态栏样式，进来改成默认（深浅色自适应），
+            // 否则沿用车辆页的 lightContent，浅色底上状态栏一片白看不清
+            UIApplication.shared.statusBarStyle = .default
+        }
+        .onDisappear {
+            // 返回车辆页恢复深色主视觉的白字状态栏
+            UIApplication.shared.statusBarStyle = .lightContent
         }
         .task(id: "\(model.selectedVehicle?.vinNo ?? "")-\(monthKey)-\(shouldLoadRides)") {
             guard shouldLoadRides else { return }

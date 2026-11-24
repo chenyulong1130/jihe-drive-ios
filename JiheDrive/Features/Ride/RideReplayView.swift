@@ -76,10 +76,11 @@ struct RideReplayView: View {
         ReplayClock.make(track)
     }
 
-    /// 回放墙钟时长：压缩真实行程，点与点之间的时间比例保持不变
+    /// 回放墙钟时长：压缩真实行程，点与点之间的时间比例保持不变。
+    /// 放慢一倍：30 分钟行程约 75 秒回放完，短行程至少 40 秒，长行程封顶 100 秒
     private var playbackSeconds: Double {
         let real = max(clock.duration, 1)
-        return min(50, max(24, real / 48))
+        return min(100, max(40, real / 24))
     }
 
     private var currentSpeed: Double {
