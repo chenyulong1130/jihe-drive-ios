@@ -101,11 +101,13 @@ final class CPDirectAccessoryTransport {
         var connectionObject: AnyObject?
         if let imp = createConnectionMethod.map({ method_getImplementation($0) }) {
             let fn = unsafeBitCast(imp, to: CreateConnectionFn.self)
-            connectionObject = fn(client, createSelector, 2, identifier as AnyObject)?
+            // 显式转 NSString：CarWithin 传的是 NSString *，避免 Swift String 被包成 __SwiftValue
+            // 导致私有框架读不到正确的标识字符串。
+            connectionObject = fn(client, createSelector, 2, identifier as NSString)?
                 .takeUnretainedValue()
             // 类型 2 失败时退回类型 1
             if connectionObject == nil {
-                connectionObject = fn(client, createSelector, 1, identifier as AnyObject)?
+                connectionObject = fn(client, createSelector, 1, identifier as NSString)?
                     .takeUnretainedValue()
             }
         }

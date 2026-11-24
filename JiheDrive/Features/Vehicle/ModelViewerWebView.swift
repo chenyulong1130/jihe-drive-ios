@@ -238,10 +238,15 @@ struct ModelViewerWebView: UIViewRepresentable {
             if let d = ModelViewerAsset.shared.orbitControlsData { extra["/OrbitControls.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.roomEnvironmentData { extra["/RoomEnvironment.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.bufferUtilsData { extra["/BufferGeometryUtils.js"] = (d, "text/javascript") }
-            scheme.replace(glb: data, script: script, extra: extra)
+            // 每次加载用唯一 token 子路径：所有页面曾经共用 jhmodel://local/model.glb，
+            // WKWebView 的 URL 缓存跨实例共享，切车后新页面拉 model.glb 会命中
+            // 上一台车的缓存响应——表现为"切车后 3D 还是第一台车的模型"。
+            // token 化后每台车的资源 URL 都不同，缓存永不串台。
+            let token = String(UUID().uuidString.prefix(8)).lowercased()
+            scheme.replace(token: token, glb: data, script: script, extra: extra)
 
             let html = ModelViewerAsset.html(interactive: interactive, autoRotate: autoRotate)
-            let base = URL(string: "\(ModelSchemeHandler.scheme)://local/index.html")!
+            let base = URL(string: "\(ModelSchemeHandler.scheme)://local/\(token)/index.html")!
             view.loadHTMLString(html, baseURL: base)
         }
 
@@ -802,12 +807,15 @@ final class ModelSchemeHandler: NSObject, WKURLSchemeHandler {
     private var files: [String: (data: Data, mime: String)] = [:]
     private let lock = NSLock()
 
-    func replace(glb: Data, script: Data, extra: [String: (data: Data, mime: String)] = [:]) {
+    func replace(token: String, glb: Data, script: Data, extra: [String: (data: Data, mime: String)] = [:]) {
         lock.lock()
-        files["/model.glb"] = (glb, "model/gltf-binary")
-        files["/model-viewer.min.js"] = (script, "text/javascript")
-        files["/index.html"] = (Data(), "text/html")
-        for (path, entry) in extra { files[path] = entry }
+        // 先清空：上一份 glb 有 6~8MB，不清理会随每次切车线性吃内存
+        files.removeAll()
+        let prefix = "/\(token)"
+        files["\(prefix)/model.glb"] = (glb, "model/gltf-binary")
+        files["\(prefix)/model-viewer.min.js"] = (script, "text/javascript")
+        files["\(prefix)/index.html"] = (Data(), "text/html")
+        for (path, entry) in extra { files["\(prefix)\(path)"] = entry }
         lock.unlock()
     }
 
@@ -830,7 +838,8 @@ final class ModelSchemeHandler: NSObject, WKURLSchemeHandler {
             "Content-Type": entry.mime,
             "Content-Length": "\(entry.data.count)",
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "no-cache"
+            // no-store：彻底禁止 WebKit 缓存自定义 scheme 响应（token 路径是双保险）
+            "Cache-Control": "no-store"
         ]
         guard let response = HTTPURLResponse(
             url: url,

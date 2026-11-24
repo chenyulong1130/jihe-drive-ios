@@ -754,9 +754,11 @@ final class ReplayMapGLBView: WKWebView {
         guard let script = ModelViewerAsset.shared.scriptData else { return }
         loadedFile = file
         lastYaw = .nan
-        schemeHandler.replace(glb: data, script: script)
+        // token 化路径：与车辆页同理，避免 WKWebView 共享缓存串台（换车后地图车模不变）
+        let token = String(UUID().uuidString.prefix(8)).lowercased()
+        schemeHandler.replace(token: token, glb: data, script: script)
         let html = ModelViewerAsset.mapHTML()
-        let base = URL(string: "\(Self.mapScheme)://local/index.html")!
+        let base = URL(string: "\(Self.mapScheme)://local/\(token)/index.html")!
         loadHTMLString(html, baseURL: base)
     }
 
