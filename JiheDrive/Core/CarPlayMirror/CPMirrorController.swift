@@ -86,6 +86,8 @@ final class CPMirrorController: ObservableObject {
     /// 兼容性重编码管线（与 CarWithin 验证参数一致：1024×480@25fps/2.5Mbps/Baseline）
     let transcoder = CPVideoTranscoder()
     private var bootstrap: CPBootstrap?
+    private var bootstrapWatchTask: Task<Void, Never>?
+    private var networkRestartCount = 0
     private var receiver: CPReceiver?
     private var zeehoLink: ZeehoMirrorLink?
     private var feederTask: Task<Void, Never>?
@@ -176,8 +178,8 @@ final class CPMirrorController: ObservableObject {
             var live = configuration
             live.port = port
             self.currentConfiguration = live
-            self.appendLog("控制端口 \(port) 就绪，正在发起 CarPlay 会话")
-            self.startBootstrap(with: live, identity: identity, token: token)
+            self.appendLog("控制端口 \(port) 就绪，等待本机网络后发起 CarPlay 会话")
+            self.startBootstrapWhenNetworkReady(with: live, identity: identity, token: token)
         }
         receiver.start(configuration: configuration, identity: identity)
         self.receiver = receiver
@@ -186,6 +188,9 @@ final class CPMirrorController: ObservableObject {
     func stop() {
         startToken = UUID()
         UIApplication.shared.isIdleTimerDisabled = false
+        bootstrapWatchTask?.cancel()
+        bootstrapWatchTask = nil
+        networkRestartCount = 0
         feederTask?.cancel()
         feederTask = nil
         bootstrap?.stop()
@@ -210,15 +215,22 @@ final class CPMirrorController: ObservableObject {
         appendLog("投屏已停止")
     }
 
-    /// 引导失败后重试（不重启接收端，画面/触控不中断）。
+    /// 引导失败后重试（不重启接收端，画面/触控不中断）。重试也带上 IP 盯守。
     func retryBootstrap() {
-        guard phase.isRunning, let configuration = currentConfiguration,
+        guard phase.isRunning, var configuration = currentConfiguration,
               let identity = currentIdentity else { return }
+        if let ip = CPMirrorDiagnostics.localIPv4(), ip != configuration.address {
+            appendLog("本机 IP 已变化（\(configuration.address) → \(ip)），用新地址重试")
+            configuration.address = ip
+            currentConfiguration = configuration
+        }
         appendLog("重新发起本机 CarPlay 引导…")
         bootstrap?.stop()
         bootstrap = nil
         setPhase(.starting)
         startBootstrap(with: configuration, identity: identity, token: startToken)
+        startAddressWatch(initialAddress: configuration.address,
+                          configuration: configuration, identity: identity, token: startToken)
     }
 
     /// 裁剪模式与整屏镜像共用 App Group 设置。
@@ -247,6 +259,88 @@ final class CPMirrorController: ObservableObject {
     }
 
     // MARK: - 引导与阶段
+
+    /// 本机没有 Wi-Fi IP 时不发 0x4301（空地址 iOS 连不回来，只能干等超时）。
+    /// 等 IP 稳定后发起会话，并继续盯 IP 变化（对齐 CarWithin 的
+    /// waitForLocalNetwork / watchStartupAddress：手机切网/重连后 IP 会变，
+    /// 会话必须用当前地址重发，否则永远停在"等待控制连接"）。
+    private func startBootstrapWhenNetworkReady(with configuration: CPInfo.Configuration,
+                                                identity: CPAccessoryIdentity, token: UUID) {
+        bootstrapWatchTask?.cancel()
+        networkRestartCount = 0
+        if !configuration.address.isEmpty {
+            startBootstrap(with: configuration, identity: identity, token: token)
+            startAddressWatch(initialAddress: configuration.address,
+                              configuration: configuration, identity: identity, token: token)
+            return
+        }
+        appendLog("本机还没有 Wi-Fi IP，等待网络就绪…")
+        let task = Task { [weak self] in
+            var candidate: String?
+            var stable = 0
+            for _ in 0..<40 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self, !Task.isCancelled, self.startToken == token else { return }
+                let address = CPMirrorDiagnostics.localIPv4() ?? ""
+                if address != candidate { candidate = address; stable = 0 }
+                stable += 1
+                guard let ip = candidate, !ip.isEmpty, stable >= 2 else { continue }
+                await MainActor.run {
+                    guard let self, self.startToken == token else { return }
+                    var live = configuration
+                    live.address = ip
+                    self.currentConfiguration = live
+                    self.appendLog("本机 IP \(ip)，发起 CarPlay 会话")
+                    self.startBootstrap(with: live, identity: identity, token: token)
+                    self.startAddressWatch(initialAddress: ip,
+                                           configuration: live, identity: identity, token: token)
+                }
+                return
+            }
+            await MainActor.run { [weak self] in
+                self?.appendLog("20 秒内未获取到本机 Wi-Fi IP，请确认已加入 Wi-Fi 后重试")
+            }
+        }
+        bootstrapWatchTask = task
+    }
+
+    /// 会话已发出但画面未通期间，监听本机 IP 变化；变化即用新地址重发会话（最多 2 次）。
+    private func startAddressWatch(initialAddress: String, configuration: CPInfo.Configuration,
+                                   identity: CPAccessoryIdentity, token: UUID) {
+        bootstrapWatchTask?.cancel()
+        let task = Task { [weak self] in
+            var candidate: String?
+            var stable = 0
+            var lostAddress = false
+            for _ in 0..<90 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                guard let self, self.startToken == token, !self.localVideoReceived else { return }
+                let address = CPMirrorDiagnostics.localIPv4() ?? ""
+                if address.isEmpty { lostAddress = true }
+                if address != candidate { candidate = address; stable = 0 }
+                stable += 1
+                guard let ip = candidate, (ip != initialAddress || lostAddress), stable >= 3 else { continue }
+                await MainActor.run {
+                    guard let self, self.startToken == token, !self.localVideoReceived,
+                          self.networkRestartCount < 2 else { return }
+                    self.networkRestartCount += 1
+                    self.appendLog("启动期间本机 IP 变化（\(initialAddress.isEmpty ? "无" : initialAddress) → \(ip)），用新地址重发 CarPlay 会话")
+                    var live = configuration
+                    live.address = ip
+                    self.currentConfiguration = live
+                    self.bootstrap?.stop()
+                    self.bootstrap = nil
+                    self.setPhase(.starting)
+                    self.startBootstrap(with: live, identity: identity, token: token)
+                    self.startAddressWatch(initialAddress: ip, configuration: live,
+                                           identity: identity, token: token)
+                }
+                return
+            }
+        }
+        bootstrapWatchTask = task
+    }
 
     private func startBootstrap(with configuration: CPInfo.Configuration,
                                 identity: CPAccessoryIdentity, token: UUID) {

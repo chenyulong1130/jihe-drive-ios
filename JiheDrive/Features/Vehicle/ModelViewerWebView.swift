@@ -729,6 +729,18 @@ enum ModelViewerAsset {
             }
             if (replaced) o.material = isArray ? processed : processed[0];
           });
+          // 银色/金属漆增亮：金属材质几乎只吃环境反射，均匀环境球下银灰漆
+          // 容易显得发暗发灰（用户反馈"白色部分发灰，其实是有点银色"）。
+          // 提高 metalness>0.5 材质的环境反射乘数，让银面有金属亮泽；塑料哑光件不受影响。
+          gltf.scene.traverse((o) => {
+            if (!o.isMesh) return;
+            const mats = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of mats) {
+              if (m && m.isMeshStandardMaterial && m.metalness > 0.5) {
+                m.envMapIntensity = 1.45;
+              }
+            }
+          });
           // 模型加载晚于页面就绪：补挂最近的灯光/坐垫目标状态
           if (lampMats.length > 0) applyLights(lightsState);
           // 对齐 model-viewer 的 camera-target auto 语义：把包围盒中心挪到
