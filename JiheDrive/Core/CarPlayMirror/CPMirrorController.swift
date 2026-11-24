@@ -286,7 +286,7 @@ final class CPMirrorController: ObservableObject {
                 stable += 1
                 guard let ip = candidate, !ip.isEmpty, stable >= 2 else { continue }
                 await MainActor.run {
-                    guard let self, self.startToken == token else { return }
+                    guard self.startToken == token else { return }
                     var live = configuration
                     live.address = ip
                     self.currentConfiguration = live
@@ -322,7 +322,7 @@ final class CPMirrorController: ObservableObject {
                 stable += 1
                 guard let ip = candidate, (ip != initialAddress || lostAddress), stable >= 3 else { continue }
                 await MainActor.run {
-                    guard let self, self.startToken == token, !self.localVideoReceived,
+                    guard self.startToken == token, !self.localVideoReceived,
                           self.networkRestartCount < 2 else { return }
                     self.networkRestartCount += 1
                     self.appendLog("启动期间本机 IP 变化（\(initialAddress.isEmpty ? "无" : initialAddress) → \(ip)），用新地址重发 CarPlay 会话")
