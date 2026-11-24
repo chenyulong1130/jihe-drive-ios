@@ -158,14 +158,14 @@ struct JiheDriveWidgetEntryView: View {
                     vehicleImage
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     if !snap.tireFrontText.isEmpty || !snap.tireRearText.isEmpty {
-                        // 胎压：车图正下方，前/后左右分布
+                        // 胎压：车图正下方，前/后左右分布（不带前后字样）
                         HStack(spacing: 0) {
-                            Text(snap.tireFrontText.isEmpty ? "前 --" : snap.tireFrontText)
+                            Text(snap.tireFrontText.isEmpty ? "--" : snap.tireFrontText)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(Color(hex: 0x94A3B8))
                                 .monospacedDigit()
                             Spacer(minLength: 8)
-                            Text(snap.tireRearText.isEmpty ? "后 --" : snap.tireRearText)
+                            Text(snap.tireRearText.isEmpty ? "--" : snap.tireRearText)
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(Color(hex: 0x94A3B8))
                                 .monospacedDigit()
@@ -264,12 +264,12 @@ struct JiheDriveWidgetEntryView: View {
                         .frame(maxWidth: .infinity, maxHeight: 120)
                     if !snap.tireFrontText.isEmpty || !snap.tireRearText.isEmpty {
                         HStack(spacing: 0) {
-                            Text(snap.tireFrontText.isEmpty ? "前 --" : snap.tireFrontText)
+                            Text(snap.tireFrontText.isEmpty ? "--" : snap.tireFrontText)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(Color(hex: 0x9AA4B2))
                                 .monospacedDigit()
                             Spacer(minLength: 8)
-                            Text(snap.tireRearText.isEmpty ? "后 --" : snap.tireRearText)
+                            Text(snap.tireRearText.isEmpty ? "--" : snap.tireRearText)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(Color(hex: 0x9AA4B2))
                                 .monospacedDigit()
@@ -438,12 +438,20 @@ struct JiheDriveWidgetEntryView: View {
                 Capsule().fill(Color(hex: 0xE5E7EB))
                 if width > 0 {
                     Capsule()
-                        .fill(Color(hex: 0x22C55E))
+                        .fill(socColor)
                         .frame(width: width)
                 }
             }
         }
         .frame(height: 7)
+    }
+
+    /// 电池进度颜色与车辆首页一致：充电绿 / ≤15 红 / ≤30 橙 / 其余蓝
+    private var socColor: Color {
+        if snap.charging { return Color(hex: 0x22C55E) }
+        if snap.soc <= 15 { return Color(hex: 0xEF4444) }
+        if snap.soc <= 30 { return Color(hex: 0xF59E0B) }
+        return Color(uiColor: .systemBlue)
     }
 
     /// 电池下方一行：充电时显示功率/电流，不带坐垫状态（坐垫在控制条图标上）
@@ -468,9 +476,7 @@ struct JiheDriveWidgetEntryView: View {
             controlButton(
                 intent: WidgetCushionIntent(),
                 tint: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155),
-                label: "\(seatStatusText)，点击解锁坐垫",
-                badge: snap.seatOpen == true ? Color(hex: 0xEA580C)
-                    : (snap.seatOpen == false ? Color(hex: 0x166534) : nil)
+                label: "\(seatStatusText)，点击解锁坐垫"
             ) {
                 WidgetSeatIcon(open: snap.seatOpen == true,
                                color: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155))
@@ -479,7 +485,7 @@ struct JiheDriveWidgetEntryView: View {
             controlButton(
                 intent: WidgetFindIntent(),
                 symbol: "light.beacon.max.fill",
-                tint: Color(hex: 0x2563EB),
+                tint: Color(hex: 0x334155),
                 label: "寻车"
             )
         }

@@ -588,16 +588,13 @@ enum WidgetSnapshot {
         return ("\(one(front, reading?.frontTemp)) / \(one(rear, reading?.rearTemp))", true)
     }
 
-    /// 单侧胎压文案（车图下方左右排版用），无效读数返回空串
+    /// 单侧胎压文案（车图下方左右排版用），无效读数返回空串；不加"前/后"字样
     private static func tireSideText(_ bar: Double?, _ temp: Double?, label: String) -> String {
         guard let bar, bar > 0.3 else { return "" }
-        var text = label + " "
         if let temp, temp != 0 {
-            text += String(format: "%.1fbar %.0f°", bar, temp)
-        } else {
-            text += String(format: "%.1fbar", bar)
+            return String(format: "%.1fbar %.0f°", bar, temp)
         }
-        return text
+        return String(format: "%.1fbar", bar)
     }
 
     static func snapshotURL() -> URL? {

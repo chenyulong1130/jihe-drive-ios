@@ -25,6 +25,8 @@ struct VehicleView: View {
     @State private var rideExtra: RideTrackService.RideExtra?
     @State private var rideLoading = false
     @State private var resolvedAddress: String?
+    /// 定位隐私遮挡：开启后首页地图/地址模糊隐藏（记忆在本地设置）
+    @AppStorage("privacy.hideLocation") private var hideLocation = false
     @StateObject private var signin = SigninStore()
 
     @State private var showMap = false
@@ -660,6 +662,7 @@ struct VehicleView: View {
     private func locationCard(_ vehicle: Vehicle) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                guard !hideLocation else { return }
                 showMap = true
             } label: {
                 ZStack(alignment: .topLeading) {
@@ -675,8 +678,26 @@ struct VehicleView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .contentShape(Rectangle())
+                .overlay {
+                    // 隐私遮挡层：磨砂盖板 + 提示，盖住地图细节
+                    if hideLocation {
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                VStack(spacing: 4) {
+                                    Image(systemName: "eye.slash")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Text("位置已隐藏")
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .foregroundStyle(Theme.secondary)
+                            )
+                            .allowsHitTesting(false)
+                    }
+                }
             }
             .buttonStyle(PressableStyle(scale: 1, brightness: 0))
+            .disabled(hideLocation)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -685,20 +706,28 @@ struct VehicleView: View {
                         .foregroundStyle(Theme.label)
                     Spacer(minLength: 0)
                     Button {
+                        withAnimation(Motion.quick) { hideLocation.toggle() }
+                    } label: {
+                        Image(systemName: hideLocation ? "eye.slash" : "eye")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(hideLocation ? Theme.orange : Theme.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
                         navigate(vehicle)
                     } label: {
                         Text("导航")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(vehicle.coordinate == nil ? Theme.tertiary : Theme.brand)
+                            .foregroundStyle(vehicle.coordinate == nil || hideLocation ? Theme.tertiary : Theme.brand)
                     }
                     .buttonStyle(.plain)
-                    .disabled(vehicle.coordinate == nil)
+                    .disabled(vehicle.coordinate == nil || hideLocation)
                 }
-                Text(locationLabel(vehicle))
+                Text(hideLocation ? "位置已隐藏" : locationLabel(vehicle))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if !locationTimeLabel(vehicle).isEmpty {
+                if !hideLocation, !locationTimeLabel(vehicle).isEmpty {
                     Text(locationTimeLabel(vehicle))
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(Theme.tertiary)

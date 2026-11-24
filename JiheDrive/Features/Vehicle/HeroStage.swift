@@ -434,8 +434,8 @@ struct HeroStage: View {
                         .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
                 }
                 .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-                .padding(.top, topInset + 140)
-                .padding(.trailing, 16)
+                .padding(.top, topInset + 126)
+                .padding(.trailing, 30)
                 .accessibilityLabel("打开坐垫")
             }
         }

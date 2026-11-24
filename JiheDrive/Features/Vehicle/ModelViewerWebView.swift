@@ -415,7 +415,7 @@ enum ModelViewerAsset {
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setClearColor(0x000000, 0);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.05;
+        renderer.toneMappingExposure = 1.0;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
@@ -451,9 +451,9 @@ enum ModelViewerAsset {
           mesh.lookAt(0, 0, 0);
           envScene.add(mesh);
         }
-        addSoftbox(0, 55, 7);   // 相机正上方主灯
-        addSoftbox(120, 40, 5); // 左后补光
-        addSoftbox(240, 40, 5); // 右后补光
+        addSoftbox(0, 55, 4.5); // 相机正上方主灯（用户反馈银色偏白灰，软箱收敛）
+        addSoftbox(120, 40, 3.2); // 左后补光
+        addSoftbox(240, 40, 3.2); // 右后补光
         scene.environment = pmrem.fromScene(envScene, 0.04).texture;
         pmrem.dispose();
         // 半球光只提供上下过渡（顶白地灰），不放任何方向光——方向光必然造成明暗面
