@@ -42,6 +42,7 @@ struct VehicleView: View {
     @State private var showSettings = false
     @State private var showReplay = false
     @State private var showMessages = false
+    @State private var showCushionConfirm = false
     @State private var pinningHero = false
     @State private var cameraReset = 0
     @State private var didResetForScroll = false
@@ -56,20 +57,24 @@ struct VehicleView: View {
             let showSpinner = refreshing || scrollY > 40
             VStack(spacing: 0) {
                 if let vehicle = model.selectedVehicle {
-                    hero(vehicle, proxy: proxy)
+                    // 整页合一滚动：主视觉随内容一起滚走，下拉时整页回弹触发刷新。
+                    // 3D 模型拖拽时 onInteract 置 pinningHero 关掉页面滚动，不影响模型旋转
                     ScrollView(showsIndicators: false) {
-                        content(vehicle)
-                            .padding(.bottom, 128)
-                            .background {
-                                GeometryReader { geo in
-                                    Color.clear.preference(
-                                        key: VehicleScrollOffsetKey.self,
-                                        value: geo.frame(in: .named("vehicleHome")).minY
-                                    )
-                                }
+                        VStack(spacing: 0) {
+                            hero(vehicle, proxy: proxy)
+                            content(vehicle)
+                                .padding(.top, themeStore.selection.blendsIntoPage ? -HeroStage.pageBlend : 0)
+                        }
+                        .padding(.bottom, 128)
+                        .background {
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: VehicleScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("vehicleHome")).minY
+                                )
                             }
+                        }
                     }
-                    .padding(.top, themeStore.selection.blendsIntoPage ? -HeroStage.pageBlend : 0)
                     .coordinateSpace(name: "vehicleHome")
                     .scrollDisabled(pinningHero)
                     .onPreferenceChange(VehicleScrollOffsetKey.self) { y in
@@ -96,6 +101,39 @@ struct VehicleView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .overlay(alignment: .top) {
+                // 切换车辆那一块固定在屏幕顶部，不随整页滚动
+                if let vehicle = model.selectedVehicle {
+                    HeroTopBar(
+                        vehicle: vehicle,
+                        selection: themeStore.selection,
+                        videoURL: themeStore.resolvedVideoURL(local: videoStore.url),
+                        canSwitchVehicle: model.vehicles.count > 1,
+                        onPickVehicle: {
+                            if model.vehicles.count > 1 {
+                                showPicker = true
+                            } else {
+                                showToast("当前账号只有一台车辆")
+                            }
+                        },
+                        onOpenTheme: {
+                            themeFocus = .theme
+                            showTheme = true
+                        },
+                        onOpenDashboardWallpaper: {
+                            if vehicle.isCarMaster {
+                                showDashboardWallpaper = true
+                            } else {
+                                showToast("分享车辆暂不支持仪表壁纸")
+                            }
+                        },
+                        onOpenMessages: { showMessages = true },
+                        unreadCount: messages.unreadCount
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.top, bar + 8)
+                }
+            }
             .overlay(alignment: .top) {
                 // 刷新指示器悬浮在主视觉与内容交界处，不再压住开机按钮那一行
                 if showSpinner {
@@ -151,6 +189,15 @@ struct VehicleView: View {
         }
         .sheet(isPresented: $showMessages) {
             MessageInboxView(store: messages)
+        }
+        .alert("打开坐垫", isPresented: $showCushionConfirm) {
+            Button("取消", role: .cancel) {}
+            Button("打开坐垫") {
+                guard let vehicle = model.selectedVehicle else { return }
+                openCushion(vehicle)
+            }
+        } message: {
+            Text("座桶锁为电控释放，打开后需手动关闭。确认要弹开坐垫吗？")
         }
         .fullScreenCover(isPresented: $showReplay) {
             RideHomeView(showsClose: true)
@@ -314,15 +361,7 @@ struct VehicleView: View {
                 showTheme = true
             },
             onOpenCushion: {
-                optimisticSeatOpen = true // 3D 模型立即开盖，不等云端
-                run("cushion") { try await model.openCushion(vehicle) }
-                // 开坐垫后尽快拉状态，让主页/弹层的 3D 模型跟上（云端上报有延迟，多试几轮）
-                Task {
-                    for delay in [8.0, 20.0, 40.0] {
-                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                        await model.loadBattery(vin: vehicle.vinNo, quiet: true)
-                    }
-                }
+                showCushionConfirm = true // 先确认再下发，避免误触直接弹开座桶
             },
             onOpenTire: {
                 showTire = true
@@ -332,8 +371,22 @@ struct VehicleView: View {
             },
             onInteract: { pinningHero = $0 },
             canSwitchVehicle: model.vehicles.count > 1,
-            cameraReset: cameraReset
+            cameraReset: cameraReset,
+            showsTopRow: false
         )
+    }
+
+    /// 确认后真正下发开坐垫：模型乐观开盖，不等云端回传
+    private func openCushion(_ vehicle: Vehicle) {
+        optimisticSeatOpen = true // 3D 模型立即开盖，不等云端
+        run("cushion") { try await model.openCushion(vehicle) }
+        // 开坐垫后尽快拉状态，让主页/弹层的 3D 模型跟上（云端上报有延迟，多试几轮）
+        Task {
+            for delay in [8.0, 20.0, 40.0] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                await model.loadBattery(vin: vehicle.vinNo, quiet: true)
+            }
+        }
     }
 
     /// 切车时先用这份 VIN 缓存，避免 3D / 车图重新下载闪一下

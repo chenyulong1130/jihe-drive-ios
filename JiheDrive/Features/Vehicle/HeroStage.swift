@@ -74,6 +74,9 @@ struct HeroStage: View {
     var canSwitchVehicle: Bool = true
     /// 递增后 3D 回到初始角度并重新显示胎压标注
     var cameraReset: Int = 0
+    /// 顶栏是否内置于主视觉。首页整页滚动后顶栏由外层固定渲染（不随页面滚走），
+    /// 这里只留等高占位，保证电量区位置不变
+    var showsTopRow: Bool = true
 
     @State private var glbRevealed = false
     @State private var modelRotated = false
@@ -107,7 +110,12 @@ struct HeroStage: View {
                 .clipped()
 
             VStack(spacing: 0) {
-                topRow
+                if showsTopRow {
+                    topRow
+                } else {
+                    // 顶栏外置固定时保留等高占位，电量区起始位置不变
+                    Color.clear.frame(height: 38)
+                }
                 batteryBlock
                     .padding(.top, 10)
                 statusRow
@@ -478,80 +486,19 @@ struct HeroStage: View {
 
     // MARK: - 顶部：车名 + 主题(衣服) + 仪表壁纸 —— 对齐 Flutter
 
+    /// 顶栏实际渲染交给 HeroTopBar；整页滚动时可由外层用同一组件固定渲染
     private var topRow: some View {
-        HStack(spacing: 10) {
-            Button(action: onPickVehicle) {
-                HStack(spacing: 5) {
-                    Text(vehicle.name)
-                        .font(.system(size: 19, weight: .heavy))
-                        .foregroundStyle(primary)
-                        .shadow(color: onDark ? Color.black.opacity(0.2) : .clear, radius: 8)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if canSwitchVehicle {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(secondaryText)
-                    }
-                }
-                .frame(minHeight: 36, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
-            .disabled(!canSwitchVehicle)
-
-            Spacer(minLength: 8)
-
-            HStack(spacing: 8) {
-                // 主题：衣服图标（动态视频背景）
-                frostedCircle(action: onOpenTheme, label: "主题") {
-                    Image("ThemeShirt")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 22, height: 22)
-                }
-                // 壁纸：车机仪表壁纸
-                frostedCircle(action: onOpenDashboardWallpaper, label: "仪表壁纸") {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.label)
-                }
-                if let onOpenMessages {
-                    frostedCircle(action: onOpenMessages, label: "消息", badge: unreadCount) {
-                        Image(systemName: unreadCount > 0 ? "bell.badge.fill" : "bell.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.label)
-                    }
-                }
-            }
-        }
-    }
-
-    private func frostedCircle<Content: View>(
-        action: @escaping () -> Void,
-        label: String,
-        badge: Int = 0,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        Button(action: action) {
-            content()
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(Color.white.opacity(0.55)))
-                .shadow(color: Color.black.opacity(0.06), radius: 6, y: 1)
-                .overlay(alignment: .topTrailing) {
-                    if badge > 0 {
-                        Text(badge > 9 ? "9+" : "\(badge)")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Theme.red))
-                            .offset(x: 4, y: -4)
-                    }
-                }
-                .contentShape(Circle())
-                .accessibilityLabel(label)
-        }
-        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+        HeroTopBar(
+            vehicle: vehicle,
+            selection: selection,
+            videoURL: videoURL,
+            canSwitchVehicle: canSwitchVehicle,
+            onPickVehicle: onPickVehicle,
+            onOpenTheme: onOpenTheme,
+            onOpenDashboardWallpaper: onOpenDashboardWallpaper,
+            onOpenMessages: onOpenMessages,
+            unreadCount: unreadCount
+        )
     }
 
     // MARK: - 电量（对齐小程序：电量% + 续航挤在左侧，短进度条 140×6）
@@ -726,6 +673,100 @@ struct HeroStage: View {
         DragGesture(minimumDistance: 6)
             .onChanged { _ in onInteract?(true) }
             .onEnded { _ in onInteract?(false) }
+    }
+}
+
+/// 车辆页顶栏：车名切换 + 主题 / 仪表壁纸 / 消息。
+/// 首页整页滚动后由外层固定渲染在屏幕顶部，不随内容滚走
+struct HeroTopBar: View {
+    let vehicle: Vehicle
+    let selection: BackdropSelection
+    var videoURL: URL? = nil
+    var canSwitchVehicle: Bool = true
+    let onPickVehicle: () -> Void
+    let onOpenTheme: () -> Void
+    let onOpenDashboardWallpaper: () -> Void
+    var onOpenMessages: (() -> Void)? = nil
+    var unreadCount: Int = 0
+
+    private var onDark: Bool { !selection.isDefault || videoURL != nil }
+    private var primary: Color { onDark ? .white : Theme.label }
+    private var secondaryText: Color { onDark ? Color.white.opacity(0.78) : Theme.secondary }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: onPickVehicle) {
+                HStack(spacing: 5) {
+                    Text(vehicle.name)
+                        .font(.system(size: 19, weight: .heavy))
+                        .foregroundStyle(primary)
+                        .shadow(color: onDark ? Color.black.opacity(0.2) : .clear, radius: 8)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if canSwitchVehicle {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(secondaryText)
+                    }
+                }
+                .frame(minHeight: 36, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+            .disabled(!canSwitchVehicle)
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 8) {
+                // 主题：衣服图标（动态视频背景）
+                frostedCircle(action: onOpenTheme, label: "主题") {
+                    Image("ThemeShirt")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
+                }
+                // 壁纸：车机仪表壁纸
+                frostedCircle(action: onOpenDashboardWallpaper, label: "仪表壁纸") {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                }
+                if let onOpenMessages {
+                    frostedCircle(action: onOpenMessages, label: "消息", badge: unreadCount) {
+                        Image(systemName: unreadCount > 0 ? "bell.badge.fill" : "bell.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                    }
+                }
+            }
+        }
+    }
+
+    private func frostedCircle<Content: View>(
+        action: @escaping () -> Void,
+        label: String,
+        badge: Int = 0,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            content()
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color.white.opacity(0.55)))
+                .shadow(color: Color.black.opacity(0.06), radius: 6, y: 1)
+                .overlay(alignment: .topTrailing) {
+                    if badge > 0 {
+                        Text(badge > 9 ? "9+" : "\(badge)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Theme.red))
+                            .offset(x: 4, y: -4)
+                    }
+                }
+                .contentShape(Circle())
+                .accessibilityLabel(label)
+        }
+        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
     }
 }
 
