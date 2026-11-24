@@ -27,48 +27,53 @@ struct RideHomeView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView(showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header
-                    monthChip
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
+            VStack(alignment: .leading, spacing: 0) {
+                // 顶部栏与日期固定：只有下面的列表滚动
+                header
+                    .padding(.horizontal, Theme.page)
+                    .padding(.top, showsClose ? 10 : 8)
+                monthChip
+                    .padding(.horizontal, Theme.page)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
-                    if !groups.isEmpty {
-                        monthHero
-                            .padding(.bottom, 8)
-                    }
-
-                    if model.selectedVehicle == nil {
-                        Text("先在车辆页登录并选择一台车")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .padding(.top, 32)
-                    } else if loading && groups.isEmpty {
-                        RideListSkeleton()
-                            .padding(.top, 4)
-                    } else if let errorText, groups.isEmpty {
-                        SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
-                            .padding(.top, 12)
-                    } else if groups.isEmpty {
-                        Text("本月暂无骑行记录")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.tertiary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 48)
-                    } else {
-                        ForEach(groups) { group in
-                            daySection(group)
+                ScrollView(showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if !groups.isEmpty {
+                            monthHero
+                                .padding(.bottom, 8)
                         }
-                        loadMoreFooter
+
+                        if model.selectedVehicle == nil {
+                            Text("先在车辆页登录并选择一台车")
+                                .font(Theme.footnote)
+                                .foregroundStyle(Theme.secondary)
+                                .padding(.top, 32)
+                        } else if loading && groups.isEmpty {
+                            RideListSkeleton()
+                                .padding(.top, 4)
+                        } else if let errorText, groups.isEmpty {
+                            SoftBanner(text: errorText, icon: "exclamationmark.triangle.fill", tone: Theme.orange)
+                                .padding(.top, 12)
+                        } else if groups.isEmpty {
+                            Text("本月暂无骑行记录")
+                                .font(Theme.footnote)
+                                .foregroundStyle(Theme.tertiary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 48)
+                        } else {
+                            ForEach(groups) { group in
+                                daySection(group)
+                            }
+                            loadMoreFooter
+                        }
                     }
+                    .padding(.horizontal, Theme.page)
+                    .padding(.bottom, listBottomPadding)
                 }
-                .padding(.horizontal, Theme.page)
-                .padding(.top, showsClose ? 10 : 8)
-                .padding(.bottom, listBottomPadding)
+                .background(Theme.groupedBackground)
+                .refreshable { await loadMonth(force: true) }
             }
-            .background(Theme.groupedBackground)
-            .refreshable { await loadMonth(force: true) }
 
             if selecting {
                 selectBar
@@ -490,7 +495,7 @@ struct RideHomeView: View {
         }
         let batch = await RideTrackService.tracks(
             vin: vehicle.vinNo, from: bounds.start, to: bounds.end,
-            page: nextPage, pageSize: 50
+            page: nextPage, pageSize: 10
         ) ?? []
         if Task.isCancelled { return }
 
@@ -550,8 +555,9 @@ struct RideHomeView: View {
 
         guard let bounds = Self.monthBounds(for: monthAnchor) else { return }
         async let daysTask = RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor)
+        // 首屏只拉 10 次（约头 2~3 天），其余交给上拉加载，别一次铺满整月
         let first = await RideTrackService.tracks(
-            vin: vehicle.vinNo, from: bounds.start, to: bounds.end, page: 1, pageSize: 50
+            vin: vehicle.vinNo, from: bounds.start, to: bounds.end, page: 1, pageSize: 10
         ) ?? []
         let days = await daysTask ?? []
         if Task.isCancelled { return }
