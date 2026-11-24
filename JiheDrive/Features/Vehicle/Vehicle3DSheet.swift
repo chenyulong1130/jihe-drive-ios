@@ -9,6 +9,7 @@ struct Vehicle3DSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appearance: AppearanceStore
+    @EnvironmentObject private var seatLinkage: SeatLinkageStore
     @StateObject private var loader = VehicleModelLoader()
     @State private var resetToken = 0
     @State private var glbFile: URL?
@@ -98,8 +99,8 @@ struct Vehicle3DSheet: View {
         .background(Theme.groupedBackground.ignoresSafeArea())
         .sheetChrome()
         .task(id: vehicle.vinNo) {
-            // 打开面板先按真实车况摆坐垫
-            if let open = realSeatOpen {
+            // 打开面板先按真实车况摆坐垫（该车型关闭联动时保持合上）
+            if seatLinkage.isLinked(vin: vehicle.vinNo), let open = realSeatOpen {
                 seatOpen = open
                 seatToken += 1
             }
@@ -116,9 +117,14 @@ struct Vehicle3DSheet: View {
             }
         }
         .onChange(of: realSeatOpen) { _, open in
-            // 真实坐垫状态变化：开→模型打开，关→模型关闭
-            guard let open, open != seatOpen else { return }
+            // 真实坐垫状态变化：开→模型打开，关→模型关闭（关闭联动时不自动跟随）
+            guard seatLinkage.isLinked(vin: vehicle.vinNo), let open, open != seatOpen else { return }
             seatOpen = open
+            seatToken += 1
+        }
+        .onReceive(seatLinkage.objectWillChange) { _ in
+            // 联动开关变化：重新摆一次坐垫（关→合上，开→按真实状态摆）
+            seatOpen = seatLinkage.isLinked(vin: vehicle.vinNo) && realSeatOpen == true
             seatToken += 1
         }
     }

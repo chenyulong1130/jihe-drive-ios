@@ -8,6 +8,7 @@ struct RootView: View {
     @StateObject private var videoStore = VideoBackdropStore()
     @StateObject private var appearance = AppearanceStore()
     @StateObject private var messages = MessageStore()
+    @StateObject private var seatLinkage = SeatLinkageStore()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -29,6 +30,7 @@ struct RootView: View {
         .environmentObject(videoStore)
         .environmentObject(appearance)
         .environmentObject(messages)
+        .environmentObject(seatLinkage)
         .preferredColorScheme(appearance.resolvedScheme)
         .tint(Theme.brand)
         .animation(Motion.spring, value: model.isLoggedIn)

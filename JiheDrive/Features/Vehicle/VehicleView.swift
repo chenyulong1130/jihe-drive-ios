@@ -7,6 +7,7 @@ struct VehicleView: View {
     @EnvironmentObject private var videoStore: VideoBackdropStore
     @EnvironmentObject private var messages: MessageStore
     @EnvironmentObject private var appearance: AppearanceStore
+    @EnvironmentObject private var seatLinkage: SeatLinkageStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.activeMainTab) private var activeMainTab
 
@@ -184,10 +185,16 @@ struct VehicleView: View {
             syncChargeIsland()
         }
         .onChange(of: model.selectedVehicle?.seat) { _, _ in
-            seatSyncToken += 1 // 云端坐垫状态变化：主页 3D 模型跟着开/合
+            // 云端坐垫状态变化：主页 3D 模型跟着开/合（该车型关闭联动时不跟随）
+            guard seatLinkage.isLinked(vin: model.selectedVehicle?.vinNo) else { return }
+            seatSyncToken += 1
         }
         .onChange(of: model.selectedVehicle?.vinNo) { _, _ in
             seatSyncToken += 1 // 切车后也要按新车状态摆坐垫
+        }
+        .onReceive(seatLinkage.objectWillChange) { _ in
+            // 联动开关变化：重新摆一次坐垫（关→合上，开→按真实状态摆）
+            seatSyncToken += 1
         }
         .onReceive(model3D.$state) { state in
             if case .ready = state, let vin = model.selectedVehicle?.vinNo {
@@ -234,7 +241,8 @@ struct VehicleView: View {
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
-            seatOpen: model.selectedVehicle?.seat?.isOpen() == true,
+            // 关闭该车型的坐垫联动时，模型保持合上，不跟随云端坐垫状态
+            seatOpen: seatLinkage.isLinked(vin: vehicle.vinNo) && model.selectedVehicle?.seat?.isOpen() == true,
             seatSyncToken: seatSyncToken,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
