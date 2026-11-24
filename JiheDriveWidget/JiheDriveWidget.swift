@@ -478,9 +478,13 @@ struct JiheDriveWidgetEntryView: View {
                 tint: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155),
                 label: "\(seatStatusText)，点击解锁坐垫"
             ) {
-                WidgetSeatIcon(open: snap.seatOpen == true,
-                               color: snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155))
-                    .frame(width: 26, height: 17)
+                // 用户提供的官方图标（Assets 里的模板图，随 tint 变色）
+                Image(snap.seatOpen == true ? "SeatIconOpen" : "SeatIconClosed")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155))
+                    .frame(width: 26, height: 18)
             }
             controlButton(
                 intent: WidgetFindIntent(),
@@ -604,66 +608,3 @@ struct JiheDriveHomeWidget: Widget {
     }
 }
 
-/// 小组件坐垫图标（按参考图重画）：侧视座垫 + 托盘底盘线稿；
-/// 开启态座垫绕前铰链上抬并带支撑杆，关闭态座垫平放。
-struct WidgetSeatIcon: View {
-    var open: Bool
-    var color: Color
-
-    var body: some View {
-        Canvas { context, size in
-            let w = size.width
-            let h = size.height
-            let stroke = StrokeStyle(lineWidth: min(w, h) * 0.07,
-                                     lineCap: .round, lineJoin: .round)
-
-            // 座垫（填充）：顺滑的侧视轮廓，鼻部圆润、尾部带一点上翘
-            var seat = Path()
-            seat.move(to: CGPoint(x: 0.04 * w, y: 0.50 * h))
-            seat.addCurve(to: CGPoint(x: 0.50 * w, y: 0.14 * h),
-                          control1: CGPoint(x: 0.14 * w, y: 0.12 * h),
-                          control2: CGPoint(x: 0.30 * w, y: 0.08 * h))
-            seat.addCurve(to: CGPoint(x: 0.92 * w, y: 0.28 * h),
-                          control1: CGPoint(x: 0.68 * w, y: 0.20 * h),
-                          control2: CGPoint(x: 0.86 * w, y: 0.18 * h))
-            seat.addCurve(to: CGPoint(x: 0.94 * w, y: 0.44 * h),
-                          control1: CGPoint(x: 0.97 * w, y: 0.34 * h),
-                          control2: CGPoint(x: 0.96 * w, y: 0.41 * h))
-            seat.addCurve(to: CGPoint(x: 0.10 * w, y: 0.56 * h),
-                          control1: CGPoint(x: 0.72 * w, y: 0.58 * h),
-                          control2: CGPoint(x: 0.28 * w, y: 0.60 * h))
-            seat.closeSubpath()
-            if open {
-                // 绕前铰链上抬约 25°，稍向右下让出支撑杆空间
-                let pivot = CGPoint(x: 0.22 * w, y: 0.52 * h)
-                var t = CGAffineTransform(translationX: pivot.x, y: pivot.y)
-                t = t.rotated(by: -.pi * 0.14).translatedBy(x: -pivot.x, y: -pivot.y)
-                seat = seat.applying(t)
-                    .applying(CGAffineTransform(translationX: 0.03 * w, y: 0.02 * h))
-            }
-            context.fill(seat, with: .color(color))
-
-            // 底盘（描边）：圆角托盘，两端微微上翘
-            var base = Path()
-            base.move(to: CGPoint(x: 0.97 * w, y: 0.50 * h))
-            base.addLine(to: CGPoint(x: 0.97 * w, y: 0.84 * h))
-            base.addQuadCurve(to: CGPoint(x: 0.88 * w, y: 0.94 * h),
-                              control: CGPoint(x: 0.97 * w, y: 0.94 * h))
-            base.addLine(to: CGPoint(x: 0.12 * w, y: 0.94 * h))
-            base.addQuadCurve(to: CGPoint(x: 0.03 * w, y: 0.84 * h),
-                              control: CGPoint(x: 0.03 * w, y: 0.94 * h))
-            base.addLine(to: CGPoint(x: 0.03 * w, y: 0.50 * h))
-            context.stroke(base, with: .color(color), style: stroke)
-
-            if open {
-                // 支撑杆：底盘中部弧线顶到座垫尾部下方
-                var strut = Path()
-                strut.move(to: CGPoint(x: 0.44 * w, y: 0.90 * h))
-                strut.addQuadCurve(to: CGPoint(x: 0.82 * w, y: 0.36 * h),
-                                   control: CGPoint(x: 0.70 * w, y: 0.60 * h))
-                context.stroke(strut, with: .color(color), style: stroke)
-            }
-        }
-        .aspectRatio(100 / 62, contentMode: .fit)
-    }
-}
