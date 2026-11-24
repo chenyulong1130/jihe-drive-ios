@@ -8,7 +8,7 @@ Payload/
 .DS_Store
 xcuserdata/
 
-# WorkBuddy 本地会话与记忆
+
 .workbuddy/
 
 analysis/carwithin/repo
