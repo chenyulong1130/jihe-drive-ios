@@ -146,9 +146,11 @@ struct JiheDriveWidgetEntryView: View {
                     }
                     progress
                         .frame(maxWidth: 128)
-                    Text(chargingLine)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(hex: 0x94A3B8))
+                    if snap.charging {
+                        Text("充电中")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(hex: 0x94A3B8))
+                    }
                     Spacer(minLength: 4)
                     controlBar
                 }
