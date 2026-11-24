@@ -644,6 +644,9 @@ struct RideTrack: Identifiable, Hashable {
     var energyWh: Double? = nil
     /// 与 points 对齐的采样 Unix 秒；0 表示该点没有时间
     var timestamps: [TimeInterval] = []
+    /// 与 points 对齐的**真实**采样 Unix 秒（多段合并时 timestamps 会压缩跨段空档，
+    /// 墙钟显示仍按真实时刻走；单段行程留空，回退到 startedAt 推算）
+    var realTimestamps: [TimeInterval] = []
     /// 行程开始（Unix 秒），来自 startTime 原文
     var startedAt: TimeInterval? = nil
     /// 行程结束（Unix 秒），来自 endTime 原文
@@ -673,6 +676,11 @@ struct RideTrack: Identifiable, Hashable {
         }
     }
 
+    /// 合并多段轨迹回放。
+    /// 关键点：两段骑行之间的空档（同日几小时 / 跨天几天）不参与回放时间轴——
+    /// 压缩成 20 秒的过渡，否则回放大部分时间都在"横穿城市/日历"，
+    /// 光标跨城乱飞、时间轴被空档占满（多选回放"乱了"的根因）。
+    /// 真实时间戳另存 realTimestamps，供墙钟时间显示。
     static func merged(_ tracks: [RideTrack]) -> RideTrack {
         let sorted = tracks.sorted { ($0.startTime ?? "") < ($1.startTime ?? "") }
         guard let first = sorted.first else {
@@ -683,17 +691,33 @@ struct RideTrack: Identifiable, Hashable {
         var points: [Coordinate] = []
         var speeds: [Double] = []
         var stamps: [TimeInterval] = []
+        var realStamps: [TimeInterval] = []
+        /// 跨段压缩的累计偏移；段与段之间超过 3 分钟的空档压成 20 秒
+        var shift: TimeInterval = 0
+        var lastReal: TimeInterval = 0
         for item in sorted {
+            let n = item.points.count
+            let itemStamps = item.timestamps.count == n ? item.timestamps : Array(repeating: TimeInterval(0), count: n)
+            var firstKnownInTrack = true
+            for raw in itemStamps {
+                if raw > 1_000_000_000 {
+                    if firstKnownInTrack, lastReal > 1_000_000_000 {
+                        let gap = raw - lastReal
+                        if gap > 180 { shift += gap - 20 }
+                    }
+                    lastReal = raw
+                    firstKnownInTrack = false
+                    stamps.append(raw - shift)
+                } else {
+                    stamps.append(0)
+                }
+            }
+            realStamps.append(contentsOf: itemStamps)
             points.append(contentsOf: item.points)
             if item.speedSamples.count == item.points.count {
                 speeds.append(contentsOf: item.speedSamples)
             } else {
                 speeds.append(contentsOf: Array(repeating: 0, count: item.points.count))
-            }
-            if item.timestamps.count == item.points.count {
-                stamps.append(contentsOf: item.timestamps)
-            } else {
-                stamps.append(contentsOf: Array(repeating: 0, count: item.points.count))
             }
         }
         return RideTrack(
@@ -713,6 +737,7 @@ struct RideTrack: Identifiable, Hashable {
             thumbnailURL: first.thumbnailURL,
             dayKey: first.dayKey,
             timestamps: stamps,
+            realTimestamps: realStamps,
             startedAt: first.startedAt,
             endedAt: sorted.last?.endedAt
         )
@@ -774,10 +799,24 @@ enum ReplayClock {
         )
     }
 
-    /// 进度对应的墙钟；有开始时间就按真实时刻走
+    /// 进度对应的墙钟；有开始时间就按真实时刻走。
+    /// 多段合并（timestamps 压缩过跨段空档）时按 realTimestamps 取样，
+    /// 保证显示的时刻仍是每段骑行的真实时刻。
     static func wallDate(track: RideTrack, progress: Double) -> Date? {
         let clock = make(track)
         let elapsed = clock.duration * min(max(progress, 0), 1)
+        if track.realTimestamps.count == track.points.count,
+           track.realTimestamps.contains(where: isUnix) {
+            let sample = sampleValue(
+                track.realTimestamps.map(Double.init),
+                times: clock.times,
+                duration: clock.duration,
+                progress: progress
+            )
+            if sample > 1_000_000_000 {
+                return Date(timeIntervalSince1970: sample)
+            }
+        }
         if let start = track.startedAt, start > 1_000_000_000 {
             return Date(timeIntervalSince1970: start + elapsed)
         }

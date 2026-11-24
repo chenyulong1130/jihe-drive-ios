@@ -24,6 +24,9 @@ struct ReplayMap: UIViewRepresentable {
     var use3D: Bool = false
     /// 全览边距。卡片/全屏都不跟车时用均匀边距，露出整段轨迹。
     var edgePadding: UIEdgeInsets = UIEdgeInsets(top: 52, left: 40, bottom: 52, right: 40)
+    /// 多段合并回放时的分段断点（points 下标）：断点处不与上一段连线，
+    /// 否则两段骑行的起终点之间会横穿城市画出一条假路线
+    var breaks: [Int] = []
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -40,7 +43,7 @@ struct ReplayMap: UIViewRepresentable {
         context.coordinator.modelScene = modelScene
         context.coordinator.glbFile = glbFile
         context.coordinator.use3D = use3D
-        context.coordinator.configure(map: map, points: points, speeds: speeds)
+        context.coordinator.configure(map: map, points: points, speeds: speeds, breaks: breaks)
         return map
     }
 
@@ -98,7 +101,7 @@ struct ReplayMap: UIViewRepresentable {
             displayLink?.invalidate()
         }
 
-        func configure(map: MKMapView, points: [CLLocationCoordinate2D], speeds: [Double]) {
+        func configure(map: MKMapView, points: [CLLocationCoordinate2D], speeds: [Double], breaks: [Int] = []) {
             mapView = map
             tickProxy.owner = self
             allPoints = points
@@ -108,16 +111,21 @@ struct ReplayMap: UIViewRepresentable {
 
             maxSpeed = max(self.speeds.max() ?? 0, 1)
 
-            var index = 0
-            while index < points.count - 1 {
-                let tone = toneIndex(speed(at: index))
-                var end = index + 1
-                while end < points.count - 1, toneIndex(speed(at: end)) == tone {
-                    end += 1
+            // 按断点拆链：每段骑行独立做速度着色分段，段与段之间不连线
+            let chainStarts = ([0] + breaks.filter { $0 > 0 && $0 < points.count }).sorted()
+            for (i, chainStart) in chainStarts.enumerated() {
+                let chainEnd = (i + 1 < chainStarts.count) ? chainStarts[i + 1] : points.count
+                var index = chainStart
+                while index < chainEnd - 1 {
+                    let tone = toneIndex(speed(at: index))
+                    var end = index + 1
+                    while end < chainEnd - 1, toneIndex(speed(at: end)) == tone {
+                        end += 1
+                    }
+                    let slice = Array(points[index...end])
+                    addLine(map, slice, color: Self.palette[tone], width: 5)
+                    index = end
                 }
-                let slice = Array(points[index...end])
-                addLine(map, slice, color: Self.palette[tone], width: 5)
-                index = end
             }
 
             let start = MKPointAnnotation()

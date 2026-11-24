@@ -43,6 +43,19 @@ struct RideReplayView: View {
 
     private var track: RideTrack { RideTrack.merged(tracks) }
 
+    /// 多段合并时的分段断点（points 下标），地图上段与段之间不连线。
+    /// 顺序必须和 merged 内部的 startTime 升序一致。
+    private var trackBreaks: [Int] {
+        let sorted = tracks.sorted { ($0.startTime ?? "") < ($1.startTime ?? "") }
+        var acc = 0
+        var result: [Int] = []
+        for (index, item) in sorted.enumerated() where index > 0 {
+            acc += sorted[index - 1].points.count
+            result.append(acc)
+        }
+        return result
+    }
+
     // MARK: - 数据
 
     private var coordinates: [CLLocationCoordinate2D] {
@@ -225,7 +238,8 @@ struct RideReplayView: View {
                 times: clock.times,
                 duration: clock.duration,
                 progress: progress,
-                follow: false
+                follow: false,
+                breaks: trackBreaks
             )
                 .allowsHitTesting(false)
 
@@ -532,7 +546,8 @@ struct RideReplayView: View {
             modelScene: prefer3D ? replayScene : nil,
             glbFile: prefer3D ? replayGLB : nil,
             use3D: prefer3D,
-            edgePadding: UIEdgeInsets(top: 120, left: 40, bottom: 280, right: 40)
+            edgePadding: UIEdgeInsets(top: 120, left: 40, bottom: 280, right: 40),
+            breaks: trackBreaks
         )
         .ignoresSafeArea()
         .safeAreaInset(edge: .top, spacing: 0) {

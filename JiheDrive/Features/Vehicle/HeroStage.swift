@@ -42,6 +42,8 @@ struct HeroStage: View {
     var lightsOn: Bool? = nil
     /// 实时电池充电态；列表里的充电标记不再当默认
     var liveCharging: Bool? = nil
+    /// 电池接口在拉取中（首次进入/切车）：电量区显示骨架而不是 0% 空数据
+    var batteryLoading: Bool = false
     /// 真实坐垫状态：开→3D 模型坐垫自动打开，关→自动合上
     var seatOpen: Bool = false
     /// 状态变化计数，变化时触发 jhSetSeat 下发
@@ -557,32 +559,44 @@ struct HeroStage: View {
     private var batteryBlock: some View {
         let energy = charging ? Theme.green : primary
         let content = VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text("\(soc)")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(energy)
-                    .shadow(color: Color.white.opacity(0.7), radius: 8)
-                    .monospacedDigit()
-                Text("%")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(charging ? Theme.green.opacity(0.85) : secondaryText)
-                    .padding(.trailing, 9)
+            if batteryLoading, vehicle.soc <= 0 {
+                // 电量接口在拉：骨架占位，不闪 0%
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        SkeletonBar(width: 64, height: 24, radius: 8)
+                        SkeletonBar(width: 92, height: 15, radius: 6)
+                    }
+                    SkeletonBar(height: 6, radius: 3)
+                        .frame(width: 140)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("\(soc)")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(energy)
+                        .shadow(color: Color.white.opacity(0.7), radius: 8)
+                        .monospacedDigit()
+                    Text("%")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(charging ? Theme.green.opacity(0.85) : secondaryText)
+                        .padding(.trailing, 9)
 
-                Text("\(vehicle.rangeKm)")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(primary)
-                    .monospacedDigit()
-                Text("km")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(secondaryText)
+                    Text("\(vehicle.rangeKm)")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(primary)
+                        .monospacedDigit()
+                    Text("km")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(secondaryText)
+                }
+
+                ChargingBar(
+                    progress: socRatio,
+                    charging: charging,
+                    track: primary.opacity(0.18),
+                    fill: socColor
+                )
             }
-
-            ChargingBar(
-                progress: socRatio,
-                charging: charging,
-                track: primary.opacity(0.18),
-                fill: socColor
-            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())

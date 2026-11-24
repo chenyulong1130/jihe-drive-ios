@@ -16,6 +16,11 @@ struct RideHomeView: View {
     @State private var picked: Set<String> = []
     @State private var replayBundle: RideReplayBundle?
     @State private var loadedKey: String?
+    /// 边缘滑动返回：手指拖动时整页跟手位移
+    @State private var backDrag: CGFloat = 0
+    @State private var backDragging = false
+    /// 多选回放最多同时选几段：合并回放的时间轴、点位规模和可读性都在 5 段内最稳
+    @State private var pickHint: String?
     /// 上拉加载更多：当月行程接口按天分页（ridetrack_v2 page/pageSize），
     /// 首屏只拉第一页，滚到底部再拉下一页追加，不再一次拼齐整月
     @State private var loadingMore = false
@@ -78,6 +83,15 @@ struct RideHomeView: View {
             if selecting {
                 selectBar
             }
+        }
+        .offset(x: backDrag)
+        .animation(backDragging ? nil : Motion.quick, value: backDrag)
+        .overlay(alignment: .leading) {
+            // 左边缘滑动返回（与系统返回手势同向）：全屏 cover 没有自带手势
+            Color.clear
+                .frame(width: 32)
+                .contentShape(Rectangle())
+                .gesture(edgeBackGesture)
         }
         .task(id: "\(model.selectedVehicle?.vinNo ?? "")-\(monthKey)-\(shouldLoadRides)") {
             guard shouldLoadRides else { return }
@@ -158,11 +172,37 @@ struct RideHomeView: View {
         return showsClose ? 40 : 120
     }
 
+    /// 左边缘滑动返回：向右拖超过阈值或速度够快就关闭，否则弹回
+    private var edgeBackGesture: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { value in
+                guard value.translation.width > 0 else { return }
+                backDragging = true
+                backDrag = value.translation.width
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let shouldDismiss = dx > 120 || value.predictedEndTranslation.width > 260
+                if shouldDismiss {
+                    dismiss()
+                }
+                backDragging = false
+                backDrag = 0
+            }
+    }
+
     private var selectBar: some View {
         HStack(spacing: 12) {
-            Text("已选 \(picked.count) 条")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.label)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("已选 \(picked.count) 条")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                if let pickHint {
+                    Text(pickHint)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.orange)
+                }
+            }
             Spacer(minLength: 0)
             Button {
                 let tracks = groups.flatMap(\.tracks).filter { picked.contains($0.id) }
@@ -300,8 +340,12 @@ struct RideHomeView: View {
                         if selecting {
                             if picked.contains(track.id) {
                                 picked.remove(track.id)
+                                pickHint = nil
+                            } else if picked.count >= maxPickedTracks {
+                                showPickHint("合并回放最多选 \(maxPickedTracks) 段")
                             } else {
                                 picked.insert(track.id)
+                                pickHint = nil
                             }
                         } else {
                             selected = track
@@ -420,6 +464,18 @@ struct RideHomeView: View {
     }
 
     // MARK: - Data
+
+    /// 合并回放一次最多几段：太多会把不同日期的空档压进同一条时间轴，
+    /// 光标跨城乱飞、地图连线成网，5 段以内节奏和可读性都最好
+    private let maxPickedTracks = 5
+
+    private func showPickHint(_ text: String) {
+        pickHint = text
+        Task {
+            try? await Task.sleep(nanoseconds: 2_200_000_000)
+            if pickHint == text { pickHint = nil }
+        }
+    }
 
     /// 骑行 Tab 已移除：RideHomeView 只从车辆页全屏打开（showsClose=true）。
     private var shouldLoadRides: Bool {

@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Network
 import UIKit
 import WidgetKit
 
@@ -27,6 +28,9 @@ final class AppModel: ObservableObject {
     @Published var batteryError: String?
     @Published private(set) var tire: TireReading?
     @Published private(set) var loading = false
+    /// 车辆首页详情（vehicleHomePage）在拉取中：首页各卡片骨架屏用这个兜底，
+    /// 切车 / 首次进入时详情没回来前不闪空数据
+    @Published private(set) var detailLoading = false
     @Published private(set) var detailVehicle: Vehicle?
     @Published var selectedVin: String? {
         didSet {
@@ -49,10 +53,19 @@ final class AppModel: ObservableObject {
 
     /// 开关机刚发出时云端锁态会滞后，这段时间内别用列表/详情把乐观状态盖回去
     private var lockHold: (vin: String, locked: Bool, until: Date)?
+    /// 充电态防抖：下拉刷新/轮询瞬间云端偶尔回报"未充电"（数据断流/缓存刷新），
+    /// 上一刻还在充电就按住旧状态 45 秒，避免主页"充电中"闪丢、过一会才回来
+    private var chargeHold: (vin: String, until: Date)?
 
     private static let vinKey = "jihe.selected.vin"
 
     private let client: ZeehoClient
+
+    /// 网络可达性监听：国行 iOS「无线数据」权限弹窗期间请求必失败，
+    /// 路径变为可用（权限放行/网络恢复）时补拉一次车辆列表，
+    /// 否则首页会一直空着，只能退出重登才恢复
+    private let pathMonitor = NWPathMonitor()
+    private var didLoadOnPathReady = false
 
     init(client: ZeehoClient = .shared) {
         self.client = client
@@ -60,6 +73,22 @@ final class AppModel: ObservableObject {
         let saved = UserDefaults.standard.string(forKey: Self.vinKey)
         self.selectedVin = (saved?.isEmpty == false) ? saved : nil
         WidgetSnapshot.persistSelectedVin(self.selectedVin)
+        startPathMonitor()
+    }
+
+    private func startPathMonitor() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            guard path.status == .satisfied else { return }
+            Task { @MainActor in
+                // 只在"还没成功拉到过车辆列表"时补拉，避免正常轮询外多打接口
+                if self.isLoggedIn, self.vehicles.isEmpty, !self.loading, !self.didLoadOnPathReady {
+                    self.didLoadOnPathReady = true
+                    await self.loadVehicles()
+                }
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "jihe.pathmonitor"))
     }
 
     var selectedVehicle: Vehicle? {
@@ -77,6 +106,15 @@ final class AppModel: ObservableObject {
     func bootstrap() async {
         guard isLoggedIn else { return }
         await loadVehicles()
+        // 网络权限刚放行时首拉常常直接失败（国行「无线数据」弹窗期间）：
+        // 车辆列表仍为空就小步重试几轮，等权限/网络真正就绪
+        for _ in 0..<5 {
+            guard isLoggedIn, vehicles.isEmpty, !Task.isCancelled else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await loadVehicles()
+            if !vehicles.isEmpty { return }
+        }
     }
 
     func loadVehicles() async {
@@ -97,6 +135,7 @@ final class AppModel: ObservableObject {
             }
             applyLockHold()
             errorMessage = nil
+            didLoadOnPathReady = true
             prefetchModelsInBackground()
         } catch let error as ZeehoError {
             if case .unauthorized = error {
@@ -266,6 +305,8 @@ final class AppModel: ObservableObject {
 
     /// 车辆首页接口：胎压、电压、温度、3D 模型这类细节只有这里带
     func loadDetail(vin: String) async {
+        detailLoading = true
+        defer { detailLoading = false }
         do {
             let response = try await client.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)")
             let code = ZeehoClient.codeString(response["code"])
@@ -330,6 +371,7 @@ final class AppModel: ObservableObject {
             }
 
             guard selectedVin == nil || WidgetSnapshot.sameVin(selectedVin, vin) else { return }
+            items = chargeHeldItems(vin: vin, fresh: items)
             if let seat {
                 if detailVehicle?.vinNo == vin {
                     detailVehicle = detailVehicle?.withSeat(seat)
@@ -375,6 +417,30 @@ final class AppModel: ObservableObject {
         batteries = []
         batteriesVin = nil
         batteryError = nil
+        chargeHold = nil
+    }
+
+    /// 充电态防抖：新读数不是充电中、但上一份是，且没拔出电池——
+    /// 45 秒宽限期内沿用上一份充电中数据，不让"充电中"在下拉刷新时闪丢。
+    /// 新读数确实是充电中，或电池已拔出，立即清除防抖。
+    private func chargeHeldItems(vin: String, fresh items: [BatteryInfo]) -> [BatteryInfo] {
+        guard let current = items.first else { return items }
+        if current.isLiveCharging || current.isPulledOut {
+            chargeHold = nil
+            return items
+        }
+        let previous = batteriesVin == vin ? batteries.first : nil
+        guard let previous, previous.isLiveCharging, !previous.isPulledOut else { return items }
+        // 只在第一次读到"充电中→未充电"跳变时装一次宽限期，过期后不重 arms，
+        // 否则真实停充会被无限按住
+        if chargeHold?.vin != vin {
+            chargeHold = (vin, Date().addingTimeInterval(45))
+        }
+        guard let until = chargeHold?.until, until > Date() else {
+            chargeHold = nil
+            return items
+        }
+        return [previous]
     }
 
     // MARK: - Commands

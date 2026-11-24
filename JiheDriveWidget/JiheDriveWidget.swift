@@ -251,6 +251,7 @@ struct JiheDriveWidgetEntryView: View {
                             .foregroundStyle(Color(hex: 0x6B7280))
                     }
                     progress
+                    electricalSparkRow
                     Text(chargingLine)
                         .font(.system(size: 11))
                         .foregroundStyle(Color(hex: 0x94A3B8))
@@ -454,19 +455,82 @@ struct JiheDriveWidgetEntryView: View {
         return Color(uiColor: .systemBlue)
     }
 
-    /// 电池下方一行：充电时显示功率/电流，不带坐垫状态（坐垫在控制条图标上）
+    /// 电池下方一行：充电时显示功率/电流，不带坐垫状态（坐垫在控制条图标上）。
+    /// 功率/电流数值移到下方折线行，这里只保留充放电状态文案
     private var chargingLine: String {
-        if snap.charging {
-            var parts: [String] = []
-            if !snap.chargePowerText.isEmpty { parts.append(snap.chargePowerText) }
-            if !snap.chargeCurrentText.isEmpty { parts.append(snap.chargeCurrentText) }
-            return parts.isEmpty ? "充电中" : "充电中 · " + parts.joined(separator: " ")
-        }
+        if snap.charging { return "充电中" }
         return "未充电"
+    }
+
+    /// 电量进度条下面的两段装饰折线（电流/功率），右边跟着实时数值。
+    /// 没有历史采样数据，波形是固定形状的"假"曲线，只做视觉占位
+    private var electricalSparkRow: some View {
+        HStack(spacing: 16) {
+            sparkCell(
+                label: "电流",
+                value: snap.chargeCurrentText.isEmpty ? "--" : snap.chargeCurrentText,
+                color: Color(hex: 0x3B82F6),
+                phase: 0
+            )
+            sparkCell(
+                label: "功率",
+                value: snap.chargePowerText.isEmpty ? "--" : snap.chargePowerText,
+                color: Color(hex: 0xF59E0B),
+                phase: 1.7
+            )
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
+    }
+
+    private func sparkCell(label: String, value: String, color: Color, phase: Double) -> some View {
+        HStack(spacing: 5) {
+            Canvas { context, size in
+                var path = Path()
+                let steps = 28
+                for i in 0...steps {
+                    let t = Double(i) / Double(steps)
+                    // 中间隆起的包络 + 两三个起伏：像一段真实采样的小曲线
+                    let envelope = sin(t * .pi) * 0.38
+                    let wave = sin(t * .pi * 3.2 + phase) * 0.30
+                    let y = size.height * CGFloat(0.66 - (envelope + wave))
+                    let x = size.width * CGFloat(t)
+                    if i == 0 {
+                        path.move(to: CGPoint(x: x, y: y))
+                    } else {
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .color(color.opacity(snap.charging ? 0.95 : 0.45)),
+                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
+                )
+            }
+            .frame(width: 44, height: 13)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(label)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(Color(hex: 0x9AA4B2))
+                Text(value)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x334155))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
     }
 
     private var controlBar: some View {
         HStack(alignment: .bottom, spacing: 16) {
+            controlButton(
+                intent: WidgetFindIntent(),
+                symbol: "light.beacon.max.fill",
+                tint: Color(hex: 0x334155),
+                label: "寻车"
+            )
             controlButton(
                 intent: WidgetLockIntent(),
                 symbol: snap.locked ? "lock.fill" : "lock.open.fill",
@@ -488,12 +552,6 @@ struct JiheDriveWidgetEntryView: View {
                     // 与 SF 图标视觉底部对齐：图标整体压到 28pt 槽位底部
                     .padding(.top, 6)
             }
-            controlButton(
-                intent: WidgetFindIntent(),
-                symbol: "light.beacon.max.fill",
-                tint: Color(hex: 0x334155),
-                label: "寻车"
-            )
         }
     }
 

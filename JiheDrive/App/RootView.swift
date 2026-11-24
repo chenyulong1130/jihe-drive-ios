@@ -72,6 +72,11 @@ struct RootView: View {
             if phase == .active {
                 appearance.applyToWindows(setStyle: false)
                 guard model.isLoggedIn else { return }
+                // 回前台时若车辆列表还没拉到（网络权限/断网期间启动失败）就补拉，
+                // 避免首页一直空着只能退出重登
+                if model.vehicles.isEmpty {
+                    Task { await model.bootstrap() }
+                }
                 Task { await messages.refresh() }
             }
         }

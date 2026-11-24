@@ -68,8 +68,17 @@ struct MainTabView: View {
                 .frame(width: w, height: geo.size.height, alignment: .topLeading)
                 .clipShape(HorizontalClip())
                 .contentShape(Rectangle())
+                // 全页横滑翻页：与页面内部手势并行，方向锁决定归属；
+                // 车辆页上半（3D 车模）不响应，边缘热区兜底
+                .simultaneousGesture(pageDrag(width: w, canStart: { start in
+                    if start.x < 28 || start.x > w - 28 { return true }
+                    if tab == .vehicle {
+                        return start.y > geo.size.height * 0.56
+                    }
+                    return true
+                }))
 
-                // 左右边缘热区翻页：中间区域（车图 / 3D / 列表）不再带动整页横滑
+                // 左右边缘热区翻页：与全页手势并行，边缘起手永远允许翻页
                 HStack(spacing: 0) {
                     Color.clear
                         .frame(width: 28)
@@ -125,7 +134,7 @@ struct MainTabView: View {
         }
     }
 
-    private func pageDrag(width: CGFloat) -> some Gesture {
+    private func pageDrag(width: CGFloat, canStart: @escaping (CGPoint) -> Bool = { _ in true }) -> some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { value in
                 let dx = value.translation.width
@@ -134,6 +143,11 @@ struct MainTabView: View {
                 // 方向锁：只判一次。水平要明显强于纵向，否则整段交给页面内 ScrollView。
                 if panAxis == nil {
                     guard abs(dx) > 12 || abs(dy) > 12 else { return }
+                    // 起手点白名单：车辆页上半是 3D 车模拖拽区，不从中间起手翻页
+                    if !canStart(value.startLocation) {
+                        panAxis = .vertical
+                        return
+                    }
                     if abs(dx) > abs(dy) * 1.6 {
                         panAxis = .horizontal
                         isDragging = true

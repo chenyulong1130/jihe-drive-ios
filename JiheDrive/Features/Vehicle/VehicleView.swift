@@ -45,9 +45,15 @@ struct VehicleView: View {
     @State private var pinningHero = false
     @State private var cameraReset = 0
     @State private var didResetForScroll = false
+    /// 自绘下拉刷新：scrollY 是内容顶部相对滚动视口的偏移（顶部回弹时为正）
+    @State private var scrollY: CGFloat = 0
+    @State private var refreshing = false
 
     var body: some View {
         GeometryReader { proxy in
+            let bar = ScreenMetrics.statusBarHeight
+            let heroSeam = max(388, (proxy.size.height + bar) * 0.47)
+            let showSpinner = refreshing || scrollY > 40
             VStack(spacing: 0) {
                 if let vehicle = model.selectedVehicle {
                     hero(vehicle, proxy: proxy)
@@ -66,8 +72,16 @@ struct VehicleView: View {
                     .padding(.top, themeStore.selection.blendsIntoPage ? -HeroStage.pageBlend : 0)
                     .coordinateSpace(name: "vehicleHome")
                     .scrollDisabled(pinningHero)
-                    .refreshable { await reloadPage() }
                     .onPreferenceChange(VehicleScrollOffsetKey.self) { y in
+                        scrollY = y
+                        // 拉过 72pt 触发一次刷新；防抖由 refreshing 状态守着
+                        if y > 72, !refreshing {
+                            refreshing = true
+                            Task {
+                                await reloadPage()
+                                refreshing = false
+                            }
+                        }
                         if y < -36, !didResetForScroll {
                             didResetForScroll = true
                             cameraReset += 1
@@ -82,6 +96,19 @@ struct VehicleView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .overlay(alignment: .top) {
+                // 刷新指示器悬浮在主视觉与内容交界处，不再压住开机按钮那一行
+                if showSpinner {
+                    ProgressView()
+                        .controlSize(.regular)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(.regularMaterial))
+                        .shadow(color: Color.black.opacity(0.12), radius: 10, y: 3)
+                        .padding(.top, heroSeam - 19)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+            .animation(Motion.quick, value: showSpinner)
         }
         .ignoresSafeArea(edges: .top)
         .background(Theme.groupedBackground.ignoresSafeArea())
@@ -255,6 +282,7 @@ struct VehicleView: View {
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
+            batteryLoading: model.batteryLoading,
             // 关闭该车型的坐垫联动时，模型保持合上，不跟随云端坐垫状态；
             // 用户刚点过"开坐垫"则立即响应，云端状态到位后接管
             seatOpen: optimisticSeatOpen || (seatLinkage.isLinked(vin: vehicle.vinNo) && model.selectedVehicle?.seat?.isOpen() == true),
@@ -905,6 +933,22 @@ struct VehicleView: View {
             )
                 .id(vehicle.vinNo)
                 .allowsHitTesting(false)
+        } else if model.detailLoading {
+            // 详情接口还没回来：骨架占位，不闪"未上报位置"
+            VStack(spacing: 8) {
+                SkeletonBar(width: 84, height: 12)
+                SkeletonBar(height: 10)
+                SkeletonBar(width: 120, height: 10)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .background(
+                LinearGradient(
+                    colors: [Color(hex: 0xE8EEF5), Color(hex: 0xD5DFEA)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
         } else {
             ZStack {
                 LinearGradient(
@@ -970,26 +1014,42 @@ struct VehicleView: View {
                 }
 
                 HStack(spacing: 0) {
-                    ridingMetric(
-                        value: vehicle.monthRideMinutes ?? formatTodayDuration(),
-                        label: "本月时长"
-                    )
-                    Rectangle()
-                        .fill(Theme.separator)
-                        .frame(width: 0.5, height: 36)
-                    ridingMetric(
-                        value: vehicle.monthMileage ?? "—",
-                        unit: "km",
-                        label: "本月里程"
-                    )
-                    Rectangle()
-                        .fill(Theme.separator)
-                        .frame(width: 0.5, height: 36)
-                    ridingMetric(
-                        value: vehicle.totalMileKm > 0 ? String(format: "%.0f", vehicle.totalMileKm) : "—",
-                        unit: "km",
-                        label: "总里程"
-                    )
+                    if model.detailLoading, vehicle.monthMileage == nil, vehicle.totalMileKm == 0 {
+                        // 详情没回来：三个指标先上骨架，不闪"—"
+                        ForEach(0..<3, id: \.self) { index in
+                            VStack(spacing: 8) {
+                                SkeletonBar(width: 58, height: 18, radius: 6)
+                                SkeletonBar(width: 44, height: 11, radius: 5)
+                            }
+                            .frame(maxWidth: .infinity)
+                            if index < 2 {
+                                Rectangle()
+                                    .fill(Theme.separator)
+                                    .frame(width: 0.5, height: 36)
+                            }
+                        }
+                    } else {
+                        ridingMetric(
+                            value: vehicle.monthRideMinutes ?? formatTodayDuration(),
+                            label: "本月时长"
+                        )
+                        Rectangle()
+                            .fill(Theme.separator)
+                            .frame(width: 0.5, height: 36)
+                        ridingMetric(
+                            value: vehicle.monthMileage ?? "—",
+                            unit: "km",
+                            label: "本月里程"
+                        )
+                        Rectangle()
+                            .fill(Theme.separator)
+                            .frame(width: 0.5, height: 36)
+                        ridingMetric(
+                            value: vehicle.totalMileKm > 0 ? String(format: "%.0f", vehicle.totalMileKm) : "—",
+                            unit: "km",
+                            label: "总里程"
+                        )
+                    }
                 }
             }
             .padding(16)
@@ -1046,9 +1106,26 @@ struct VehicleView: View {
             Image(systemName: "bolt.car")
                 .font(.system(size: 34, weight: .regular))
                 .foregroundStyle(Theme.tertiary)
-            Text("账号下还没有车辆")
+            Text(model.errorMessage ?? "账号下还没有车辆")
                 .font(Theme.headline)
                 .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await model.bootstrap() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("重新加载")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Theme.brand))
+            }
+            .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+            .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, ScreenMetrics.statusBarHeight + 120)
