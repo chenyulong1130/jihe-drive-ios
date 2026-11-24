@@ -13,6 +13,8 @@ struct VehicleView: View {
 
     @StateObject private var model3D = VehicleModelLoader()
     @State private var heroGLB: URL?
+    /// 3D 模型下载失败（仪表 Wi-Fi 等无互联网网络常见）：主视觉回落车图并提示
+    @State private var glbLoadFailed = false
     @State private var loadedModelVin: String?
     @State private var readyGLBVins: Set<String> = []
 
@@ -238,6 +240,11 @@ struct VehicleView: View {
             modelGLBFile: heroGLB,
             modelGLBCached: vehicle.vinNo == loadedModelVin && (readyGLBVins.contains(vehicle.vinNo) || HeroAssetCache.glb(for: vehicle.vinNo) != nil),
             prefers3D: vehicle.model3DURL != nil,
+            modelGLBFailed: glbLoadFailed,
+            onRetryModel: {
+                glbLoadFailed = false
+                Task { await loadHeroModel() }
+            },
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
@@ -322,6 +329,7 @@ struct VehicleView: View {
             return
         }
         let vin = vehicle.vinNo
+        glbLoadFailed = false
         if let cached = HeroAssetCache.glb(for: vin) ?? GLBModelStore.cached(vin: vin, remote: vehicle.model3DURL) {
             heroGLB = cached
             readyGLBVins.insert(vin)
@@ -347,8 +355,13 @@ struct VehicleView: View {
             if let file {
                 readyGLBVins.insert(vin)
                 heroGLB = file
+                glbLoadFailed = false
                 // hero 车模就绪后顺手预热 3D 弹层网页：首次打开弹层也接近秒开
                 ModelViewerWebView.prewarm(reuseKey: "sheet3d-\(vin)", glbFile: file)
+            } else {
+                // 下载失败（常见于仪表 Wi-Fi 无互联网）：回落车图并提示，不再永远转圈
+                glbLoadFailed = true
+                showToast("3D 模型下载失败，已临时改用官方车图")
             }
         } else {
             heroGLB = nil

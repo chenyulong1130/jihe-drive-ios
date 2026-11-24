@@ -415,29 +415,45 @@ enum ModelViewerAsset {
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setClearColor(0x000000, 0);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.15;
+        renderer.toneMappingExposure = 1.05;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
         // 金属漆车身（metalness 高）的颜色几乎全靠环境反射成像，漫射灯（方向光/半球光）
         // 对它基本无效——这就是之前怎么加补光都治不了"侧边死黑"的原因。
         // RoomEnvironment 自带窗户与明暗面，车侧转到背对亮窗的方向就反射出深色。
-        // 换成四面均匀的渐变摄影棚环境球：顶部 1.15 → 底部 0.72（均值≈0.94，
-        // 与原 RoomEnvironment 亮度持平——此前 0.45~1.0 偏暗导致白色漆面发灰）。
-        // 任何朝向都有反射光，无方向性阴影。
+        // 换成四面均匀的渐变摄影棚环境球（底 0.6 → 顶 1.05）+ 三条高亮"软箱"灯带：
+        // 金属件靠软箱高光出亮泽，哑光件不受影响；材质参数一律不动
+        // （不做 envMapIntensity/曝光干预），配色以模型贴图为准。
         const pmrem = new THREE.PMREMGenerator(renderer);
+        const envScene = new THREE.Scene();
         const envGeo = new THREE.SphereGeometry(10, 32, 16);
         const envPos = envGeo.attributes.position;
         const envColors = [];
         for (let i = 0; i < envPos.count; i++) {
           const t = (envPos.getY(i) / 10 + 1) / 2; // 0=底部 → 1=顶部
-          const v = 0.72 + 0.43 * t;
+          const v = 0.6 + 0.45 * t;
           envColors.push(v, v, v);
         }
         envGeo.setAttribute('color', new THREE.Float32BufferAttribute(envColors, 3));
-        const envScene = new THREE.Scene();
         envScene.add(new THREE.Mesh(envGeo,
           new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+        function addSoftbox(angleDeg, elevDeg, intensity) {
+          const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(6, 3),
+            new THREE.MeshBasicMaterial({
+              color: new THREE.Color(intensity, intensity, intensity),
+              side: THREE.DoubleSide
+            })
+          );
+          const a = angleDeg * Math.PI / 180, e = elevDeg * Math.PI / 180, r = 9;
+          mesh.position.set(Math.sin(a) * Math.cos(e) * r, Math.sin(e) * r, Math.cos(a) * Math.cos(e) * r);
+          mesh.lookAt(0, 0, 0);
+          envScene.add(mesh);
+        }
+        addSoftbox(0, 55, 7);   // 相机正上方主灯
+        addSoftbox(120, 40, 5); // 左后补光
+        addSoftbox(240, 40, 5); // 右后补光
         scene.environment = pmrem.fromScene(envScene, 0.04).texture;
         pmrem.dispose();
         // 半球光只提供上下过渡（顶白地灰），不放任何方向光——方向光必然造成明暗面
@@ -728,18 +744,6 @@ enum ModelViewerAsset {
               processed.push(m);
             }
             if (replaced) o.material = isArray ? processed : processed[0];
-          });
-          // 银色/金属漆增亮：金属材质几乎只吃环境反射，均匀环境球下银灰漆
-          // 容易显得发暗发灰（用户反馈"白色部分发灰，其实是有点银色"）。
-          // 提高 metalness>0.5 材质的环境反射乘数，让银面有金属亮泽；塑料哑光件不受影响。
-          gltf.scene.traverse((o) => {
-            if (!o.isMesh) return;
-            const mats = Array.isArray(o.material) ? o.material : [o.material];
-            for (const m of mats) {
-              if (m && m.isMeshStandardMaterial && m.metalness > 0.5) {
-                m.envMapIntensity = 1.45;
-              }
-            }
           });
           // 模型加载晚于页面就绪：补挂最近的灯光/坐垫目标状态
           if (lampMats.length > 0) applyLights(lightsState);

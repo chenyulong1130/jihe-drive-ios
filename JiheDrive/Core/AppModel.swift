@@ -97,6 +97,7 @@ final class AppModel: ObservableObject {
             }
             applyLockHold()
             errorMessage = nil
+            prefetchModelsInBackground()
         } catch let error as ZeehoError {
             if case .unauthorized = error {
                 isLoggedIn = false
@@ -106,6 +107,42 @@ final class AppModel: ObservableObject {
             // 页面刷新打断，忽略
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private var prefetchTask: Task<Void, Never>?
+
+    /// 联网时后台预取其他车辆的 3D 模型：切到没缓存过的车（尤其已在
+    /// 仪表 Wi-Fi 等无互联网网络时）也有缓存可用，不用现场下载失败。
+    func prefetchModelsInBackground() {
+        prefetchTask?.cancel()
+        prefetchTask = Task { [weak self] in
+            guard let self else { return }
+            let vins = await MainActor.run { self.vehicles.map(\.vinNo) }
+            for vin in vins {
+                guard !Task.isCancelled else { return }
+                await self.prefetchModelIfNeeded(vin: vin)
+            }
+        }
+    }
+
+    private func prefetchModelIfNeeded(vin: String) async {
+        do {
+            let response = try await client.get("/v1.0/app/cfmotoserverapp/vehicleHomePage/\(vin)")
+            let code = ZeehoClient.codeString(response["code"])
+            guard code.isEmpty || code == "10000",
+                  var json = Self.detailPayload(response) else { return }
+            json["vinNo"] = vin
+            if let nested = json["vehicleInfo"] as? [String: Any] {
+                json.merge(nested) { current, _ in current }
+            }
+            guard let parsed = Vehicle(json: json),
+                  let url = parsed.model3DURL, parsed.isGLBModel,
+                  GLBModelStore.cached(vin: vin, remote: url) == nil else { return }
+            _ = try await GLBModelStore.localFile(for: url, vin: vin)
+        } catch is CancellationError {
+        } catch {
+            // 静默失败：联网后重新进入会再预取
         }
     }
 
@@ -142,6 +179,8 @@ final class AppModel: ObservableObject {
 
     func logout() {
         client.clearSession()
+        prefetchTask?.cancel()
+        prefetchTask = nil
         vehicles = []
         batteries = []
         selectedVin = nil
@@ -178,6 +217,7 @@ final class AppModel: ObservableObject {
             }
             errorMessage = nil
             isLoggedIn = true
+            prefetchModelsInBackground()
         } catch {
             client.clearSession()
             throw error

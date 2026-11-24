@@ -33,6 +33,9 @@ struct HeroStage: View {
     var modelGLBCached: Bool = false
     /// 这台车有官方 3D 时只出 3D，下载完成前也不要用 2D 占位
     var prefers3D: Bool = false
+    /// 3D 模型下载失败（常见于仪表 Wi-Fi 等无互联网网络）：回落官方车图并提示，点提示可重试
+    var modelGLBFailed: Bool = false
+    var onRetryModel: (() -> Void)? = nil
     /// 车辆 Tab 是否在前台：不在时暂停背景视频与 3D 渲染，翻页不吃 GPU
     var screenActive: Bool = true
     /// 全车灯跟随外观深浅色：深色亮灯，nil 不下发
@@ -378,10 +381,35 @@ struct HeroStage: View {
                     .simultaneousGesture(heroDrag)
                     .onTapGesture(count: 2) { resetCamera() }
                 } else if prefers3D {
-                    ModelLoadingSkeleton(scale: 0.8)
-                        .padding(.top, glbTopPad)
+                    if modelGLBFailed {
+                        // 下载失败：回落官方车图，不再永远停在骨架屏；点提示重试
+                        twoDCar
+                            .padding(.top, carTopPad)
+                            .padding(.horizontal, 4)
+                            .padding(.bottom, carBottomPad)
+                            .allowsHitTesting(false)
+                        Button {
+                            onRetryModel?()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("3D 模型下载失败，点按重试（需联网）")
+                                    .font(.system(size: 11.5, weight: .medium))
+                            }
+                            .foregroundStyle(Theme.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(.ultraThinMaterial))
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
                         .padding(.bottom, carBottomPad)
-                        .allowsHitTesting(false)
+                    } else {
+                        ModelLoadingSkeleton(scale: 0.8)
+                            .padding(.top, glbTopPad)
+                            .padding(.bottom, carBottomPad)
+                            .allowsHitTesting(false)
+                    }
                 } else {
                     twoDCar
                         .padding(.top, carTopPad)
