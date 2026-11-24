@@ -415,22 +415,23 @@ enum ModelViewerAsset {
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setClearColor(0x000000, 0);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.05;
+        renderer.toneMappingExposure = 1.15;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
         // 金属漆车身（metalness 高）的颜色几乎全靠环境反射成像，漫射灯（方向光/半球光）
         // 对它基本无效——这就是之前怎么加补光都治不了"侧边死黑"的原因。
         // RoomEnvironment 自带窗户与明暗面，车侧转到背对亮窗的方向就反射出深色。
-        // 换成四面均匀的渐变摄影棚环境球：顶部白 1.0 → 底部灰 0.45，
-        // 任何朝向都有反射光，无方向性阴影（对齐 model-viewer neutral 的观感）。
+        // 换成四面均匀的渐变摄影棚环境球：顶部 1.15 → 底部 0.72（均值≈0.94，
+        // 与原 RoomEnvironment 亮度持平——此前 0.45~1.0 偏暗导致白色漆面发灰）。
+        // 任何朝向都有反射光，无方向性阴影。
         const pmrem = new THREE.PMREMGenerator(renderer);
         const envGeo = new THREE.SphereGeometry(10, 32, 16);
         const envPos = envGeo.attributes.position;
         const envColors = [];
         for (let i = 0; i < envPos.count; i++) {
           const t = (envPos.getY(i) / 10 + 1) / 2; // 0=底部 → 1=顶部
-          const v = 0.45 + 0.55 * t;
+          const v = 0.72 + 0.43 * t;
           envColors.push(v, v, v);
         }
         envGeo.setAttribute('color', new THREE.Float32BufferAttribute(envColors, 3));

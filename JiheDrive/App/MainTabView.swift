@@ -245,7 +245,8 @@ private struct LiquidTabBar: View {
                 )
         )
         .shadow(color: Theme.softShadow, radius: 24, x: 0, y: 10)
-        .frame(maxWidth: 360)
+        // 3 个 tab 时 360 太宽（每格 120pt，选中胶囊显得空旷），收到 272
+        .frame(maxWidth: 272)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
