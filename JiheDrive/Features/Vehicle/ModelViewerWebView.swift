@@ -378,7 +378,7 @@ enum ModelViewerAsset {
 
     /// three.js 自绘 viewer（three r160 + GLTFLoader + OrbitControls + RoomEnvironment）。
     /// 相机参数与原 model-viewer 对齐：orbit 0deg 90deg 4.35m / target 0.02 0.74 / fov 26。
-    /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯自发光,不含转向灯,无光锥) / jhResetOrbit。
+    /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯自发光+近光侧散光扇,不含转向灯) / jhResetOrbit。
     static func html(interactive: Bool, autoRotate: Bool) -> String {
         return """
         <!DOCTYPE html>
@@ -589,8 +589,80 @@ enum ModelViewerAsset {
           if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
           return null;
         }
-        // ---------- 大灯光锥 FX：已移除（用户反馈"两个光球、光往两边散"）----------
-        // 开灯只保留灯面自发光（lampSpec 控制颜色/强度），不再做可见光锥和聚光灯。
+        // ---------- 大灯光域：近光"往两边散"光扇 + 远光细长平射 ----------
+        // 车头朝 -x（AE4 世界坐标实测：大灯 x≈-0.5、尾灯 x≈+0.8）。
+        // 灯口取 L-HighBeam/L-LowBeam 包围盒中心——节点原点≠灯面中心（灯节点位移挂在父级上）。
+        // 近光（用户指定效果）：中间一束宽短锥 + 左右两束斜向锥，铺成往两边散的光扇；
+        // 远光：单束细长锥平射。画布是透明背景（露出 SwiftUI 舞台渐变），
+        // AdditiveBlending 会被 alpha 合成吃掉，必须用普通混合。
+        const NEAR_DIR   = new THREE.Vector3(-1, -0.22, 0);    // 近光：中间下压
+        const NEAR_DIR_L = new THREE.Vector3(-1, -0.30, 0.95); // 近光：向左散
+        const NEAR_DIR_R = new THREE.Vector3(-1, -0.30, -0.95); // 近光：向右散
+        const FAR_DIR    = new THREE.Vector3(-1, -0.08, 0);    // 远光：平射
+        let beamGroup = null;
+        let beamOrigin = null;
+        const beams = { near: [], far: null };
+        let beamSpot = null;
+        function makeBeamCone() {
+          const g = new THREE.ConeGeometry(1, 1, 32, 1, true);
+          g.translate(0, -0.5, 0); // 锥顶移到原点
+          const m = new THREE.MeshBasicMaterial({
+            color: 0xfff2d0, transparent: true, opacity: 0.22,
+            blending: THREE.NormalBlending, side: THREE.DoubleSide, depthWrite: false
+          });
+          return new THREE.Mesh(g, m);
+        }
+        function aimBeam(cone, from, dir, len, radius) {
+          cone.scale.set(radius, len, radius);
+          cone.position.copy(from);
+          cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.clone().normalize());
+        }
+        function buildBeam(root) {
+          const lampNode = root.getObjectByName('L-HighBeam') || root.getObjectByName('L-LowBeam');
+          if (!lampNode) return;
+          root.updateMatrixWorld(true);
+          beamOrigin = new THREE.Box3().setFromObject(lampNode).getCenter(new THREE.Vector3());
+          if (beamGroup) { // 复用页换模型：只更新灯口
+            applyBeam();
+            return;
+          }
+          beamGroup = new THREE.Group();
+          beamGroup.name = 'HeadBeamFX';
+
+          beams.near = [makeBeamCone(), makeBeamCone(), makeBeamCone()];
+          beams.far = makeBeamCone();
+          beams.near.forEach((c) => beamGroup.add(c));
+          beamGroup.add(beams.far);
+
+          beamSpot = new THREE.SpotLight(0xfff2d0, 0, 12, 0.4, 0.5, 1.4);
+          beamSpot.visible = false;
+          beamGroup.add(beamSpot, beamSpot.target);
+          beamGroup.visible = false;
+          scene.add(beamGroup);
+        }
+        function applyBeam() {
+          needsRender = true;
+          if (!beamGroup || !beamOrigin) return;
+          const on = lightsState;
+          beamGroup.visible = on;
+          // 开灯不压暗环境光：日间观感一致，光锥靠普通混合保证可见
+          if (!on) return;
+          aimBeam(beams.near[0], beamOrigin, NEAR_DIR, 3.0, 0.70);  // 近光中间束：宽短
+          aimBeam(beams.near[1], beamOrigin, NEAR_DIR_L, 2.4, 0.50); // 近光左散
+          aimBeam(beams.near[2], beamOrigin, NEAR_DIR_R, 2.4, 0.50); // 近光右散
+          beams.near.forEach((c) => { c.visible = true; });
+          aimBeam(beams.far, beamOrigin, FAR_DIR, 6.5, 0.75);        // 远光：细长平射
+          beams.far.visible = true;
+          // 聚光灯取远光参数（app 全车灯含远光，对齐 demo onFar 分支）
+          beamSpot.color.setHex(0xffffff);
+          beamSpot.angle = 0.32;
+          beamSpot.distance = 16;
+          beamSpot.intensity = 300;
+          beamSpot.visible = true;
+          beamSpot.position.copy(beamOrigin);
+          beamSpot.target.position.copy(beamOrigin.clone().add(FAR_DIR.clone().multiplyScalar(14)));
+          beamSpot.target.updateMatrixWorld();
+        }
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
         function applyLights(on) {
@@ -603,7 +675,7 @@ enum ModelViewerAsset {
               m.emissiveIntensity = 0;
             }
           }
-          needsRender = true;
+          applyBeam();
         }
         window.jhSetLights = (on) => {
           lightsState = !!on;
@@ -665,6 +737,7 @@ enum ModelViewerAsset {
           gltf.scene.position.x += 0.02 - center.x;
           gltf.scene.position.z += 0 - center.z;
           gltf.scene.position.y += 0.74 - center.y;
+          buildBeam(gltf.scene);
           needsRender = true;
           window.__jhModelReady = true;
           readyPending = true; // 首帧渲染完成后再上报 ready，避免揭掉 loading 后还有空窗
