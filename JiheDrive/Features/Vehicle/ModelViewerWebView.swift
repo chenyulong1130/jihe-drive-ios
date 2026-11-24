@@ -236,6 +236,8 @@ struct ModelViewerWebView: UIViewRepresentable {
             if let d = ModelViewerAsset.shared.threeData { extra["/three.module.min.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.gltfLoaderData { extra["/GLTFLoader.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.orbitControlsData { extra["/OrbitControls.js"] = (d, "text/javascript") }
+            if let d = ModelViewerAsset.shared.rgbeLoaderData { extra["/RGBELoader.js"] = (d, "text/javascript") }
+            if let d = ModelViewerAsset.shared.neutralHdrData { extra["/neutral.hdr"] = (d, "application/octet-stream") }
             if let d = ModelViewerAsset.shared.roomEnvironmentData { extra["/RoomEnvironment.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.bufferUtilsData { extra["/BufferGeometryUtils.js"] = (d, "text/javascript") }
             // 每次加载用唯一 token 子路径：所有页面曾经共用 jhmodel://local/model.glb，
@@ -409,6 +411,7 @@ enum ModelViewerAsset {
         import * as THREE from 'three';
         import { GLTFLoader } from './GLTFLoader.js';
         import { OrbitControls } from './OrbitControls.js';
+        import { RGBELoader } from './RGBELoader.js';
 
         const INTERACTIVE = \(interactive);
         const AUTO_ROTATE = \(autoRotate);
@@ -423,32 +426,16 @@ enum ModelViewerAsset {
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
-        // 单主光环境（用户要求：不要好几个光圈，只要一束"带切线"的高光带）：
-        // 均匀渐变底 + 唯一一块斜置的宽软箱面板。斜置让光带两端收窄，
-        // 投在车身上的高光近似三角过渡但不是三角形；四面渐变兜底，不会背光侧死黑。
+        // 官方 model-viewer neutral 环境贴图：环境光保持原样（自带几块灯板的效果，
+        // 用户明确要求不要动），银色漆等按贴图原样呈现。
         const pmrem = new THREE.PMREMGenerator(renderer);
-        const envScene = new THREE.Scene();
-        const envGeo = new THREE.SphereGeometry(10, 32, 16);
-        const envPos = envGeo.attributes.position;
-        const envColors = [];
-        for (let i = 0; i < envPos.count; i++) {
-          const t = (envPos.getY(i) / 10 + 1) / 2; // 0=底部 → 1=顶部
-          const v = 0.52 + 0.42 * t;
-          envColors.push(v, v, v);
-        }
-        envGeo.setAttribute('color', new THREE.Float32BufferAttribute(envColors, 3));
-        envScene.add(new THREE.Mesh(envGeo,
-          new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
-        const key = new THREE.Mesh(
-          new THREE.PlaneGeometry(10, 4.2),
-          new THREE.MeshBasicMaterial({ color: new THREE.Color(5.5, 5.5, 5.5), side: THREE.DoubleSide })
-        );
-        key.position.set(-4.5, 7.5, 5.5); // 左前上方
-        key.lookAt(0, 0.6, 0);
-        key.rotateZ(0.42);                // 斜置：光带一端宽一端窄
-        envScene.add(key);
-        scene.environment = pmrem.fromScene(envScene, 0.03).texture;
-        pmrem.dispose();
+        new RGBELoader().load('neutral.hdr', (hdr) => {
+          hdr.mapping = THREE.EquirectangularReflectionMapping;
+          scene.environment = pmrem.fromEquirectangular(hdr).texture;
+          hdr.dispose();
+          pmrem.dispose();
+          needsRender = true;
+        }, undefined, () => { pmrem.dispose(); });
 
         // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
         const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);
@@ -597,20 +584,15 @@ enum ModelViewerAsset {
           if (n.indexOf('lowbeam') >= 0) return [0xfff2d0, 10];
           return null;
         }
-        // ---------- 大灯光域：近光"往两边散"光扇 + 远光细长平射 ----------
-        // 车头朝 -x（AE4 世界坐标实测：大灯 x≈-0.5、尾灯 x≈+0.8）。
-        // 灯口取 L-HighBeam/L-LowBeam 包围盒中心——节点原点≠灯面中心（灯节点位移挂在父级上）。
-        // 近光（用户指定效果）：中间一束宽短锥 + 左右两束斜向锥，铺成往两边散的光扇；
-        // 远光：单束细长锥平射。画布是透明背景（露出 SwiftUI 舞台渐变），
-        // AdditiveBlending 会被 alpha 合成吃掉，必须用普通混合。
-        const NEAR_DIR   = new THREE.Vector3(-1, -0.22, 0);    // 近光：中间下压
-        const NEAR_DIR_L = new THREE.Vector3(-1, -0.30, 0.95); // 近光：向左散
-        const NEAR_DIR_R = new THREE.Vector3(-1, -0.30, -0.95); // 近光：向右散
-        const FAR_DIR    = new THREE.Vector3(-1, -0.08, 0);    // 远光：平射
+        // ---------- 车灯光锥：单束大光锥（用户指定效果）----------
+        // 只要一个锥：从灯口照向前下方，侧影就是三角形状（带切线边缘，非真三角）。
+        // 之前的“中间束+左右两束+远光锥+聚光灯”全部去掉。车头朝 -x（AE4 实测）；
+        // 灯口取 L-HighBeam/L-LowBeam 包围盒中心（节点原点≠灯面中心）。
+        // 画布是透明背景，AdditiveBlending 会被 alpha 合成吃掉，必须用普通混合。
+        const BEAM_DIR = new THREE.Vector3(-1, -0.18, 0); // 照向前方、略微下压
         let beamGroup = null;
         let beamOrigin = null;
-        const beams = { near: [], far: null };
-        let beamSpot = null;
+        const beams = { main: null };
         function makeBeamCone() {
           const g = new THREE.ConeGeometry(1, 1, 32, 1, true);
           g.translate(0, -0.5, 0); // 锥顶移到原点
@@ -637,14 +619,8 @@ enum ModelViewerAsset {
           beamGroup = new THREE.Group();
           beamGroup.name = 'HeadBeamFX';
 
-          beams.near = [makeBeamCone(), makeBeamCone(), makeBeamCone()];
-          beams.far = makeBeamCone();
-          beams.near.forEach((c) => beamGroup.add(c));
-          beamGroup.add(beams.far);
-
-          beamSpot = new THREE.SpotLight(0xfff2d0, 0, 12, 0.4, 0.5, 1.4);
-          beamSpot.visible = false;
-          beamGroup.add(beamSpot, beamSpot.target);
+          beams.main = makeBeamCone();
+          beamGroup.add(beams.main);
           beamGroup.visible = false;
           scene.add(beamGroup);
         }
@@ -655,21 +631,8 @@ enum ModelViewerAsset {
           beamGroup.visible = on;
           // 开灯不压暗环境光：日间观感一致，光锥靠普通混合保证可见
           if (!on) return;
-          aimBeam(beams.near[0], beamOrigin, NEAR_DIR, 3.0, 0.70);  // 近光中间束：宽短
-          aimBeam(beams.near[1], beamOrigin, NEAR_DIR_L, 2.4, 0.50); // 近光左散
-          aimBeam(beams.near[2], beamOrigin, NEAR_DIR_R, 2.4, 0.50); // 近光右散
-          beams.near.forEach((c) => { c.visible = true; });
-          aimBeam(beams.far, beamOrigin, FAR_DIR, 6.5, 0.75);        // 远光：细长平射
-          beams.far.visible = true;
-          // 聚光灯取远光参数（app 全车灯含远光，对齐 demo onFar 分支）
-          beamSpot.color.setHex(0xffffff);
-          beamSpot.angle = 0.32;
-          beamSpot.distance = 16;
-          beamSpot.intensity = 300;
-          beamSpot.visible = true;
-          beamSpot.position.copy(beamOrigin);
-          beamSpot.target.position.copy(beamOrigin.clone().add(FAR_DIR.clone().multiplyScalar(14)));
-          beamSpot.target.updateMatrixWorld();
+          aimBeam(beams.main, beamOrigin, BEAM_DIR, 6.0, 1.05); // 单束：长而宽，侧影近似三角
+          beams.main.visible = true;
         }
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
