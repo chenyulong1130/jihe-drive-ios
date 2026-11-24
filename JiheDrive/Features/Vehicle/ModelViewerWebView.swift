@@ -236,8 +236,6 @@ struct ModelViewerWebView: UIViewRepresentable {
             if let d = ModelViewerAsset.shared.threeData { extra["/three.module.min.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.gltfLoaderData { extra["/GLTFLoader.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.orbitControlsData { extra["/OrbitControls.js"] = (d, "text/javascript") }
-            if let d = ModelViewerAsset.shared.rgbeLoaderData { extra["/RGBELoader.js"] = (d, "text/javascript") }
-            if let d = ModelViewerAsset.shared.neutralHdrData { extra["/neutral.hdr"] = (d, "application/octet-stream") }
             if let d = ModelViewerAsset.shared.roomEnvironmentData { extra["/RoomEnvironment.js"] = (d, "text/javascript") }
             if let d = ModelViewerAsset.shared.bufferUtilsData { extra["/BufferGeometryUtils.js"] = (d, "text/javascript") }
             // 每次加载用唯一 token 子路径：所有页面曾经共用 jhmodel://local/model.glb，
@@ -411,7 +409,6 @@ enum ModelViewerAsset {
         import * as THREE from 'three';
         import { GLTFLoader } from './GLTFLoader.js';
         import { OrbitControls } from './OrbitControls.js';
-        import { RGBELoader } from './RGBELoader.js';
 
         const INTERACTIVE = \(interactive);
         const AUTO_ROTATE = \(autoRotate);
@@ -426,20 +423,32 @@ enum ModelViewerAsset {
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         host.appendChild(renderer.domElement);
 
-        // 官方 model-viewer neutral 环境贴图（与构建 69 前的 model-viewer 完全同源）：
-        // 原始配色/银色漆按贴图原样呈现，无任何额外干预。neutral 本身是低反差
-        // 预过滤环境，四面受光均匀，不会出现"背光侧死黑"。HDR 未就绪前用弱半球光兜底。
+        // 单主光环境（用户要求：不要好几个光圈，只要一束"带切线"的高光带）：
+        // 均匀渐变底 + 唯一一块斜置的宽软箱面板。斜置让光带两端收窄，
+        // 投在车身上的高光近似三角过渡但不是三角形；四面渐变兜底，不会背光侧死黑。
         const pmrem = new THREE.PMREMGenerator(renderer);
-        const fallback = new THREE.HemisphereLight(0xffffff, 0x555555, 1.2);
-        scene.add(fallback);
-        new RGBELoader().load('neutral.hdr', (hdr) => {
-          hdr.mapping = THREE.EquirectangularReflectionMapping;
-          scene.environment = pmrem.fromEquirectangular(hdr).texture;
-          hdr.dispose();
-          pmrem.dispose();
-          scene.remove(fallback); // 官方环境到位后撤掉兜底灯，保持原始观感
-          needsRender = true;
-        }, undefined, () => { pmrem.dispose(); });
+        const envScene = new THREE.Scene();
+        const envGeo = new THREE.SphereGeometry(10, 32, 16);
+        const envPos = envGeo.attributes.position;
+        const envColors = [];
+        for (let i = 0; i < envPos.count; i++) {
+          const t = (envPos.getY(i) / 10 + 1) / 2; // 0=底部 → 1=顶部
+          const v = 0.52 + 0.42 * t;
+          envColors.push(v, v, v);
+        }
+        envGeo.setAttribute('color', new THREE.Float32BufferAttribute(envColors, 3));
+        envScene.add(new THREE.Mesh(envGeo,
+          new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+        const key = new THREE.Mesh(
+          new THREE.PlaneGeometry(10, 4.2),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(5.5, 5.5, 5.5), side: THREE.DoubleSide })
+        );
+        key.position.set(-4.5, 7.5, 5.5); // 左前上方
+        key.lookAt(0, 0.6, 0);
+        key.rotateZ(0.42);                // 斜置：光带一端宽一端窄
+        envScene.add(key);
+        scene.environment = pmrem.fromScene(envScene, 0.03).texture;
+        pmrem.dispose();
 
         // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
         const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);

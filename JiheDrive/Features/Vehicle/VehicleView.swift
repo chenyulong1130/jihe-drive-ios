@@ -25,6 +25,8 @@ struct VehicleView: View {
     @State private var rideExtra: RideTrackService.RideExtra?
     @State private var rideLoading = false
     @State private var resolvedAddress: String?
+    /// 开坐垫乐观更新：点击立即让 3D 模型开盖，不等云端回传；关坐垫仍跟云端状态
+    @State private var optimisticSeatOpen = false
     /// 定位隐私遮挡：开启后首页地图/地址模糊隐藏（记忆在本地设置）
     @AppStorage("privacy.hideLocation") private var hideLocation = false
     @StateObject private var signin = SigninStore()
@@ -175,6 +177,7 @@ struct VehicleView: View {
             guard let vin else { return }
             restoreCachedHero(vin: vin)
             loadedModelVin = vin
+            optimisticSeatOpen = false
         }
         // 3D 模型地址只有详情接口带，详情回来晚了要补一次加载
         .onChange(of: model.selectedVehicle?.model3DURL) { _, url in
@@ -189,7 +192,9 @@ struct VehicleView: View {
             syncChargeIsland()
         }
         .onChange(of: model.selectedVehicle?.seat) { _, _ in
-            // 云端坐垫状态变化：主页 3D 模型跟着开/合（该车型关闭联动时不跟随）
+            // 云端坐垫状态变化：主页 3D 模型跟着开/合（该车型关闭联动时不跟随）；
+            // 云端确认已开时由真实状态接管乐观值
+            if model.selectedVehicle?.seat?.isOpen() == true { optimisticSeatOpen = false }
             guard seatLinkage.isLinked(vin: model.selectedVehicle?.vinNo) else { return }
             seatSyncToken += 1
         }
@@ -250,8 +255,9 @@ struct VehicleView: View {
             screenActive: activeMainTab == .vehicle,
             lightsOn: appearance.resolvedScheme == .dark,
             liveCharging: model.liveBatteryOfSelected?.isLiveCharging,
-            // 关闭该车型的坐垫联动时，模型保持合上，不跟随云端坐垫状态
-            seatOpen: seatLinkage.isLinked(vin: vehicle.vinNo) && model.selectedVehicle?.seat?.isOpen() == true,
+            // 关闭该车型的坐垫联动时，模型保持合上，不跟随云端坐垫状态；
+            // 用户刚点过"开坐垫"则立即响应，云端状态到位后接管
+            seatOpen: optimisticSeatOpen || (seatLinkage.isLinked(vin: vehicle.vinNo) && model.selectedVehicle?.seat?.isOpen() == true),
             seatSyncToken: seatSyncToken,
             tireFrontBar: model.tire?.frontBar,
             tireRearBar: model.tire?.rearBar,
@@ -280,6 +286,7 @@ struct VehicleView: View {
                 showTheme = true
             },
             onOpenCushion: {
+                optimisticSeatOpen = true // 3D 模型立即开盖，不等云端
                 run("cushion") { try await model.openCushion(vehicle) }
                 // 开坐垫后尽快拉状态，让主页/弹层的 3D 模型跟上（云端上报有延迟，多试几轮）
                 Task {

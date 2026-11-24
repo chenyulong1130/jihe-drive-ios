@@ -466,7 +466,7 @@ struct JiheDriveWidgetEntryView: View {
     }
 
     private var controlBar: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .bottom, spacing: 16) {
             controlButton(
                 intent: WidgetLockIntent(),
                 symbol: snap.locked ? "lock.fill" : "lock.open.fill",
@@ -484,7 +484,9 @@ struct JiheDriveWidgetEntryView: View {
                     .resizable()
                     .scaledToFit()
                     .foregroundStyle(snap.seatOpen == true ? Color(hex: 0xEA580C) : Color(hex: 0x334155))
-                    .frame(width: 26, height: 18)
+                    .frame(width: 23, height: 16)
+                    // 与 SF 图标视觉底部对齐：图标整体压到 28pt 槽位底部
+                    .padding(.top, 6)
             }
             controlButton(
                 intent: WidgetFindIntent(),
