@@ -1,8 +1,12 @@
 import SwiftUI
 import ReplayKit
 
-/// 投屏页：同机 CarPlay / 整屏镜像两种模式。
-/// 布局从上到下：模式 → 状态（含自检摘要，点开弹窗看详情）→ 连接 → 日志，说明文字压到最少。
+/// 投屏页。信息层次参考 CarWithin：
+/// 1) 一个 hero 卡承载标题、一句话说明、状态胶囊、连接指导、启动按钮；
+/// 2) 卡在连接超过 5 秒才出现排障提示，不打扰正常启动；
+/// 3) 视频区启动后才出现，带全屏；
+/// 4) Wi-Fi 与输出分区收纳，首页保持清爽；
+/// 5) 自检与日志收成一行摘要，点开看详情。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
@@ -13,32 +17,40 @@ struct MirrorView: View {
     @State private var runningChecks = false
     @State private var showExport = false
     @State private var exportURL: URL?
-    @State private var timer: Timer?
     @State private var showFullscreen = false
     @State private var showPreflight = false
-    @State private var pollTick = 0
+    @State private var showLogs = false
+    /// 启动超过 5 秒仍未出画面时显示的排障提示
+    @State private var showStartupHint = false
+    @State private var startupHintTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 10) {
+            VStack(spacing: 14) {
                 LargeTitle("投屏")
                     .staggerIn(0)
 
                 modeSelector.staggerIn(0)
 
-                statusCard.staggerIn(1)
-
-                if mode == "carplay" && controller.phase.isRunning {
-                    previewCard.staggerIn(2)
+                if mode == "carplay" {
+                    carPlayHeroCard.staggerIn(1)
+                    if controller.phase.isRunning {
+                        previewCard.staggerIn(2)
+                    }
+                } else {
+                    screenMirrorHeroCard.staggerIn(1)
                 }
 
-                SectionHeader("连接")
-                connectionCard.staggerIn(3)
+                SectionHeader("连接与网络")
+                wifiCard.staggerIn(3)
 
-                if !controller.logs.isEmpty {
-                    SectionHeader("日志")
-                    logCard.staggerIn(6)
+                if mode == "carplay" {
+                    SectionHeader("画面输出")
+                    outputCard.staggerIn(4)
                 }
+
+                preflightRow.staggerIn(5)
+                logSection.staggerIn(6)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -48,14 +60,12 @@ struct MirrorView: View {
         .onAppear {
             store.detectSSID()
             store.recheckIdentity()
-            startPolling()
             if checks.isEmpty {
                 Task { await runChecks() }
             }
         }
-        .onDisappear {
-            timer?.invalidate()
-            timer = nil
+        .onChange(of: controller.phase) { _, phase in
+            handlePhase(phase)
         }
         .sheet(isPresented: $showExport) {
             if let exportURL {
@@ -81,115 +91,149 @@ struct MirrorView: View {
         .padding(.horizontal, 4)
     }
 
-    // MARK: - 状态卡
+    // MARK: - Hero：本机 CarPlay
 
-    private var statusCard: some View {
-        AppleCard(padding: 18) {
-            VStack(spacing: 14) {
-                HStack(spacing: 12) {
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(runningOrExt ? Theme.brand : Theme.secondary)
-
+    private var carPlayHeroCard: some View {
+        AppleCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "carplay")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(statusText)
+                        Text("本机 CarPlay")
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
-                        Text(subtitle)
+                        Text("无需外接盒子，直接在这台 iPhone 上使用 CarPlay")
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
-                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-
                     Spacer(minLength: 0)
-
-                    if runningOrExt {
-                        StatusPill(text: "进行中", color: Theme.green)
-                    } else if case .failed = controller.phase {
-                        StatusPill(text: "失败", color: Theme.red)
-                    } else {
-                        StatusPill(text: "就绪", color: Theme.secondary)
-                    }
                 }
 
-                if mode == "carplay" {
-                    startButton
-                    if case .liveFallback = controller.phase {
-                        Button {
-                            controller.retryBootstrap()
-                        } label: {
-                            Text("重试本机 CarPlay 引导")
-                                .font(Theme.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.brand)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if controller.phase.isRunning {
-                        Text("极核仪表：\(controller.zeehoStatus)")
+                StatusPill(text: controller.phase.label,
+                           color: phaseColor,
+                           pulsing: awaitingPicture)
+
+                Text(connectionGuide)
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if showStartupHint {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(Theme.orange)
+                        Text("连接较久时，可尝试在系统设置中关闭再打开 Wi-Fi。当前仍在继续连接。")
                             .font(Theme.caption)
                             .foregroundStyle(Theme.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                } else {
-                    broadcastButton
+                    .padding(10)
+                    .background(Theme.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
-                // 自检摘要：一行带过，点开弹窗看逐项详情
-                Button {
-                    showPreflight = true
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: preflightSummaryIcon)
-                            .font(.system(size: 15))
-                            .foregroundStyle(preflightSummaryColor)
-                        Text(preflightSummaryText)
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text("详情")
+                if case .liveFallback = controller.phase {
+                    Button {
+                        controller.retryBootstrap()
+                    } label: {
+                        Text("重试本机 CarPlay 引导")
                             .font(Theme.footnote.weight(.semibold))
                             .foregroundStyle(Theme.brand)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.tertiary)
                     }
-                    .padding(.top, 2)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .disabled(runningChecks)
+
+                startButton
             }
         }
     }
 
-    private var runningOrExt: Bool {
-        if mode == "screen" { return MirrorStore.extensionStatus() != nil }
-        return controller.phase.isRunning
-    }
-
-    private var statusText: String {
-        if mode == "screen" {
-            return MirrorStore.extensionStatus() ?? "整屏镜像未运行"
+    /// 阶段配色：出画=绿，失败/缺身份=红，回退=橙，其余=蓝
+    private var phaseColor: Color {
+        switch controller.phase {
+        case .localStreaming, .streaming: return Theme.green
+        case .failed, .identityMissing: return Theme.red
+        case .liveFallback, .stopped: return Theme.orange
+        default: return Theme.brand
         }
-        return controller.phase.label
     }
 
-    private var statusIcon: String {
-        runningOrExt ? "dot.radiowaves.left.and.right" : "carplay"
-    }
-
-    private var subtitle: String {
-        if mode == "screen" {
-            return "可投任意 App，熄屏即停止"
+    /// 处于「已启动但还没出画面」的阶段——用于延迟排障提示
+    private var awaitingPicture: Bool {
+        switch controller.phase {
+        case .starting, .transportReady, .linkConnected, .authenticated,
+             .identified, .sessionRequested, .waitingControl, .controlConnected:
+            return true
+        default:
+            return false
         }
+    }
+
+    private var connectionGuide: String {
         if case .identityMissing = controller.phase {
-            return "需要 CarPlay 配件身份"
+            return "需要 CarPlay 配件身份，请把身份三件套放入「文件」App 的 JiheDrive/IdentityImport/ 目录。"
         }
         if let ssid = store.currentSSID {
-            return "当前 Wi-Fi：\(ssid)"
+            return "当前 Wi-Fi：\(ssid)。若已保存同名网络密码，直接点下方按钮即可。"
         }
-        return store.locationDenied ? "获取 Wi-Fi 名称需要定位权限" : "未检测到 Wi-Fi"
+        return "先在系统设置连接 Wi-Fi，再回到这里启动。"
+    }
+
+    /// 启动阶段计时：5 秒还没出画面才显示提示；出画/停止后清除
+    private func handlePhase(_ phase: CPMirrorController.Phase) {
+        switch phase {
+        case .starting, .transportReady, .linkConnected:
+            guard startupHintTask == nil else { return }
+            let task = Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if awaitingPicture { showStartupHint = true }
+                }
+            }
+            startupHintTask = task
+        case .localStreaming, .streaming, .failed, .stopped, .idle,
+             .identityMissing, .liveFallback:
+            startupHintTask?.cancel()
+            startupHintTask = nil
+            showStartupHint = false
+        default:
+            break
+        }
+    }
+
+    // MARK: - Hero：整屏镜像
+
+    private var screenExtStatus: String? { MirrorStore.extensionStatus() }
+
+    private var screenMirrorHeroCard: some View {
+        AppleCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "rectangle.on.rectangle.angled")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(Theme.teal)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("整屏镜像")
+                            .font(Theme.headline)
+                            .foregroundStyle(Theme.label)
+                        Text("把任意 App 的整屏画面投到极核仪表，熄屏即停止")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                StatusPill(text: screenExtStatus ?? "未运行",
+                           color: screenExtStatus != nil ? Theme.green : Theme.secondary)
+
+                broadcastButton
+            }
+        }
     }
 
     // MARK: - 启动按钮（CarPlay 模式）
@@ -204,7 +248,7 @@ struct MirrorView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: controller.phase.isRunning ? "stop.fill" : "play.fill")
-                Text(controller.phase.isRunning ? "停止投屏" : "启动投屏")
+                Text(controller.phase.isRunning ? "停止 CarPlay" : "启动本机 CarPlay")
                     .font(Theme.headline)
             }
             .foregroundStyle(.white)
@@ -261,12 +305,11 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 连接卡（网络 + 仪表合并，减少碎卡）
+    // MARK: - Wi-Fi 卡（只管网络）
 
-    private var connectionCard: some View {
+    private var wifiCard: some View {
         AppleCard(padding: 18) {
-            VStack(spacing: 14) {
-                // 网络
+            VStack(spacing: 12) {
                 HStack(spacing: 10) {
                     Image(systemName: "wifi")
                         .foregroundStyle(Theme.brand)
@@ -287,32 +330,54 @@ struct MirrorView: View {
                     .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
                 }
 
-                SecureField("热点密码（开放网络留空）", text: $store.wifiPassword)
+                if store.locationDenied {
+                    Text("获取 Wi-Fi 名称需要定位权限，可在系统设置中开启。")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.orange)
+                }
+
+                SecureField("Wi-Fi 密码（开放网络留空）", text: $store.wifiPassword)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
 
-                Button {
-                    store.commitWiFi()
-                    store.joinDashboardHotspot(ssid: store.currentSSID,
-                                               password: store.wifiPassword)
-                } label: {
-                    Text("加入此网络")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
+                HStack(spacing: 10) {
+                    Button {
+                        store.commitWiFi()
+                    } label: {
+                        Text("仅保存")
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        store.commitWiFi()
+                        store.joinDashboardHotspot(ssid: store.currentSSID,
+                                                   password: store.wifiPassword)
+                    } label: {
+                        Text("加入此网络")
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
 
                 if let status = store.hotspotStatus {
                     Text(status)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
                 }
+            }
+        }
+    }
 
-                HairLine()
+    // MARK: - 输出卡（只管画面去向）
 
-                // 仪表（可选输出，不影响本地 CarPlay）
-                Toggle("投屏到极核仪表", isOn: $store.castToZeeho)
+    private var outputCard: some View {
+        AppleCard(padding: 18) {
+            VStack(spacing: 14) {
+                Toggle("同时投放到极核仪表", isOn: $store.castToZeeho)
                     .font(Theme.footnote.weight(.semibold))
                     .foregroundStyle(Theme.label)
                     .tint(Theme.brand)
@@ -334,6 +399,8 @@ struct MirrorView: View {
                                 .foregroundStyle(Theme.secondary)
                         }
                         Spacer(minLength: 0)
+                        StatusPill(text: controller.zeehoStatus,
+                                   color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
                     }
 
                     HStack(spacing: 8) {
@@ -356,12 +423,16 @@ struct MirrorView: View {
                         store.commitCropMode()
                         controller.setCropMode(value)
                     }
+                } else {
+                    Text("关闭时仅在本机显示 CarPlay，预览与触控照常可用。")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
                 }
             }
         }
     }
 
-    // MARK: - 自检：摘要行 + 详情弹窗（不再占页面位置）
+    // MARK: - 自检摘要行 + 详情弹窗
 
     private var preflightSummaryText: String {
         if runningChecks { return "正在自检…" }
@@ -369,7 +440,7 @@ struct MirrorView: View {
         let failed = checks.filter { !$0.passed }
         if failed.isEmpty { return "自检全部通过（\(checks.count) 项）" }
         let names = failed.map(\.name).joined(separator: "、")
-        return "自检 \(checks.count - failed.count)/\(checks.count) 未全过：\(names)"
+        return "自检 \(checks.count - failed.count)/\(checks.count)：\(names)"
     }
 
     private var preflightSummaryIcon: String {
@@ -386,7 +457,37 @@ struct MirrorView: View {
         return failed.contains { !$0.warning } ? Theme.red : Color(hex: 0xFF9F0A)
     }
 
-    /// 自检详情弹窗：逐项展开（通过项也显示明细，如 SSID / 本机 IP）
+    private var preflightRow: some View {
+        Button {
+            showPreflight = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: preflightSummaryIcon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(preflightSummaryColor)
+                Text(preflightSummaryText)
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("详情")
+                    .font(Theme.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.brand)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            .padding(14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
+        .background(
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(Theme.surface)
+        )
+        .disabled(runningChecks)
+    }
+
     private var preflightSheet: some View {
         SheetShell(
             title: "启动自检",
@@ -428,7 +529,6 @@ struct MirrorView: View {
         }
     }
 
-    /// 弹窗里的详情行：每项名称 + 完整 detail（无论通过与否）
     @ViewBuilder
     private func preflightDetailRow(_ result: CPMirrorDiagnostics.CheckResult) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -475,14 +575,18 @@ struct MirrorView: View {
                     .aspectRatio(1024.0 / 480.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                HStack(spacing: 10) {
-                    controlButton("house.fill", "主页") { controller.pressHome() }
-                    controlButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
-                    controlButton("chevron.backward", "返回") { controller.pressBack() }
-                    controlButton("mic.fill", "Siri") { controller.requestSiri() }
-                    controlButton("arrow.up.left.and.arrow.down.right", "全屏") { showFullscreen = true }
-                }
+                controlRow
             }
+        }
+    }
+
+    private var controlRow: some View {
+        HStack(spacing: 10) {
+            controlButton("house.fill", "主页") { controller.pressHome() }
+            controlButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
+            controlButton("chevron.backward", "返回") { controller.pressBack() }
+            controlButton("mic.fill", "Siri") { controller.requestSiri() }
+            controlButton("arrow.up.left.and.arrow.down.right", "全屏") { showFullscreen = true }
         }
     }
 
@@ -505,8 +609,6 @@ struct MirrorView: View {
         .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
     }
 
-    // MARK: - 全屏预览
-
     private var fullscreenView: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -526,15 +628,15 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 日志卡
+    // MARK: - 日志：默认收起，点开看详情
 
-    private var logCard: some View {
-        AppleCard(padding: 18) {
+    private var logSection: some View {
+        AppleCard(padding: 16) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("最近事件（7 天）")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
+                    Label("运行日志", systemImage: "doc.text.magnifyingglass")
+                        .font(Theme.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.label)
                     Spacer(minLength: 0)
                     Button {
                         exportURL = MirrorLogStore.exportFile()
@@ -544,7 +646,6 @@ struct MirrorView: View {
                             .font(.system(size: 14))
                             .foregroundStyle(Theme.secondary)
                     }
-                    .padding(.trailing, 4)
                     Button {
                         controller.clearLogs()
                         MirrorLogStore.clearAll()
@@ -553,28 +654,39 @@ struct MirrorView: View {
                             .font(.system(size: 14))
                             .foregroundStyle(Theme.secondary)
                     }
+                    Button {
+                        withAnimation { showLogs.toggle() }
+                    } label: {
+                        Image(systemName: showLogs ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                            .frame(width: 24)
+                    }
                 }
 
-                ForEach(Array(controller.logs.suffix(8).enumerated()), id: \.offset) { _, line in
-                    Text(line)
+                if showLogs {
+                    if controller.logs.isEmpty {
+                        Text("暂无日志")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.tertiary)
+                    } else {
+                        ForEach(Array(controller.logs.suffix(20).enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                        }
+                    }
+                } else if let last = controller.logs.last {
+                    Text(last)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.secondary)
+                        .foregroundStyle(Theme.tertiary)
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    // MARK: - 扩展状态轮询
-
-    private func startPolling() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { _ in
-            if mode == "screen" {
-                pollTick += 1
-            }
         }
     }
 }

@@ -213,20 +213,25 @@ private struct LiquidTabBar: View {
         }
         .padding(5)
         .background(
-            Capsule(style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.22), Color.white.opacity(0.02)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
+            ZStack {
+                // 材质兜底底色：快速滚动列表时 .ultraThinMaterial 的采样可能
+                // 失效变全透明，导航栏会"隐形"。下面垫一层 85% 不透明的页面底色，
+                // 材质正常时它被盖住不影响观感，材质失效时保住可见性。
+                Capsule(style: .continuous)
+                    .fill(Theme.groupedBackground.opacity(0.85))
+                Capsule(style: .continuous)
+                    .fill(.ultraThinMaterial)
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.22), Color.white.opacity(0.02)],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
-                        .blendMode(.plusLighter)
-                        .allowsHitTesting(false)
-                )
+                    )
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
+            }
         )
         .overlay(
             Capsule(style: .continuous)
