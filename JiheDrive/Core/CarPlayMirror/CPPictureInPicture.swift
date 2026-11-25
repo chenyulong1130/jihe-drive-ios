@@ -27,8 +27,8 @@ final class CPVideoSurface: NSObject {
             allocator: kCFAllocatorDefault,
             imageBuffer: pixelBuffer,
             dataReady: true,
-            dataBuffer: nil,
-            formatDescription: nil,
+            makeDataReadyCallback: nil,
+            refcon: nil,
             sampleTiming: &timing,
             sampleBufferOut: &sampleBuffer)
         guard status == noErr, let sample = sampleBuffer else { return }
@@ -118,15 +118,22 @@ final class CPPictureInPicture: NSObject, AVPictureInPictureSampleBufferPlayback
         // 只读实时流，没有播放/暂停语义
     }
 
+    func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
+        CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+    }
+
+    func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
+        false
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
+                                    didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
+
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
                                     skipByInterval skipInterval: CMTime,
                                     completion completionHandler: @escaping () -> Void) {
         completionHandler()
     }
-
-    var timeRange: CMTimeRange { .invalid }
-
-    var isPlaybackPaused: Bool { false }
 }
 
 extension CPPictureInPicture: AVPictureInPictureControllerDelegate {

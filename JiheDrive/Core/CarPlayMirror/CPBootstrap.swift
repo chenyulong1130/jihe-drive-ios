@@ -226,8 +226,8 @@ final class CPBootstrap {
                 throw CPError.malformed("认证或识别完成前收到 CarPlay 可用通知")
             }
             for group in message.parameters {
-                if let nested = try CPIAP2.Parameter.parse(group.value),
-                   let value = nested.first(where: { $0.id == 0 })?.value.first {
+                let nested = try CPIAP2.Parameter.parse(group.value)
+                if let value = nested.first(where: { $0.id == 0 })?.value.first {
                     stage(String(format: "CarPlay 可用传输 %d：%d", group.id, value))
                 }
             }

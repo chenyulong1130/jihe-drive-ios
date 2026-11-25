@@ -282,7 +282,7 @@ final class CPBrowserServer {
             return
         }
         viewers[id]?.writing = true
-        viewer.connection.send(content: data, completion: { [weak self] error in
+        viewer.connection.send(content: data, completion: .contentProcessed { [weak self] error in
             guard let self else { return }
             self.queue.async {
                 guard self.viewers[id] != nil else { return }
