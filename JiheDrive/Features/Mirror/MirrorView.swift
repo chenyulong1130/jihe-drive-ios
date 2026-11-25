@@ -21,6 +21,8 @@ struct MirrorView: View {
     @State private var showFullscreen = false
     @State private var showPreviewWindow = false
     @State private var previewWindowFullscreen = false
+    @State private var wifiSaveTask: Task<Void, Never>?
+    @State private var wifiSaved = false
     @State private var showPreflight = false
     @State private var showLogs = false
     /// 启动超过 5 秒仍未出画面时显示的排障提示
@@ -44,16 +46,11 @@ struct MirrorView: View {
                     screenMirrorHeroCard.staggerIn(1)
                 }
 
-                SectionHeader("连接与网络")
-                wifiCard.staggerIn(3)
+                SectionHeader("连接设置")
+                settingsCard.staggerIn(3)
 
-                if mode == "carplay" {
-                    SectionHeader("画面输出")
-                    outputCard.staggerIn(4)
-                }
-
-                preflightRow.staggerIn(5)
-                logSection.staggerIn(6)
+                preflightRow.staggerIn(4)
+                logSection.staggerIn(5)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -343,19 +340,33 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - Wi-Fi 卡（只管网络）
+    // MARK: - 连接设置卡（Wi-Fi + 画面输出，自动保存）
 
-    private var wifiCard: some View {
-        AppleCard(padding: 18) {
-            VStack(spacing: 12) {
+    /// Wi-Fi 与仪表输出合并为一张设置卡：输入自动保存，去掉多余的按钮组。
+    private var settingsCard: some View {
+        AppleCard(padding: 16) {
+            VStack(spacing: 14) {
                 HStack(spacing: 10) {
                     Image(systemName: "wifi")
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.brand)
-                    Text(store.currentSSID ?? "未检测到 Wi-Fi")
-                        .font(Theme.headline)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.currentSSID ?? "未检测到 Wi-Fi")
+                            .font(Theme.headline)
+                            .foregroundStyle(Theme.label)
+                            .lineLimit(1)
+                        Text(store.locationDenied ? "需要定位权限读取 Wi-Fi 名称" : "与仪表保持同一网络")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.secondary)
+                    }
                     Spacer(minLength: 0)
+                    if wifiSaved {
+                        Label("已保存", systemImage: "checkmark.circle.fill")
+                            .font(Theme.caption.weight(.semibold))
+                            .foregroundStyle(Theme.green)
+                            .transition(.opacity)
+                    }
                     Button {
                         store.detectSSID()
                     } label: {
@@ -368,53 +379,36 @@ struct MirrorView: View {
                     .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
                 }
 
-                if store.locationDenied {
-                    Text("获取 Wi-Fi 名称需要定位权限，可在系统设置中开启。")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.orange)
-                }
-
                 SecureField("Wi-Fi 密码（开放网络留空）", text: $store.wifiPassword)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                    .onChange(of: store.wifiPassword) { _, _ in scheduleWifiSave() }
 
-                HStack(spacing: 10) {
-                    Button {
-                        store.commitWiFi()
-                    } label: {
-                        Text("仅保存")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 42)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        store.commitWiFi()
-                        store.joinDashboardHotspot(ssid: store.currentSSID,
-                                                   password: store.wifiPassword)
-                    } label: {
-                        Text("加入此网络")
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 42)
-                    }
-                    .buttonStyle(.borderedProminent)
+                Button {
+                    store.commitWiFi()
+                    store.joinDashboardHotspot(ssid: store.currentSSID,
+                                               password: store.wifiPassword)
+                } label: {
+                    Label("一键加入此 Wi-Fi", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(Theme.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.brand)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Theme.brand.opacity(0.1)))
                 }
+                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
 
                 if let status = store.hotspotStatus {
                     Text(status)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-        }
-    }
 
-    // MARK: - 输出卡（只管画面去向）
+                Divider()
 
-    private var outputCard: some View {
-        AppleCard(padding: 18) {
-            VStack(spacing: 14) {
                 Toggle("同时投放到极核仪表", isOn: $store.castToZeeho)
                     .font(Theme.footnote.weight(.semibold))
                     .foregroundStyle(Theme.label)
@@ -427,10 +421,38 @@ struct MirrorView: View {
                 if store.castToZeeho {
                     HStack(spacing: 10) {
                         Image(systemName: "gauge.with.needle")
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Theme.brand)
+                            .frame(width: 24)
+                        TextField("仪表 IP，如 192.168.0.1", text: $store.dashboardIP)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.decimalPad)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onChange(of: store.dashboardIP) { _, _ in store.commitDashboardIP() }
+                        Menu {
+                            Picker("裁剪", selection: $store.cropMode) {
+                                Text("居中裁剪").tag("crop")
+                                Text("完整画面").tag("fit")
+                            }
+                        } label: {
+                            Image(systemName: "crop.rotate")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.secondary)
+                                .frame(width: 36, height: 36)
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Theme.surfaceAlt))
+                        }
+                        .onChange(of: store.cropMode) { _, value in
+                            store.commitCropMode()
+                            controller.setCropMode(value)
+                        }
+                    }
+
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("极核 6.2 寸仪表")
-                                .font(Theme.headline)
+                                .font(Theme.caption.weight(.semibold))
                                 .foregroundStyle(Theme.label)
                             Text("1024×480 · H.264 25帧")
                                 .font(Theme.caption)
@@ -440,33 +462,26 @@ struct MirrorView: View {
                         StatusPill(text: controller.zeehoStatus,
                                    color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
                     }
-
-                    HStack(spacing: 8) {
-                        Text("IP")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                        TextField("192.168.0.1", text: $store.dashboardIP)
-                            .textFieldStyle(.roundedBorder)
-                            .keyboardType(.decimalPad)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                    }
-
-                    Picker("裁剪", selection: $store.cropMode) {
-                        Text("居中裁剪").tag("crop")
-                        Text("完整画面").tag("fit")
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: store.cropMode) { _, value in
-                        store.commitCropMode()
-                        controller.setCropMode(value)
-                    }
                 } else {
-                    Text("关闭时仅在本机显示 CarPlay，预览与触控照常可用。")
+                    Text("关闭后仅本机显示 CarPlay，预览窗与画中画照常可用。")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        }
+    }
+
+    /// 密码输入防抖自动保存，省掉「仅保存」按钮。
+    private func scheduleWifiSave() {
+        wifiSaveTask?.cancel()
+        wifiSaveTask = Task {
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            store.commitWiFi()
+            await MainActor.run { wifiSaved = true }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run { wifiSaved = false }
         }
     }
 
@@ -613,20 +628,43 @@ struct MirrorView: View {
                     .aspectRatio(1024.0 / 480.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                controlRow
+                    .overlay(alignment: .topTrailing) {
+                        HStack(spacing: 8) {
+                            previewOverlayButton("pip.enter", "画中画") {
+                                _ = controller.startPictureInPicture()
+                            }
+                            previewOverlayButton("rectangle.inset.filled", "预览窗") {
+                                showPreviewWindow = true
+                            }
+                            previewOverlayButton("arrow.up.left.and.arrow.down.right", "全屏") {
+                                showFullscreen = true
+                            }
+                        }
+                        .padding(8)
+                    }
+                Text("画面可直接触控操作")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
             }
         }
     }
 
-    private var controlRow: some View {
-        HStack(spacing: 10) {
-            controlButton("house.fill", "主页") { controller.pressHome() }
-            controlButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
-            controlButton("chevron.backward", "返回") { controller.pressBack() }
-            controlButton("mic.fill", "Siri") { controller.requestSiri() }
-            controlButton("rectangle.inset.filled", "预览窗") { showPreviewWindow = true }
-            controlButton("arrow.up.left.and.arrow.down.right", "全屏") { showFullscreen = true }
+    /// 预览画面右上角的半透明快捷钮（替代原来的按钮组）。
+    private func previewOverlayButton(_ icon: String, _ label: String,
+                                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+            }
+            .foregroundStyle(.white)
+            .frame(width: 46, height: 40)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.black.opacity(0.45)))
         }
+        .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
     }
 
     private func controlButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
@@ -858,10 +896,10 @@ private struct PreviewWindowWebView: UIViewRepresentable {
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
-// MARK: - 启动步骤追踪器（进度条 + 步骤圆点）
+// MARK: - 启动步骤追踪器（分段胶囊进度）
 
-/// 展示 CarPlay 引导的 7 个阶段：顶部进度条随完成度推进，
-/// 下方一排步骤圆点（完成=绿色对勾，进行中=品牌色高亮，未到=灰圈）。
+/// 展示 CarPlay 引导的 7 个阶段：一排分段胶囊随完成度逐格点亮，
+/// 下方单行文字说明当前步骤——不放一排小圆点，保持干净。
 private struct PhaseStepTracker: View {
     let steps: [String]
     let completed: Int
@@ -869,78 +907,64 @@ private struct PhaseStepTracker: View {
     let failed: Bool
     let accent: Color
 
+    private var headline: String {
+        if failed { return "连接未完成，可查看下方日志或重试" }
+        if completed >= steps.count { return "连接完成，画面输出中" }
+        let step = active >= 0 && active < steps.count ? steps[active] : steps.first ?? ""
+        let ordinal = active >= 0 ? active + 1 : min(completed + 1, steps.count)
+        return "第 \(ordinal)/\(steps.count) 步 · \(step)"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, _ in
                     Capsule()
-                        .fill(Theme.surfaceAlt)
-                    Capsule()
-                        .fill(barStyle)
-                        .frame(width: proxy.size.width
-                            * CGFloat(completed) / CGFloat(max(steps.count, 1)))
+                        .fill(segmentColor(index))
+                        .frame(height: 8)
+                        .frame(maxWidth: .infinity)
                 }
             }
-            .frame(height: 6)
 
-            HStack(alignment: .top, spacing: 0) {
-                ForEach(Array(steps.enumerated()), id: \.offset) { index, title in
-                    VStack(spacing: 5) {
-                        HStack(spacing: 6) {
-                            Rectangle()
-                                .fill(index == 0 ? Color.clear : lineColor(leading: index))
-                                .frame(height: 2)
-                            symbol(for: index)
-                            Rectangle()
-                                .fill(index == steps.count - 1 ? Color.clear : lineColor(trailing: index))
-                                .frame(height: 2)
-                        }
-                        Text(title)
-                            .font(.system(size: 10, weight: index == active ? .semibold : .regular))
-                            .foregroundStyle(index < completed || index == active
-                                             ? Theme.label : Theme.tertiary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                    .frame(maxWidth: .infinity)
+            HStack(spacing: 6) {
+                if failed {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(accent)
+                } else if completed >= steps.count {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.green)
+                } else if active >= 0 {
+                    Circle()
+                        .fill(accent)
+                        .frame(width: 6, height: 6)
+                        .opacity(pulsing ? 0.35 : 1)
                 }
+                Text(headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .font(Theme.caption)
+            .foregroundStyle(failed ? accent : Theme.secondary)
+        }
+        .animation(.easeInOut(duration: 0.3), value: completed)
+        .animation(.easeInOut(duration: 0.3), value: active)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulsing = true
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: completed)
-        .animation(.easeInOut(duration: 0.35), value: active)
     }
 
-    /// 失败=纯红/橙；全部完成=纯绿；进行中=品牌色到绿的渐变
-    private var barStyle: AnyShapeStyle {
-        if failed { return AnyShapeStyle(accent) }
-        if completed >= steps.count { return AnyShapeStyle(Theme.green) }
-        return AnyShapeStyle(LinearGradient(colors: [accent, Theme.green],
-                                            startPoint: .leading, endPoint: .trailing))
-    }
+    @State private var pulsing = false
 
-    private func lineColor(leading index: Int) -> Color {
-        index - 1 < completed ? Theme.green.opacity(0.45) : Theme.surfaceAlt
-    }
-
-    private func lineColor(trailing index: Int) -> Color {
-        index < completed ? Theme.green.opacity(0.45) : Theme.surfaceAlt
-    }
-
-    @ViewBuilder
-    private func symbol(for index: Int) -> some View {
-        if index < completed {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(Theme.green)
-        } else if index == active {
-            ZStack {
-                Circle().fill(accent.opacity(0.15))
-                Circle().stroke(accent, lineWidth: 1.5)
-                Circle().fill(accent).frame(width: 6, height: 6)
-            }
-        } else {
-            Circle().stroke(Theme.tertiary, lineWidth: 1.5)
+    private func segmentColor(_ index: Int) -> Color {
+        if index < completed { return Theme.green }
+        if index == active {
+            return failed ? accent : accent.opacity(pulsing ? 0.55 : 1)
         }
+        return Theme.surfaceAlt
     }
 }
 
