@@ -226,7 +226,7 @@ final class CPBootstrap {
                 throw CPError.malformed("认证或识别完成前收到 CarPlay 可用通知")
             }
             for group in message.parameters {
-                if let nested = try? CPIAP2.Parameter.parse(group.value),
+                if let nested = try CPIAP2.Parameter.parse(group.value),
                    let value = nested.first(where: { $0.id == 0 })?.value.first {
                     stage(String(format: "CarPlay 可用传输 %d：%d", group.id, value))
                 }
@@ -251,8 +251,12 @@ final class CPBootstrap {
     }
 
     private func requestSession(_ configuration: CPInfo.Configuration) throws {
-        let wifi = CPWiFiDefaults.validated()
-        let wifiInfo = wifi.map { CPIAP2.WiFiInfo(ssid: $0.ssid, password: $0.password, channel: $0.channel) }
+        // StartSession 必须带 Wi-Fi 信息（对齐 CarWithin：validate 强制 SSID/密码）。
+        // 缺失时 iOS 可能无法回连 7000 端口，表现为「已请求会话但永远等不到控制连接」。
+        guard let wifi = CPWiFiDefaults.validated() else {
+            throw CPError.malformed("未配置 Wi-Fi 名称与密码，无法发起 CarPlay 会话（请在投屏页填写 Wi-Fi 预设）")
+        }
+        let wifiInfo = CPIAP2.WiFiInfo(ssid: wifi.ssid, password: wifi.password, channel: wifi.channel)
         try send(CPIAP2.carPlayStartSession(address: configuration.address,
                                             port: configuration.port,
                                             deviceID: configuration.deviceID,

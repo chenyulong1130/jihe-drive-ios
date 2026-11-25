@@ -13,6 +13,12 @@ final class CPReceiver {
     private var configuration: CPInfo.Configuration = .default(deviceID: "")
     private var identity: CPAccessoryIdentity?
     private var generation = UUID()
+    // forceKeyFrame 状态：250ms 节流合并多个恢复方，未收到关键帧前每秒重发（对齐 CarWithin）。
+    private var keyframeWantedSince: DispatchTime?
+    private var keyframeLastSent: DispatchTime?
+    private var keyframeAttempts = 0
+    private var keyframeReason = ""
+    private var nightMode: Bool?
 
     var onVideo: ((Data, CPVideoCodec) -> Void)?
     var onLog: ((String) -> Void)?
@@ -75,11 +81,57 @@ final class CPReceiver {
         }
     }
 
-    /// 请求 iPhone 立即编码一个关键帧（解码/转码恢复用），转发到活跃媒体会话
-    func requestKeyFrame() {
+    /// 请求 iPhone 立即编码一个关键帧（解码/转码恢复用）。
+    /// CarPlay 只在流开始时发一个关键帧，此后所有解码恢复都依赖该命令；
+    /// 250ms 节流合并并发恢复方，每秒重试最多 8 次，之后等待自然关键帧。
+    func requestKeyFrame(reason: String = "恢复") {
+        queue.async { [weak self] in self?.requestKeyFrameOnQueue(reason: reason) }
+    }
+
+    private func requestKeyFrameOnQueue(reason: String) {
+        let now = DispatchTime.now()
+        if keyframeWantedSince == nil {
+            keyframeWantedSince = now
+            keyframeAttempts = 0
+            keyframeReason = reason
+        }
+        if let last = keyframeLastSent, now.uptimeNanoseconds - last.uptimeNanoseconds < 250_000_000 { return }
+        sendKeyFrameRequest()
+    }
+
+    private func sendKeyFrameRequest() {
+        guard keyframeWantedSince != nil else { return }
+        guard let media = sessions.values.first(where: { $0.media?.hasEventChannel == true })?.media else { return }
+        keyframeAttempts += 1
+        keyframeLastSent = .now()
+        guard media.requestKeyFrame() else { return }
+        if keyframeAttempts == 1 { log("已请求关键帧（\(keyframeReason)）") }
+        guard keyframeAttempts < 8 else {
+            log("iPhone 未响应关键帧请求（已重试 8 次），等待自然关键帧")
+            keyframeWantedSince = nil
+            return
+        }
+        let generation = self.generation
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, self.generation == generation, self.keyframeWantedSince != nil else { return }
+            self.sendKeyFrameRequest()
+        }
+    }
+
+    /// 收到随机访问单元时清空关键帧等待状态（接收线程调用，queue-confined）。
+    private func clearKeyframeWanting() {
+        guard let since = keyframeWantedSince else { return }
+        keyframeWantedSince = nil
+        let ms = (DispatchTime.now().uptimeNanoseconds - since.uptimeNanoseconds) / 1_000_000
+        log("关键帧已到达（\(ms) ms，\(keyframeAttempts) 次请求）")
+    }
+
+    /// 夜间模式：记住最新状态，事件通道就绪后立即下发（含之后新建的会话）。
+    func setNightMode(_ night: Bool) {
         queue.async { [weak self] in
-            guard let media = self?.sessions.values.first(where: { $0.media != nil })?.media else { return }
-            media.requestKeyFrame()
+            guard let self, self.nightMode != night else { return }
+            self.nightMode = night
+            self.sessions.values.forEach { $0.media?.setNightMode(night) }
         }
     }
 
@@ -91,6 +143,9 @@ final class CPReceiver {
         sessions.removeAll()
         connections.values.forEach { $0.cancel() }
         connections.removeAll()
+        keyframeWantedSince = nil
+        keyframeLastSent = nil
+        keyframeAttempts = 0
     }
 
     /// port 为 nil 时使用系统分配的临时端口：7000 被占用时自动回退，
@@ -222,8 +277,11 @@ final class CPReceiver {
                 let media = CPMediaSession(queue: queue, secret: secret, peerAddress: state.peerAddress)
                 media.onLog = { [weak self] in self?.log($0) }
                 media.onVideo = { [weak self] data, codec in
-                    self?.onVideo?(data, codec)
+                    guard let self else { return }
+                    if CPAnnexB.containsRandomAccess(data) { self.clearKeyframeWanting() }
+                    self.onVideo?(data, codec)
                 }
+                if let nightMode { media.setNightMode(nightMode) }
                 state.media = media
             }
             return CPRTSPResponse(body: try state.media!.setup(request.body),
@@ -264,8 +322,8 @@ final class CPReceiver {
             }
             return CPRTSPResponse()
         case ("TEARDOWN", _):
-            state.media?.stop()
-            state.media = nil
+            // 按流拆除：只停被指定的流，其余流保持（对齐 CarWithin）。
+            if try state.media?.teardown(request.body) == true { state.media = nil }
             return CPRTSPResponse()
         default:
             log("未实现：\(request.method) \(request.target.prefix(80))")
@@ -299,6 +357,9 @@ final class CPMediaSession {
     private var eventParser = CPRTSPParser(allowResponses: true)
     private var screen: CPScreenStream?
     private var cseq = 0
+    private var videoPackets = 0
+    private var videoBytes = 0
+    private var pendingNightMode: Bool?
 
     var onLog: ((String) -> Void)?
     var onVideo: ((Data, CPVideoCodec) -> Void)?
@@ -334,6 +395,8 @@ final class CPMediaSession {
                 video = nil
                 videoListener?.stop()
                 screen = CPScreenStream(secret: secret, connectionID: connectionID.uint64Value)
+                videoPackets = 0
+                videoBytes = 0
                 let listener = try CPMediaTCPListener(queue: queue, peerAddress: peerAddress)
                 videoListener = listener
                 listener.onConnection = { [weak self] connection in
@@ -345,8 +408,13 @@ final class CPMediaSession {
                     self.log("视频 TCP 通道已连接")
                     connection.onBytes = { [weak self] bytes in
                         guard let self, let screen = self.screen else { return }
+                        self.videoBytes += bytes.count
                         do {
                             for unit in try screen.append(bytes) {
+                                self.videoPackets += 1
+                                if self.videoPackets <= 2 {
+                                    self.log("已解码 \(screen.codec.displayName) 访问单元 \(self.videoPackets)（\(unit.count) 字节）")
+                                }
                                 self.onVideo?(unit, screen.codec)
                             }
                         } catch {
@@ -359,6 +427,7 @@ final class CPMediaSession {
                         self?.log("视频通道已关闭")
                     }
                     connection.start()
+                    self.recoverFirstVideoUnit(on: connection, attempt: 1)
                 }
                 replies.append(["type": 110, "dataPort": listener.port])
                 log("视频监听器已在端口 \(listener.port) 就绪")
@@ -393,7 +462,11 @@ final class CPMediaSession {
             guard let self, let connection, let cipher = self.eventCipher else { return }
             for request in try self.eventParser.append(cipher.receive(bytes)) {
                 if request.method.hasPrefix("RTSP/") || request.method.hasPrefix("HTTP/") {
-                    continue // 我方命令的响应；仅失败值得记录
+                    // 我方命令的响应；仅失败值得记录
+                    if request.target != "200" {
+                        self.log("iPhone 拒绝了事件命令（状态 \(request.target)，CSeq \(request.headers["cseq"] ?? "?")）")
+                    }
+                    continue
                 }
                 try connection.send(cipher.encrypt(CPRTSPResponse().encoded(for: request)))
             }
@@ -404,10 +477,38 @@ final class CPMediaSession {
             self?.log("事件通道已关闭")
         }
         connection.start()
+        flushNightMode()
     }
 
-    /// 请求 iPhone 立即编码一个关键帧（解码恢复用）。
-    func requestKeyFrame() {
+    var hasEventChannel: Bool { event != nil && eventCipher != nil }
+
+    /// 事件通道就绪前的夜间模式先暂存，就绪后立即下发。
+    func setNightMode(_ night: Bool) {
+        pendingNightMode = night
+        flushNightMode()
+    }
+
+    private func flushNightMode() {
+        guard let night = pendingNightMode, hasEventChannel else { return }
+        if sendCommand(["type": "setNightMode", "params": ["nightMode": night]], label: "夜间模式") {
+            pendingNightMode = nil
+            log("已通知 iPhone 切换为\(night ? "夜间" : "白天")外观")
+        }
+    }
+
+    /// 视频通道连上但迟迟没有访问单元时：请求关键帧并输出诊断
+    /// （区分「字节没来」和「字节来了但解不出」）。
+    private func recoverFirstVideoUnit(on connection: CPMediaTCPConnection, attempt: Int) {
+        queue.asyncAfter(deadline: .now() + (attempt == 1 ? 2 : 3)) { [weak self, weak connection] in
+            guard let self, let connection, self.video === connection, self.videoPackets == 0 else { return }
+            let sent = self.requestKeyFrame()
+            self.log("等待首帧：视频 TCP 已读 \(self.videoBytes) 字节，第 \(attempt) 次关键帧请求\(sent ? "已发送" : "未发送")")
+            if attempt < 2 { self.recoverFirstVideoUnit(on: connection, attempt: attempt + 1) }
+        }
+    }
+
+    /// 请求 iPhone 立即编码一个关键帧。
+    func requestKeyFrame() -> Bool {
         sendCommand(["type": "forceKeyFrame"], label: "关键帧请求")
     }
 
@@ -420,7 +521,10 @@ final class CPMediaSession {
 
     /// 瞬时按键：按下报告后紧跟全抬起报告。
     func pressHID(_ uuid: String, _ report: Data, label: String) {
-        guard sendHID(uuid, report, label: label) else { return }
+        guard sendHID(uuid, report, label: label) else {
+            log("按键未发送：事件通道尚未连接")
+            return
+        }
         _ = sendHID(uuid, Data(repeating: 0, count: 4), label: label)
     }
 
@@ -431,27 +535,52 @@ final class CPMediaSession {
 
     /// 请求 Siri（按下/抬起两个动作）。
     func requestSiri() {
-        sendCommand(["type": "requestSiri", "params": ["siriAction": 2]], label: "Siri")
-        sendCommand(["type": "requestSiri", "params": ["siriAction": 3]], label: "Siri")
+        guard sendCommand(["type": "requestSiri", "params": ["siriAction": 2]], label: "Siri") else {
+            log("Siri 未发送：事件通道尚未连接")
+            return
+        }
+        _ = sendCommand(["type": "requestSiri", "params": ["siriAction": 3]], label: "Siri")
     }
 
     private func sendHID(_ uuid: String, _ report: Data, label: String) -> Bool {
         sendCommand(["type": "hidSendReport", "uuid": uuid, "hidReport": report], label: label)
-        return true
     }
 
-    private func sendCommand(_ command: [String: Any], label: String) {
-        guard let event, let eventCipher else { return }
+    private func sendCommand(_ command: [String: Any], label: String) -> Bool {
+        guard let event, let eventCipher else { return false }
         do {
             let body = try PropertyListSerialization.data(fromPropertyList: command, format: .binary, options: 0)
             cseq += 1
             let header = "POST /command RTSP/1.0\r\nContent-Type: application/x-apple-binary-plist\r\n"
                 + "Content-Length: \(body.count)\r\nCSeq: \(cseq)\r\n\r\n"
             try event.send(eventCipher.encrypt(Data(header.utf8) + body))
+            return true
         } catch {
             log("\(label)写入失败：\(error)")
             event.stop()
+            return false
         }
+    }
+
+    /// 按流拆除：body 带 streams 时只停指定流（返回 false，会话保留）；否则整会话停止（返回 true）。
+    func teardown(_ body: Data) throws -> Bool {
+        guard !body.isEmpty,
+              let values = try PropertyListSerialization.propertyList(from: body, format: nil) as? [String: Any],
+              let streams = values["streams"] as? [[String: Any]] else {
+            stop()
+            return true
+        }
+        for stream in streams {
+            guard let type = stream["type"] as? NSNumber else { continue }
+            if type.intValue == 110 {
+                video?.stop()
+                video = nil
+                videoListener?.stop()
+                videoListener = nil
+                screen = nil
+            }
+        }
+        return false
     }
 
     func stop() {

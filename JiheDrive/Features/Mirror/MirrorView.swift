@@ -116,6 +116,12 @@ struct MirrorView: View {
                            color: phaseColor,
                            pulsing: awaitingPicture)
 
+                PhaseStepTracker(steps: Self.phaseSteps,
+                                 completed: phaseProgress.completed,
+                                 active: phaseProgress.active,
+                                 failed: phaseProgress.failed,
+                                 accent: phaseColor)
+
                 Text(connectionGuide)
                     .font(Theme.footnote)
                     .foregroundStyle(Theme.secondary)
@@ -169,6 +175,29 @@ struct MirrorView: View {
             return true
         default:
             return false
+        }
+    }
+
+    // MARK: - 启动步骤与进度
+
+    static let phaseSteps = ["配件端点", "iAP2 链路", "配件认证", "配件识别", "会话请求", "控制连接", "画面输出"]
+
+    /// completed = 已走完的步骤数；active = 进行中的步骤下标（-1 无）；
+    /// failed = 引导/接收端失败（进度条染红）。
+    private var phaseProgress: (completed: Int, active: Int, failed: Bool) {
+        switch controller.phase {
+        case .idle, .stopped: return (0, -1, false)
+        case .identityMissing: return (0, -1, true)
+        case .starting: return (0, 0, false)
+        case .transportReady: return (1, 1, false)
+        case .linkConnected: return (2, 2, false)
+        case .authenticated: return (3, 3, false)
+        case .identified: return (4, 4, false)
+        case .sessionRequested, .waitingControl: return (5, 5, false)
+        case .controlConnected: return (6, 6, false)
+        case .localStreaming: return (7, -1, false)
+        case .streaming: return (7, -1, false)
+        case .liveFallback, .failed: return (0, -1, true)
         }
     }
 
@@ -687,6 +716,92 @@ struct MirrorView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - 启动步骤追踪器（进度条 + 步骤圆点）
+
+/// 展示 CarPlay 引导的 7 个阶段：顶部进度条随完成度推进，
+/// 下方一排步骤圆点（完成=绿色对勾，进行中=品牌色高亮，未到=灰圈）。
+private struct PhaseStepTracker: View {
+    let steps: [String]
+    let completed: Int
+    let active: Int
+    let failed: Bool
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Theme.surfaceAlt)
+                    Capsule()
+                        .fill(barStyle)
+                        .frame(width: proxy.size.width
+                            * CGFloat(completed) / CGFloat(max(steps.count, 1)))
+                }
+            }
+            .frame(height: 6)
+
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, title in
+                    VStack(spacing: 5) {
+                        HStack(spacing: 6) {
+                            Rectangle()
+                                .fill(index == 0 ? Color.clear : lineColor(leading: index))
+                                .frame(height: 2)
+                            symbol(for: index)
+                            Rectangle()
+                                .fill(index == steps.count - 1 ? Color.clear : lineColor(trailing: index))
+                                .frame(height: 2)
+                        }
+                        Text(title)
+                            .font(.system(size: 10, weight: index == active ? .semibold : .regular))
+                            .foregroundStyle(index < completed || index == active
+                                             ? Theme.label : Theme.tertiary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.35), value: completed)
+        .animation(.easeInOut(duration: 0.35), value: active)
+    }
+
+    /// 失败=纯红/橙；全部完成=纯绿；进行中=品牌色到绿的渐变
+    private var barStyle: AnyShapeStyle {
+        if failed { return AnyShapeStyle(accent) }
+        if completed >= steps.count { return AnyShapeStyle(Theme.green) }
+        return AnyShapeStyle(LinearGradient(colors: [accent, Theme.green],
+                                            startPoint: .leading, endPoint: .trailing))
+    }
+
+    private func lineColor(leading index: Int) -> Color {
+        index - 1 < completed ? Theme.green.opacity(0.45) : Theme.surfaceAlt
+    }
+
+    private func lineColor(trailing index: Int) -> Color {
+        index < completed ? Theme.green.opacity(0.45) : Theme.surfaceAlt
+    }
+
+    @ViewBuilder
+    private func symbol(for index: Int) -> some View {
+        if index < completed {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(Theme.green)
+        } else if index == active {
+            ZStack {
+                Circle().fill(accent.opacity(0.15))
+                Circle().stroke(accent, lineWidth: 1.5)
+                Circle().fill(accent).frame(width: 6, height: 6)
+            }
+        } else {
+            Circle().stroke(Theme.tertiary, lineWidth: 1.5)
         }
     }
 }
