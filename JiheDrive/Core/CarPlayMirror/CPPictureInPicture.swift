@@ -18,17 +18,23 @@ final class CPVideoSurface: NSObject {
         guard frame != lastFrame else { return }
         lastFrame = frame
         var sampleBuffer: CMSampleBuffer?
+        var format: CMFormatDescription?
         var timing = CMSampleTimingInfo(
             duration: CMTime(value: 1, timescale: 30),
             presentationTimeStamp: CMTime(seconds: ProcessInfo.processInfo.systemUptime,
                                           preferredTimescale: 1_000),
             decodeTimeStamp: .invalid)
+        guard CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescriptionOut: &format) == noErr, let format else { return }
         let status = CMSampleBufferCreateForImageBuffer(
             allocator: kCFAllocatorDefault,
             imageBuffer: pixelBuffer,
             dataReady: true,
             makeDataReadyCallback: nil,
             refcon: nil,
+            formatDescription: format,
             sampleTiming: &timing,
             sampleBufferOut: &sampleBuffer)
         guard status == noErr, let sample = sampleBuffer else { return }
