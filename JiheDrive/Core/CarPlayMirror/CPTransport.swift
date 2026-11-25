@@ -4,7 +4,7 @@ import ObjectiveC.runtime
 /// CoreAccessories 私有框架桥：让本机 iOS 把 App 当作「已连接的 Wi-Fi 配件」，
 /// 从而在直连传输上跑 iAP2 会话（同机 CarPlay 的入口）。
 ///
-/// 参数与调用序严格对齐 CarWithin 的 DirectAccessoryTransport.m：
+/// 调用序（方法名与签名以运行时探测为准）：
 ///   client      = [ACCTransportClient sharedClient]
 ///   connection  = [client createConnectionWithType:2 andIdentifier:<id>]   ← 返回连接标识
 ///   endpoint    = [client createEndpointWithTransportType:2 andProtocol:4
@@ -48,7 +48,7 @@ final class CPDirectAccessoryTransport {
 
     private static var cachedClient: AnyObject?
 
-    /// NSObject 侧的方法签名校验（CarWithin 的 HasMethod 等价实现）。
+    /// NSObject 侧的方法签名校验（参数个数与选择器是否匹配）。
     private static func hasMethod(_ object: AnyObject, _ name: String, _ arguments: Int) -> Bool {
         let selector = NSSelectorFromString(name)
         guard let target = object as? NSObject, target.responds(to: selector) else { return false }
@@ -60,7 +60,7 @@ final class CPDirectAccessoryTransport {
     /// 加载 CoreAccessories 框架并取出共享 client。
     private static func acquireClient() throws -> AnyObject {
         if let cached = cachedClient { return cached }
-        // 与 CarWithin 一致：先查类，未注册再加载框架。
+        // 先查类是否已注册，未注册再加载框架。
         var cls = NSClassFromString("ACCTransportClient")
         if cls == nil {
             let frameworkPath = "/System/Library/PrivateFrameworks/CoreAccessories.framework"
@@ -101,7 +101,7 @@ final class CPDirectAccessoryTransport {
         var connectionObject: AnyObject?
         if let imp = createConnectionMethod.map({ method_getImplementation($0) }) {
             let fn = unsafeBitCast(imp, to: CreateConnectionFn.self)
-            // 显式转 NSString：CarWithin 传的是 NSString *，避免 Swift String 被包成 __SwiftValue
+            // 显式转 NSString：私有框架按 NSString 读取标识，避免 Swift String 被包成 __SwiftValue
             // 导致私有框架读不到正确的标识字符串。
             connectionObject = fn(client, createSelector, 2, identifier as NSString)?
                 .takeUnretainedValue()
@@ -112,7 +112,7 @@ final class CPDirectAccessoryTransport {
             }
         }
         guard let connection = connectionObject as? NSString else {
-            // CarWithin：返回值必须是 NSString，否则是框架拒绝（可能返回错误码对象）。
+            // 返回值必须是 NSString，否则是框架拒绝（可能返回错误码对象）。
             throw TransportError.refused("连接创建")
         }
         self.connection = connection
@@ -125,8 +125,8 @@ final class CPDirectAccessoryTransport {
 
         let generation = UUID()
         self.generation = generation
-        // 回调是 3 个参数（来源 NSString / 目标 NSString / 数据 NSData）——
-        // 与 CarWithin 的 `void (^)(NSString *, NSString *, NSData *)` 完全一致（签名 v32@?0@"NSString"8@"NSString"16@"NSData"24）。
+        // 回调是 3 个参数（来源 NSString / 目标 NSString / 数据 NSData），签名
+        // v32@?0@"NSString"8@"NSString"16@"NSData"24。
         // 数据固定取第 3 个；用 1 参数 block 会读错寄存器里的对象。
         let dataOutHandler: @convention(block) (NSString?, NSString?, NSData?) -> Void = { [weak self] _, _, data in
             guard let data, data.count <= 65536 else { return }
@@ -205,7 +205,7 @@ final class CPDirectAccessoryTransport {
         endpoint = nil
         dataOutHandlerBox = nil
         // 不清 onData：回调由上层（CPBootstrap）管理生命周期。
-        // CarWithin 的同名 stop 也不清 onData；start() 内部会先调 stop()，
+        // start() 内部会先调 stop()，
         // 若在这里清空会把上层刚设置的回调抹掉，导致 iAP2 收包被丢弃。
     }
 

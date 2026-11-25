@@ -83,8 +83,12 @@ final class CPMirrorController: ObservableObject {
     private let videoBox = CPFrameBox()
     /// 原始视频帧广播：预览层直接订阅，避免依赖转码器自解码。
     let frameHub = CPVideoFrameHub()
-    /// 兼容性重编码管线（与 CarWithin 验证参数一致：1024×480@25fps/2.5Mbps/Baseline）
+    /// 兼容性重编码管线（1024×480@25fps/2.5Mbps/Baseline）
     let transcoder = CPVideoTranscoder()
+    /// 可操作预览窗口服务：画面以 MJPEG 提供给本机弹窗与同网设备，触控/按键回传。
+    let previewServer = CPBrowserServer()
+    /// 系统画中画悬浮窗（可拖动/缩放/覆盖其他 App，离开 App 也能保持）。
+    let pip = CPPictureInPicture()
     private var bootstrap: CPBootstrap?
     private var bootstrapWatchTask: Task<Void, Never>?
     private var networkRestartCount = 0
@@ -103,7 +107,7 @@ final class CPMirrorController: ObservableObject {
 
     // MARK: - 启动 / 停止
 
-    /// 先起 RTSP 接收端；拿到实际监听端口后再发起 iAP2 引导（CarWithin 同款顺序）。
+    /// 先起 RTSP 接收端；拿到实际监听端口后再发起 iAP2 引导（端口就绪前发会话会白等）。
     /// castToZeeho = false 时完全不触碰极核链路，本地 CarPlay 独立运行。
     func start(dashboardIP: String, localIP: String, castToZeeho: Bool) {
         guard !phase.isRunning else { return }
@@ -121,6 +125,7 @@ final class CPMirrorController: ObservableObject {
         self.transcoder.onKeyframeNeeded = { [weak self] in self?.requestKeyFrame() }
         self.zeehoStatus = castToZeeho ? "等待连接" : "未启用"
         setCropMode(UserDefaults(suiteName: MirrorLogStore.appGroupID)?.string(forKey: "mirror.crop") ?? "crop")
+        startPreviewServer()
 
         let identity: CPAccessoryIdentity
         do {
@@ -155,6 +160,7 @@ final class CPMirrorController: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.localVideoReceived else { return }
                 self.localVideoReceived = true
+                self.pip.startFeed()
                 self.appendLog("已收到 CarPlay 视频，本地预览与触控可用")
                 self.setPhase(.localStreaming)
             }
@@ -193,6 +199,10 @@ final class CPMirrorController: ObservableObject {
         networkRestartCount = 0
         feederTask?.cancel()
         feederTask = nil
+        previewPumpTask?.cancel()
+        previewPumpTask = nil
+        previewServer.stop()
+        pip.stop()
         bootstrap?.stop()
         bootstrap = nil
         receiver?.stop()
@@ -261,8 +271,7 @@ final class CPMirrorController: ObservableObject {
     // MARK: - 引导与阶段
 
     /// 本机没有 Wi-Fi IP 时不发 0x4301（空地址 iOS 连不回来，只能干等超时）。
-    /// 等 IP 稳定后发起会话，并继续盯 IP 变化（对齐 CarWithin 的
-    /// waitForLocalNetwork / watchStartupAddress：手机切网/重连后 IP 会变，
+    /// 等 IP 稳定后发起会话，并继续盯 IP 变化（手机切网/重连后 IP 会变，
     /// 会话必须用当前地址重发，否则永远停在"等待控制连接"）。
     private func startBootstrapWhenNetworkReady(with configuration: CPInfo.Configuration,
                                                 identity: CPAccessoryIdentity, token: UUID) {
@@ -451,6 +460,60 @@ final class CPMirrorController: ObservableObject {
         feederTask = task
     }
 
+    // MARK: - 可操作预览窗口
+
+    /// 预览窗口地址（服务就绪且有本机 IP 时有效）。
+    var previewURL: String? {
+        guard previewServer.port > 0 else { return nil }
+        guard let ip = CPMirrorDiagnostics.localIPv4() else { return nil }
+        return "http://\(ip):\(previewServer.port)"
+    }
+
+    /// 有观看者连接时按 ~15fps 出 JPEG（没有观看者时完全不消耗 CPU）。
+    private var previewPumpTask: Task<Void, Never>?
+
+    private func startPreviewServer() {
+        pip.frameProvider = { [weak self] in self?.transcoder.snapshotForDisplay() }
+        pip.onLog = { [weak self] in self?.appendLog($0) }
+        pip.onStopped = { [weak self] in
+            self?.appendLog("画中画已关闭")
+        }
+        previewServer.onTouch = { [weak self] id, x, y, down in
+            self?.touches([(id: id, x: x, y: y, down: down)])
+        }
+        previewServer.onKey = { [weak self] key in
+            switch key {
+            case "home": self?.pressHome()
+            case "back": self?.pressBack()
+            case "select": self?.pressSelect()
+            case "siri": self?.requestSiri()
+            default: break
+            }
+        }
+        previewServer.onLog = { [weak self] in self?.appendLog($0) }
+        previewServer.onViewerCountChanged = { [weak self] active in
+            self?.setPreviewPumping(active)
+        }
+        previewServer.start(preferredPort: 8089)
+    }
+
+    private func setPreviewPumping(_ active: Bool) {
+        guard active else {
+            previewPumpTask?.cancel()
+            previewPumpTask = nil
+            return
+        }
+        guard previewPumpTask == nil else { return }
+        previewPumpTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let jpeg = self?.transcoder.jpegLatest() {
+                    self?.previewServer.publish(jpeg)
+                }
+                try? await Task.sleep(nanoseconds: 66_000_000) // ≈15fps
+            }
+        }
+    }
+
     // MARK: - 预览触控与按键
 
     private struct TouchSlot {
@@ -496,6 +559,13 @@ final class CPMirrorController: ObservableObject {
     func pressBack() { receiver?.pressKnob(back: true) }
     func pressSelect() { receiver?.pressKnob(select: true) }
     func requestSiri() { receiver?.requestSiri() }
+
+    /// 启动系统画中画悬浮窗（需在用户手势里调用）。
+    func startPictureInPicture() -> Bool {
+        let started = pip.start()
+        appendLog(started ? "已启动画中画悬浮窗" : "画中画暂未就绪（画面输出后才能启动）")
+        return started
+    }
 
     /// 显示层/转码器需要重新同步时，请系统立即编码一个关键帧。
     func requestKeyFrame() { receiver?.requestKeyFrame() }

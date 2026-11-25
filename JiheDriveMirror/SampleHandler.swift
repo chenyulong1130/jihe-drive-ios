@@ -3,7 +3,7 @@ import ReplayKit
 import UIKit
 
 /// 整屏镜像广播扩展：系统整屏（含高德等任意 App）→ 解码 → 缩放重编码
-/// （1024×480 @25fps / 2.5Mbps，与 CarWithin 验证参数一致）→ 极核仪表 PXC。
+/// （1024×480 @25fps / 2.5Mbps）→ 极核仪表 PXC。
 ///
 /// 生命周期：控制中心发起广播 → broadcastStarted → processSampleBuffer(视频)
 /// → broadcastFinished。仪表连接失败会自动重试（等待仪表打开投屏页）。

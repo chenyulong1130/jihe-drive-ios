@@ -56,7 +56,7 @@ final class CPBootstrap {
             try transport.start(withIdentifier: configuration.deviceID, transportType: 2)
             // 关键：必须在 transport.start() 之后设置回调。start() 内部会先 stop()，
             // 而 stop() 末尾执行 onData = nil；若提前设置，回调会被清空，iOS 回来的
-            // iAP2 数据全部丢弃，握手停在「已创建配件端点」——CarWithin 的 stop 不清 onData。
+            // iAP2 数据全部丢弃，握手停在「已创建配件端点」——stop 时不清 onData。
             transport.onData = { [weak self] data in self?.receive(data) }
             stage(.transportReady)
             stage("已创建本机配件端点（Wi-Fi 直连），正在建立 iAP2")
@@ -251,7 +251,7 @@ final class CPBootstrap {
     }
 
     private func requestSession(_ configuration: CPInfo.Configuration) throws {
-        // StartSession 必须带 Wi-Fi 信息（对齐 CarWithin：validate 强制 SSID/密码）。
+        // StartSession 必须带 Wi-Fi 信息：缺失时 iOS 无法回连 7000 端口。
         // 缺失时 iOS 可能无法回连 7000 端口，表现为「已请求会话但永远等不到控制连接」。
         guard let wifi = CPWiFiDefaults.validated() else {
             throw CPError.malformed("未配置 Wi-Fi 名称与密码，无法发起 CarPlay 会话（请在投屏页填写 Wi-Fi 预设）")

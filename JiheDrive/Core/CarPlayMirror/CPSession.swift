@@ -13,7 +13,7 @@ final class CPReceiver {
     private var configuration: CPInfo.Configuration = .default(deviceID: "")
     private var identity: CPAccessoryIdentity?
     private var generation = UUID()
-    // forceKeyFrame 状态：250ms 节流合并多个恢复方，未收到关键帧前每秒重发（对齐 CarWithin）。
+    // forceKeyFrame 状态：250ms 节流合并多个恢复方，未收到关键帧前每秒重发。
     private var keyframeWantedSince: DispatchTime?
     private var keyframeLastSent: DispatchTime?
     private var keyframeAttempts = 0
@@ -322,7 +322,7 @@ final class CPReceiver {
             }
             return CPRTSPResponse()
         case ("TEARDOWN", _):
-            // 按流拆除：只停被指定的流，其余流保持（对齐 CarWithin）。
+            // 按流拆除：只停被指定的流，其余流保持。
             if try state.media?.teardown(request.body) == true { state.media = nil }
             return CPRTSPResponse()
         default:

@@ -127,7 +127,7 @@ private struct CPParameterSets {
     }
 }
 
-// MARK: - 显示层（对齐 CarWithin H264Surface 的恢复闭环）
+// MARK: - 显示层（解码恢复闭环）
 
 final class CPDisplaySurface: UIView {
     override static var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }

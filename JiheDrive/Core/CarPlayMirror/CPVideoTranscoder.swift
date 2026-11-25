@@ -2,11 +2,12 @@ import Foundation
 import CoreMedia
 import CoreVideo
 import CoreImage
+import ImageIO
 import VideoToolbox
 
 /// 视频转码器：任意来源（CarPlay 流 / 整屏广播）→ 解码 → 缩放 → 按
 /// 极核仪表验证过的参数重编码（1024×480 @25fps / 2.5Mbps / H.264 Baseline，
-/// 首帧强制 IDR）。与 CarWithin 实测兼容的出帧规格一致。
+/// 首帧强制 IDR）。与极核仪表实测兼容的出帧规格一致。
 final class CPVideoTranscoder {
 
     enum ScaleMode {
@@ -20,7 +21,7 @@ final class CPVideoTranscoder {
     let bitrate: Int = 2_500_000
 
     var scaleMode: ScaleMode = .fit
-    /// 解码失效时由上层请求系统重发关键帧（对齐 CarWithin 的恢复闭环）。
+    /// 解码失效时由上层请求系统重发关键帧（恢复闭环）。
     var onKeyframeNeeded: (() -> Void)?
 
     // 解码状态
@@ -154,6 +155,23 @@ final class CPVideoTranscoder {
         defer { bufferLock.unlock() }
         guard let buffer = latestBuffer else { return nil }
         return (buffer, frameCounter)
+    }
+
+    /// 可操作预览窗口用：最新解码帧转 JPEG（内嵌预览页的 MJPEG 流）。
+    func jpegLatest(quality: CGFloat = 0.6) -> Data? {
+        bufferLock.lock()
+        let image = latestBuffer
+        bufferLock.unlock()
+        guard let image else { return nil }
+        let ciImage = CIImage(cvPixelBuffer: image)
+        guard let cgImage = compositor.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output as CFMutableData, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, cgImage,
+                                   [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
     }
 
     func invalidate() {

@@ -1,8 +1,9 @@
 import SwiftUI
 import ReplayKit
+import WebKit
 
-/// 投屏页。信息层次参考 CarWithin：
-/// 1) 一个 hero 卡承载标题、一句话说明、状态胶囊、连接指导、启动按钮；
+/// 投屏页。信息层次：
+/// 1) 一个 hero 卡承载标题、一句话说明、状态胶囊、启动步骤进度、连接指导、启动按钮；
 /// 2) 卡在连接超过 5 秒才出现排障提示，不打扰正常启动；
 /// 3) 视频区启动后才出现，带全屏；
 /// 4) Wi-Fi 与输出分区收纳，首页保持清爽；
@@ -18,6 +19,8 @@ struct MirrorView: View {
     @State private var showExport = false
     @State private var exportURL: URL?
     @State private var showFullscreen = false
+    @State private var showPreviewWindow = false
+    @State private var previewWindowFullscreen = false
     @State private var showPreflight = false
     @State private var showLogs = false
     /// 启动超过 5 秒仍未出画面时显示的排障提示
@@ -77,6 +80,12 @@ struct MirrorView: View {
         }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
+        }
+        .sheet(isPresented: $showPreviewWindow) {
+            previewWindowSheet
+        }
+        .fullScreenCover(isPresented: $previewWindowFullscreen) {
+            previewWindowFullscreenView
         }
     }
 
@@ -615,6 +624,7 @@ struct MirrorView: View {
             controlButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
             controlButton("chevron.backward", "返回") { controller.pressBack() }
             controlButton("mic.fill", "Siri") { controller.requestSiri() }
+            controlButton("rectangle.inset.filled", "预览窗") { showPreviewWindow = true }
             controlButton("arrow.up.left.and.arrow.down.right", "全屏") { showFullscreen = true }
         }
     }
@@ -656,6 +666,116 @@ struct MirrorView: View {
             }
         }
     }
+
+    // MARK: - 可操作预览窗口
+
+    /// 弹出的可操作预览窗口：内嵌触控画面，同一 Wi-Fi 下的 iPad/电脑
+    /// 打开提示地址也能看到同一画面并回传触控。可最小化成悬浮窗、可全屏。
+    private var previewWindowSheet: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(Theme.tertiary.opacity(0.4))
+                    .frame(width: 40, height: 5)
+                Spacer()
+            }
+            .padding(.horizontal, Theme.page)
+            .padding(.top, 10)
+
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.inset.filled")
+                    .foregroundStyle(Theme.brand)
+                Text("可操作预览窗口")
+                    .font(Theme.headline)
+                    .foregroundStyle(Theme.label)
+                Spacer(minLength: 0)
+                Button {
+                    showPreviewWindow = false
+                    _ = controller.startPictureInPicture()
+                } label: {
+                    Image(systemName: "pip.enter")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Theme.surfaceAlt))
+                }
+                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+
+                Button {
+                    showPreviewWindow = false
+                    previewWindowFullscreen = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Theme.surfaceAlt))
+                }
+                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            }
+            .padding(.horizontal, Theme.page)
+            .padding(.top, 8)
+
+            if let url = controller.previewURL {
+                Text("同一 Wi-Fi 下的 iPad / 电脑浏览器打开：\(url)，即可看到同一画面并触控操作。")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.page)
+                    .padding(.top, 4)
+                    .textSelection(.enabled)
+
+                PreviewWindowWebView(url: url)
+                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, Theme.page)
+                    .padding(.top, 10)
+            } else {
+                Text("预览窗口服务尚未就绪，请先启动投屏。")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Spacer(minLength: 0)
+        }
+        .presentationDetents([.large])
+        .background(Theme.groupedBackground)
+    }
+
+    /// 全屏态预览窗口。
+    private var previewWindowFullscreenView: some View {        ZStack {
+            Color.black.ignoresSafeArea()
+            if let url = controller.previewURL {
+                PreviewWindowWebView(url: url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button {
+                            previewWindowFullscreen = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 30))
+                                .foregroundStyle(.white.opacity(0.75))
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                        .padding(16)
+                    }
+                    Spacer()
+                }
+            } else {
+                Text("预览窗口服务尚未就绪，请先启动投屏。")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+            }
+        }
+    }
+
+    /// 最小化悬浮窗已由系统画中画取代：预览窗顶栏的画中画按钮启动后，
+    /// 悬浮窗由系统提供（可拖动/缩放/覆盖其他 App/离开 App 保持）。
 
     // MARK: - 日志：默认收起，点开看详情
 
@@ -718,6 +838,24 @@ struct MirrorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+// MARK: - 可操作预览窗口的触控页面
+
+private struct PreviewWindowWebView: UIViewRepresentable {
+    let url: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.isOpaque = false
+        view.backgroundColor = .black
+        if let address = URL(string: url) {
+            view.load(URLRequest(url: address))
+        }
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 // MARK: - 启动步骤追踪器（进度条 + 步骤圆点）
