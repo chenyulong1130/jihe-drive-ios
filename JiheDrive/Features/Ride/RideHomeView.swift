@@ -30,6 +30,8 @@ struct RideHomeView: View {
     /// 已加载的当月行程明细；monthInfo 的日里程兜底用在翻完页之后
     @State private var loadedDays: [RideTrackService.MonthDay] = []
     @State private var loadedTracks: [RideTrack] = []
+    /// 月份选择面板：点日期胶囊弹出年/月双轮
+    @State private var showMonthPicker = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -123,6 +125,9 @@ struct RideHomeView: View {
                 RideReplayView(vehicle: vehicle, tracks: bundle.tracks)
             }
         }
+        .sheet(isPresented: $showMonthPicker) {
+            MonthPickerSheet(anchor: $monthAnchor)
+        }
     }
 
     // MARK: - Header
@@ -141,9 +146,17 @@ struct RideHomeView: View {
                 .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
             }
 
-            Text("全部行程")
-                .font(.system(size: showsClose ? 18 : 28, weight: .semibold))
-                .foregroundStyle(Theme.label)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("全部行程")
+                    .font(.system(size: showsClose ? 18 : 28, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                if !groups.isEmpty {
+                    Text("本月 \(loadedTracks.count) 次骑行记录")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                        .monospacedDigit()
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -250,19 +263,24 @@ struct RideHomeView: View {
             }
             .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
 
-            HStack(spacing: 6) {
-                Text(monthTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.label)
-                    .monospacedDigit()
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.tertiary)
+            Button {
+                showMonthPicker = true
+            } label: {
+                HStack(spacing: 6) {
+                    Text(monthTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                        .monospacedDigit()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Theme.tertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(Theme.surface))
+                .shadow(color: Theme.cardShadow, radius: 8, y: 2)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Capsule().fill(Theme.surface))
-            .shadow(color: Theme.cardShadow, radius: 8, y: 2)
+            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
 
             Button {
                 shiftMonth(1)
@@ -282,34 +300,115 @@ struct RideHomeView: View {
     private var monthHero: some View {
         let km = groups.reduce(0.0) { $0 + $1.totalKm }
         let days = groups.filter { !$0.tracks.isEmpty }.count
+        let minutes = groups.reduce(0) { $0 + $1.totalMin }
         let peak = groups.map(\.totalKm).max() ?? 0
-        let avg = days > 0 ? km / Double(days) : 0
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("本月里程")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "bicycle")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.brand)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Theme.brand.opacity(0.12)))
+                Text("本月总览")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+                Spacer(minLength: 0)
+                Text(monthTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.tertiary)
+                    .monospacedDigit()
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(formatKm(km))
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.label)
                     .monospacedDigit()
                 Text("km")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.brand)
             }
+
             HStack(spacing: 0) {
                 monthStat("\(days)", "天", "骑行天数")
-                monthStat(formatKm(avg), "km", "日均里程")
+                heroDivider
+                monthStat(RideTrackService.durationText(minutes), "", "累计时长")
+                heroDivider
                 monthStat(formatKm(peak), "km", "单日最长")
             }
+
+            heroBars
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Theme.surface)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Theme.brand.opacity(0.14), Theme.brand.opacity(0.04), Theme.surface.opacity(0.6)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Theme.brand.opacity(0.10), lineWidth: 1)
         )
         .shadow(color: Theme.cardShadow, radius: 12, y: 3)
+    }
+
+    private var heroDivider: some View {
+        Rectangle()
+            .fill(Theme.tertiary.opacity(0.2))
+            .frame(width: 1, height: 26)
+            .padding(.horizontal, 6)
+    }
+
+    /// 当月每日里程迷你柱状图（月历接口的日里程），今天高亮；只有一天数据时不画
+    @ViewBuilder
+    private var heroBars: some View {
+        let ridden = loadedDays
+            .filter { $0.mileage > 0 }
+            .sorted { $0.date < $1.date }
+        let peakKm = ridden.map(\.mileage).max() ?? 0
+        let today = Self.dotted.string(from: Date())
+        if ridden.count > 1 {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .bottom, spacing: 3) {
+                    ForEach(ridden, id: \.date) { day in
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(day.date == today ? Theme.brand : Theme.brand.opacity(0.28))
+                            .frame(height: max(4, 40 * CGFloat(day.mileage / max(peakKm, 0.01))))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 40)
+
+                HStack(spacing: 3) {
+                    if let firstDay = ridden.first {
+                        Text(Self.monthDayLabel(firstDay.date))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                    if let todayKm = loadedDays.first(where: { $0.date == today }), todayKm.mileage > 0 {
+                        Text("今日 \(formatKm(todayKm.mileage)) km")
+                            .foregroundStyle(Theme.brand)
+                    } else if let lastDay = ridden.last {
+                        Text(Self.monthDayLabel(lastDay.date))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                }
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+            }
+        }
+    }
+
+    private static func monthDayLabel(_ key: String) -> String {
+        let parts = key.split(separator: ".")
+        guard parts.count >= 3 else { return key }
+        return "\(parts[1])/\(parts[2])"
     }
 
     private func monthStat(_ value: String, _ unit: String, _ label: String) -> some View {
@@ -612,7 +711,8 @@ struct RideHomeView: View {
         return (start, min(last, Date()))
     }
 
-    /// 首屏只拉当月第一页（接口按天分组翻页）；后续页交给 loadMore 上拉追加
+    /// 首屏拉当月第一页 + 最近一周明细（接口按天升序翻页，最新行程在最后几页）；
+    /// 更早的记录交给 loadMore 上拉追加
     private func loadMonth(force: Bool = true) async {
         guard let vehicle = model.selectedVehicle else { return }
         let key = "\(vehicle.vinNo)-\(monthKey)"
@@ -623,20 +723,30 @@ struct RideHomeView: View {
 
         guard let bounds = Self.monthBounds(for: monthAnchor) else { return }
         async let daysTask = RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor)
-        // 首屏只拉 10 次（约头 2~3 天），其余交给上拉加载，别一次铺满整月
+        // 接口按天升序翻页：整月第 1 页装的是月初最旧的几天，最新行程排在最后几页，
+        // 光等翻页要上拉到底才看到今天。并行补拉最近一周，合并去重后首屏顶部就是最新骑行
         let first = await RideTrackService.tracks(
             vin: vehicle.vinNo, from: bounds.start, to: bounds.end, page: 1, pageSize: 10
+        ) ?? []
+        let recentStart = max(bounds.start, Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? bounds.start)
+        let recent = await RideTrackService.tracks(
+            vin: vehicle.vinNo, from: recentStart, to: bounds.end, page: 1, pageSize: 10
         ) ?? []
         let days = await daysTask ?? []
         if Task.isCancelled { return }
 
         loadedDays = days
-        loadedTracks = first
+        var merged: [RideTrack] = []
+        var seen = Set<String>()
+        for track in first + recent where seen.insert(track.id).inserted {
+            merged.append(track)
+        }
+        loadedTracks = merged
         nextPage = 2
-        noMorePages = first.isEmpty
-        groups = Self.buildGroups(days: days, tracks: first)
+        noMorePages = first.isEmpty && recent.isEmpty
+        groups = Self.buildGroups(days: days, tracks: merged)
 
-        if first.isEmpty, days.contains(where: { $0.mileage > 0 }) {
+        if merged.isEmpty, days.contains(where: { $0.mileage > 0 }) {
             // 月历有里程但分页明细空：先按天兜底补一轮，仍为空才报错
             await reconcileMissingDays(vehicle: vehicle)
             if groups.isEmpty {
@@ -764,6 +874,100 @@ private struct RideDayGroup: Identifiable {
     let totalKm: Double
     let totalMin: Int
     let tracks: [RideTrack]
+}
+
+/// 月份选择面板：年/月双轮，范围 2020-01 到当前月
+private struct MonthPickerSheet: View {
+    @Binding var anchor: Date
+    @Environment(\.dismiss) private var dismiss
+
+    private let calendar = Calendar.current
+    @State private var year: Int
+    @State private var month: Int
+
+    init(anchor: Binding<Date>) {
+        _anchor = anchor
+        let cal = Calendar.current
+        _year = State(initialValue: cal.component(.year, from: anchor.wrappedValue))
+        _month = State(initialValue: cal.component(.month, from: anchor.wrappedValue))
+    }
+
+    private var currentYear: Int { calendar.component(.year, from: Date()) }
+    private var currentMonth: Int { calendar.component(.month, from: Date()) }
+    private var years: [Int] { Array(2020...max(2020, currentYear)) }
+    private var months: [Int] { year >= currentYear ? Array(1...currentMonth) : Array(1...12) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("选择月份")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Spacer(minLength: 0)
+                Button {
+                    apply(year: currentYear, month: currentMonth)
+                } label: {
+                    Text("回到本月")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                }
+                .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+
+            HStack(spacing: 0) {
+                Picker("年", selection: $year) {
+                    ForEach(years, id: \.self) { value in
+                        Text("\(value)年").tag(value)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(maxWidth: .infinity)
+
+                Picker("月", selection: $month) {
+                    ForEach(months, id: \.self) { value in
+                        Text("\(value)月").tag(value)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(maxWidth: .infinity)
+            }
+            .frame(height: 160)
+            .onChange(of: year) { _, newValue in
+                // 切到当前年时把月份收敛到不超过本月
+                if newValue >= currentYear, month > currentMonth {
+                    month = currentMonth
+                }
+            }
+
+            Button {
+                apply()
+            } label: {
+                Text("确定")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.brand))
+            }
+            .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+        }
+        .sheetChrome(detents: [.height(340)])
+    }
+
+    private func apply(year targetYear: Int? = nil, month targetMonth: Int? = nil) {
+        var components = DateComponents()
+        components.year = targetYear ?? year
+        components.month = targetMonth ?? month
+        components.day = 1
+        if let date = calendar.date(from: components) {
+            anchor = date
+        }
+        dismiss()
+    }
 }
 
 /// 浅底轨迹缩略图：青点起点、红点终点

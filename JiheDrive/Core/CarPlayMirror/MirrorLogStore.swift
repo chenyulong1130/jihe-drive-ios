@@ -7,7 +7,7 @@ import Foundation
 /// - 可导出合并文件用于问题反馈
 enum MirrorLogStore {
 
-    static let appGroupID = "group.com.liruixin.jihedrive"
+    static let appGroupID = "group.com.qianxu.jihedrive"
 
     private static let lock = NSLock()
     private static let queue = DispatchQueue(label: "jihedrive.mirror.log", qos: .utility)

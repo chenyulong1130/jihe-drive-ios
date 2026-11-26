@@ -10,6 +10,10 @@ struct SettingsView: View {
     @State private var showSigninDetail = false
     @StateObject private var signin = SigninStore()
     @StateObject private var profileStore = UserProfileStore()
+    // 石栏开机密码（大灯/控制器入口用），存在这里详情页就不用每次问
+    @State private var powerCode = DeviceAuth.powerOnCode
+    @State private var hasCustomPowerCode = DeviceAuth.hasCustomPowerCode()
+    @State private var powerCodeSaved = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -30,9 +34,12 @@ struct SettingsView: View {
                 SectionHeader("3D 模型")
                 modelSection.staggerIn(4)
 
+                SectionHeader("设备")
+                deviceSection.staggerIn(5)
+
                 logoutButton
                     .padding(.top, 24)
-                    .staggerIn(5)
+                    .staggerIn(6)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -160,6 +167,74 @@ struct SettingsView: View {
         seatLinkage.isLinked(vin: model.selectedVehicle?.vinNo)
             ? "真实坐垫开合时，主页与 3D 看车的模型坐垫同步跟动。"
             : "已关闭：模型坐垫不跟随真实坐垫，仅 3D 看车内手动开关时才会动。"
+    }
+
+    // MARK: - 设备（石栏开机密码）
+
+    /// 石栏大灯 / 控制器的 8 位开机密码：在这里存好，设备页验证时直接比对，
+    /// 没存则回落出厂默认 22222222
+    private var deviceSection: some View {
+        AppleCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "key.horizontal.fill")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.brand)
+                        .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("石栏开机密码")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Theme.label)
+                        Text(hasCustomPowerCode
+                             ? "已保存自定义密码 · 连接大灯/控制器时自动校验"
+                             : "未保存，使用默认密码 \(DeviceAuth.defaultPowerOnCode)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                }
+
+                TextField("8 位数字密码", text: $powerCode)
+                    .keyboardType(.numberPad)
+                    .font(.system(size: 18, design: .rounded))
+                    .multilineTextAlignment(.center)
+                    .padding(10)
+                    .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+
+                HStack(spacing: 12) {
+                    Button {
+                        DeviceAuth.setPowerOnCode(powerCode)
+                        hasCustomPowerCode = DeviceAuth.hasCustomPowerCode()
+                        powerCodeSaved = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { powerCodeSaved = false }
+                    } label: {
+                        Text(powerCodeSaved ? "已保存 ✓" : "保存")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                            .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+
+                    if hasCustomPowerCode {
+                        Button {
+                            DeviceAuth.setPowerOnCode("")
+                            powerCode = DeviceAuth.defaultPowerOnCode
+                            hasCustomPowerCode = false
+                        } label: {
+                            Text("恢复默认")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.red)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 42)
+                                .background(Theme.red.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - 账号

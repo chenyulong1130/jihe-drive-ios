@@ -24,7 +24,7 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var castToZeeho: Bool
 
     private let locationManager = CLLocationManager()
-    private static let wifiService = "com.liruixin.jihedrive.wifi"
+    private static let wifiService = "com.qianxu.jihedrive.wifi"
 
     override init() {
         let savedIP = UserDefaults.standard.string(forKey: "mirror.dashboard.ip")
@@ -125,7 +125,7 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
             var add = query
             add[kSecValueData as String] = Data(password.utf8)
             add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            add[kSecAttrAccessGroup as String] = "com.liruixin.jihedrive"
+            add[kSecAttrAccessGroup as String] = "com.qianxu.jihedrive"
             _ = SecItemAdd(add as CFDictionary, nil)
         }
     }

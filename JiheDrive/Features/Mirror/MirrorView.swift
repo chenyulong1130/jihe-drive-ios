@@ -376,11 +376,49 @@ struct MirrorView: View {
                     }
 
                     HStack(spacing: 10) {
+                        Image(systemName: "car.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 24)
+                        Text("仪表车型")
+                            .font(Theme.footnote.weight(.medium))
+                            .foregroundStyle(Theme.label)
+                        Spacer(minLength: 8)
+                        Menu {
+                            ForEach(CPMirrorController.zeehoModels, id: \.id) { model in
+                                Button {
+                                    controller.setZeehoModel(model.id)
+                                } label: {
+                                    if controller.zeehoModelID == model.id {
+                                        Label(model.name, systemImage: "checkmark")
+                                    } else {
+                                        Text(model.name)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(controller.zeehoModelName)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(Theme.label)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Theme.surfaceAlt, in: Capsule())
+                        }
+                    }
+
+                    HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(controller.zeehoSpecText)
                                 .font(Theme.caption.weight(.semibold))
                                 .foregroundStyle(Theme.label)
-                            Text("投屏规格随仪表协商自动适配")
+                            Text(controller.zeehoModelID == "auto"
+                                 ? "投屏规格随仪表协商自动适配"
+                                 : "已选 \(controller.zeehoModelName) · 规格按所选车型协商，异常时回退自适应")
                                 .font(Theme.caption)
                                 .foregroundStyle(Theme.secondary)
                         }

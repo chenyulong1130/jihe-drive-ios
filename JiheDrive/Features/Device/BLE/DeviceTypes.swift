@@ -6,7 +6,6 @@ import CoreBluetooth
 enum DeviceKind: String, CaseIterable, Identifiable {
     case bms
     case shilanLight
-    case controller
 
     var id: String { rawValue }
 
@@ -14,7 +13,6 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "保护板"
         case .shilanLight: return "石栏大灯"
-        case .controller: return "电机控制器"
         }
     }
 
@@ -22,7 +20,6 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "保护板"
         case .shilanLight: return "石栏"
-        case .controller: return "控制器"
         }
     }
 
@@ -30,7 +27,6 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "蚂蚁 / 彦阳 · 电压 / 电流 / 单体 / 保护"
         case .shilanLight: return "石栏协议 · NB- / SL- 大灯高低调节"
-        case .controller: return "电机位置 / 限位 / 速度 / 车型预设"
         }
     }
 
@@ -38,18 +34,17 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "battery.100.bolt"
         case .shilanLight: return "headlight.high.beam"
-        case .controller: return "gearshape.2.fill"
         }
     }
 
-    /// 设备页主推：保护板 + 石栏（先做这两类）
+    /// 设备页主推：保护板 + 石栏
     static let primaryKinds: [DeviceKind] = [.bms, .shilanLight]
 
-    /// 石栏与控制器共用 5A A5 电机帧，进入前需要 8 位开机密码校验
+    /// 石栏沿用小程序的 8 位开机密码校验，BMS 不需要
     var requiresPowerAuth: Bool {
         switch self {
         case .bms: return false
-        case .controller, .shilanLight: return true
+        case .shilanLight: return true
         }
     }
 
@@ -61,15 +56,6 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         if upper.contains("NB-") || upper.contains("SL-") { return .shilanLight }
         // 保护板：蚂蚁 ANT / 彦阳 YY（先接这两家）
         if BMSBrand.detect(name: trimmed) != nil { return .bms }
-        let ids = (serviceUUIDs ?? []).map { $0.uuidString.uppercased() }
-        if !upper.isEmpty, ids.contains(where: { $0.contains("FFF0") }) {
-            if upper.contains("MOTOR") || upper.contains("CTRL") || upper.contains("DRL") {
-                return .controller
-            }
-        }
-        if upper.contains("MOTOR") || upper.contains("CTRL") || upper.contains("DRL") {
-            return .controller
-        }
         return nil
     }
 }
@@ -147,11 +133,34 @@ enum BMSChannel: String, CaseIterable, Identifiable {
 // MARK: - 本地鉴权（沿用小程序密码，仅作本地门锁，不上传）
 
 enum DeviceAuth {
-    static let powerOnCode = "22222222"
+    /// 石栏/控制器出厂默认 8 位开机密码
+    static let defaultPowerOnCode = "22222222"
     static let serviceCode = "0241"
 
     private static let powerKey = "device.auth.poweron.v1"
     private static let expireKey = "device.auth.poweron.expire"
+    /// 「我的」页面保存的自定义开机密码；未保存时回落出厂默认
+    private static let customCodeKey = "device.auth.poweron.custom"
+
+    /// 开机密码：优先「我的」里存的，没有才用默认值
+    static var powerOnCode: String {
+        let stored = UserDefaults.standard.string(forKey: customCodeKey) ?? ""
+        return stored.isEmpty ? defaultPowerOnCode : stored
+    }
+
+    static func hasCustomPowerCode() -> Bool {
+        !(UserDefaults.standard.string(forKey: customCodeKey) ?? "").isEmpty
+    }
+
+    /// 保存自定义开机密码；传空串/不足 8 位即清除，回落默认
+    static func setPowerOnCode(_ code: String) {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count == 8 {
+            UserDefaults.standard.set(trimmed, forKey: customCodeKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: customCodeKey)
+        }
+    }
 
     static func isVerified() -> Bool {
         let expire = UserDefaults.standard.double(forKey: expireKey)

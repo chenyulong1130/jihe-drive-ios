@@ -74,8 +74,8 @@ final class CPSRPServer {
 // MARK: - 配对持久化（控制端 ID → 长期公钥）
 
 enum CPPairingStore {
-    private static let service = "com.liruixin.jihedrive.cp.pairing.v1"
-    private static let accessGroup = "com.liruixin.jihedrive"
+    private static let service = "com.qianxu.jihedrive.cp.pairing.v1"
+    private static let accessGroup = "com.qianxu.jihedrive"
 
     static func publicKey(for identifier: String) -> Curve25519.Signing.PublicKey? {
         var item: CFTypeRef?
@@ -113,6 +113,9 @@ enum CPPairingStore {
     }
 
     /// 本机配对签名密钥（Ed25519/Curve25519 signing）。
+    /// Keychain 自定义访问组不可用（免费证书 / 重签后团队前缀变化，-34018）时
+    /// 必须退回默认组：拿不到这把钥匙 SessionState.setup 就是 nil，
+    /// iPhone 一发 /pair-setup 就报「pair-setup 不可用」，CarPlay 永远配不上对。
     static func localSigningKey() throws -> Curve25519.Signing.PrivateKey {
         let account = "local-signing-key"
         var item: CFTypeRef?
@@ -129,7 +132,7 @@ enum CPPairingStore {
             return key
         }
         let key = Curve25519.Signing.PrivateKey()
-        let add: [String: Any] = [
+        var add: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -137,7 +140,17 @@ enum CPPairingStore {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecAttrAccessGroup as String: accessGroup,
         ]
-        let status = SecItemAdd(add as CFDictionary, nil)
+        var status = SecItemAdd(add as CFDictionary, nil)
+        if status != errSecSuccess, status != errSecDuplicateItem {
+            // 访问组不可用：清掉自定义组用默认组重试
+            add.removeValue(forKey: kSecAttrAccessGroup as String)
+            SecItemDelete([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ] as CFDictionary)
+            status = SecItemAdd(add as CFDictionary, nil)
+        }
         if status == errSecDuplicateItem, SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
            let data = item as? Data, let existing = try? Curve25519.Signing.PrivateKey(rawRepresentation: data) {
             return existing

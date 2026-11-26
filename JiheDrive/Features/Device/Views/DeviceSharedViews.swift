@@ -32,6 +32,62 @@ struct MetricTile: View {
     }
 }
 
+/// 彩色圆形图标底座（充电卡 / 峰值压差卡等行卡用）
+struct IconBadge: View {
+    let icon: String
+    let color: Color
+    var size: CGFloat = 42
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color.opacity(0.14))
+            Image(systemName: icon)
+                .font(.system(size: size * 0.42, weight: .semibold))
+                .foregroundStyle(color)
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// 带图标的指标卡（对齐 Flutter 版 BmsPanel 的 DeviceMetricCard）：
+/// 标题行 = 15pt 图标 + 12pt 标题；数值 19pt 加粗，单位同色小字。
+struct MetricCard: View {
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let value: String
+    let unit: String
+    var valueColor: Color = Theme.label
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .foregroundStyle(valueColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(valueColor.opacity(0.7))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+    }
+}
+
 struct LogPanel: View {
     let title: String
     let logs: [String]
@@ -73,12 +129,6 @@ struct LogPanel: View {
     }
 }
 
-private func rssiIcon(_ rssi: Int) -> String {
-    if rssi > -55 { return "wifi" }
-    if rssi > -75 { return "wifi" }
-    return "wifi.exclamationmark"
-}
-
 // MARK: - 蓝牙列表 / 连接弹窗
 
 struct DeviceScanSheet: View {
@@ -88,6 +138,8 @@ struct DeviceScanSheet: View {
     let onConnected: (BLEDevice) -> Void
 
     @State private var activeFilter: DeviceKind?
+    /// 正在连接的设备：按钮转 spinner、其余行禁点，避免「点了没反应」的卡顿感
+    @State private var connectingID: UUID?
 
     private var visibleDevices: [BLEDevice] {
         guard let activeFilter else { return ble.discovered }
@@ -111,7 +163,7 @@ struct DeviceScanSheet: View {
                 if ble.isScanning {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("正在搜索附近设备 · 30 秒后自动停止")
+                        Text("正在搜索附近设备 · 10 秒后自动停止")
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
                     }
@@ -194,7 +246,8 @@ struct DeviceScanSheet: View {
     }
 
     private func deviceRow(_ device: BLEDevice) -> some View {
-        HStack(spacing: 12) {
+        let isConnecting = connectingID == device.id
+        return HStack(spacing: 12) {
             Image(systemName: device.kind.icon)
                 .font(.system(size: 20))
                 .foregroundStyle(Theme.brand)
@@ -206,18 +259,15 @@ struct DeviceScanSheet: View {
                     .foregroundStyle(Theme.label)
                 HStack(spacing: 6) {
                     Text(device.kind.shortTitle)
-                    Text("·")
-                    Text("\(device.rssi) dBm")
+                    if isConnecting {
+                        Text("· 连接中…")
+                    }
                 }
                 .font(Theme.caption)
-                .foregroundStyle(Theme.secondary)
+                .foregroundStyle(isConnecting ? Theme.brand : Theme.secondary)
             }
 
             Spacer(minLength: 4)
-
-            Image(systemName: rssiIcon(device.rssi))
-                .foregroundStyle(device.rssi > -75 ? Theme.green : Theme.orange)
-                .font(.system(size: 15))
 
             Menu {
                 ForEach(DeviceKind.allCases) { kind in
@@ -233,6 +283,8 @@ struct DeviceScanSheet: View {
             }
 
             Button {
+                guard connectingID == nil else { return }
+                connectingID = device.id
                 Task {
                     do {
                         try await ble.connect(device)
@@ -241,18 +293,26 @@ struct DeviceScanSheet: View {
                     } catch {
                         ble.log("连接失败：\(error.localizedDescription)")
                     }
+                    connectingID = nil
                 }
             } label: {
-                Text("连接")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Theme.brand, in: Capsule())
+                if isConnecting {
+                    ProgressView()
+                        .frame(width: 44)
+                } else {
+                    Text("连接")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Theme.brand, in: Capsule())
+                }
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+            .disabled(connectingID != nil && !isConnecting)
         }
         .padding(.vertical, 4)
+        .opacity(connectingID == nil || isConnecting ? 1 : 0.45)
     }
 }
 
@@ -273,7 +333,7 @@ struct PowerPasswordSheet: View {
                 Text("输入开机密码")
                     .font(Theme.title2)
                     .foregroundStyle(Theme.label)
-                Text("大灯调节设备沿用石栏小程序的 8 位开机密码，验证后 7 天内免输入。")
+                Text("大灯调节设备沿用石栏小程序的 8 位开机密码（默认 \(DeviceAuth.defaultPowerOnCode)，可在「我的 → 设备」保存自定义密码），验证后 7 天内免输入。")
                     .font(Theme.footnote)
                     .foregroundStyle(Theme.secondary)
                     .multilineTextAlignment(.center)

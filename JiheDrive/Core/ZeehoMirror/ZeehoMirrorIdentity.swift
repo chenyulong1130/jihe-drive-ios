@@ -26,7 +26,7 @@ enum ZeehoMirrorIdentity {
         }
     }
 
-    private static let service = "com.liruixin.jihedrive.mirror.identity.v1"
+    private static let service = "com.qianxu.jihedrive.mirror.identity.v1"
     private static let account = "identity"
 
     /// 读取（或首次生成）本机身份。并发调用时保证只有一个身份落地。

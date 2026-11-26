@@ -12,8 +12,8 @@ final class KeychainStore {
         case widgetImage = "widget_vehicle_image"
     }
 
-    private let service = "com.liruixin.jihedrive"
-    private let accessGroup = "com.liruixin.jihedrive"
+    private let service = "com.qianxu.jihedrive"
+    private let accessGroup = "com.qianxu.jihedrive"
 
     func value(for key: Key) -> String? {
         if let data = data(for: key) {

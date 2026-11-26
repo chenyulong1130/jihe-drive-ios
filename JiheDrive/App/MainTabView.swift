@@ -19,11 +19,12 @@ enum MainTab: String, CaseIterable, Identifiable {
     }
 
     /// 仅使用系统确认存在的 SF Symbol；`bluetooth` / `carplay.fill` 无效会导致空白图标。
+    /// mirror 用投屏图标（airplayvideo，SF Symbols 1 起存在，无 fill 变体）
     var icon: String {
         switch self {
         case .vehicle: return "bolt.car"
         case .device: return "antenna.radiowaves.left.and.right"
-        case .mirror: return "carplay"
+        case .mirror: return "airplayvideo"
         case .settings: return "person"
         }
     }
@@ -32,7 +33,7 @@ enum MainTab: String, CaseIterable, Identifiable {
         switch self {
         case .vehicle: return "bolt.car.fill"
         case .device: return "antenna.radiowaves.left.and.right"
-        case .mirror: return "carplay"
+        case .mirror: return "airplayvideo"
         case .settings: return "person.fill"
         }
     }
@@ -47,6 +48,8 @@ struct MainTabView: View {
     @State private var panAxis: Axis? = nil
     /// 手指还在屏幕上：拖动位移绝不跟动画，避免「贴着乱抖」
     @State private var isDragging = false
+    /// 设备详情页已推入：隐藏悬浮 Tab 栏、禁用横滑翻页，把横滑还给系统返回手势
+    @State private var detailActive = false
 
     private var tabs: [MainTab] { MainTab.allCases }
     private var index: Int { tabs.firstIndex(of: tab) ?? 0 }
@@ -97,11 +100,18 @@ struct MainTabView: View {
                 }
                 .allowsHitTesting(true)
 
-                LiquidTabBar(tab: $tab)
+                // 详情页推入时 Tab 栏收起，详情页获得完整的二级页面视口
+                if !detailActive {
+                    LiquidTabBar(tab: $tab)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .environment(\.activeMainTab, tab)
+        .onPreferenceChange(DeviceDetailActiveKey.self) { active in
+            withAnimation(Motion.page) { detailActive = active }
+        }
         .sensoryFeedback(.selection, trigger: tab)
         .onAppear(perform: applyStatusBar)
         .onChange(of: tab) { _, _ in
@@ -143,6 +153,8 @@ struct MainTabView: View {
     private func pageDrag(width: CGFloat, canStart: @escaping (CGPoint) -> Bool = { _ in true }) -> some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { value in
+                // 详情页里横滑属于系统返回手势，主界面不再抢
+                guard !detailActive else { return }
                 let dx = value.translation.width
                 let dy = value.translation.height
 
@@ -217,6 +229,14 @@ private struct HorizontalClip: Shape {
                 height: rect.height + 6000
             )
         )
+    }
+}
+
+/// 设备详情推入时由 DeviceTabView 上抛 true：主界面隐藏 Tab 栏并停用横滑翻页
+struct DeviceDetailActiveKey: PreferenceKey {
+    static var defaultValue: Bool = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }
 

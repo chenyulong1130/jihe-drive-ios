@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// 石栏大灯调节专属页：调节大灯高低位置
-/// 走 motor_handle 的 5A A5 电机帧，复用 MotorStore。
-/// 主视觉用当前车辆的 3D 模型（GLB）+ 大灯光锥，仰角实时跟随高度百分比；
-/// 没有可用模型时降级为 2D 光束示意。页面不使用 SF 符号图标。
+/// 石栏大灯调节页（苹果风格独立设计，不复用控制器工程风布局）：
+/// 3D 车模灯光效果为核心主视觉，光束仰角实时跟随高度；
+/// 常驻内容只留「高度主控」，速度/限位/预设/自检等收进右上角设置弹窗，
+/// 指令记录收进诊断弹窗（带复制）。协议沿用 motor_handle 的 5A A5 电机帧。
 struct HeadlightDetailView: View {
     @EnvironmentObject private var ble: DeviceBLEManager
     @EnvironmentObject private var session: DeviceSession
@@ -13,10 +13,12 @@ struct HeadlightDetailView: View {
 
     @State private var glbFile: URL?
     @State private var glbFailed = false
-    @State private var showLogs = false
     @State private var resetToken = 0
     @State private var scrubbing = false
     @State private var scrubValue: Double = 0
+    @State private var showDiagnostics = false
+    @State private var showSettings = false
+    @State private var copyToast = false
 
     private var current: Int { store.params.absolutePercent }
     private var target: Int { store.params.targetPercent }
@@ -47,32 +49,40 @@ struct HeadlightDetailView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            VStack(spacing: 14) {
                 stage
-                heightSummary
-                SectionHeader("设备参数")
-                paramsCard
-                SectionHeader("快捷高度")
-                quickCard
-                SectionHeader("精细调节")
-                fineCard
-                SectionHeader("自检与归位")
-                actionCard
-                SectionHeader("车型预设")
-                projectCard
-                SectionHeader("通信日志")
-                LogPanel(title: "指令记录", logs: store.logs)
+                mainControlCard
+                if !store.paramsLoaded {
+                    loadHintCard
+                }
             }
-            .padding(.horizontal, Theme.page)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
             .padding(.bottom, 40)
         }
         .background(Theme.groupedBackground)
-        .navigationTitle("石栏大灯调节")
+        .navigationTitle("石栏大灯")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("读取参数") { store.loadParams() }
-                    .font(Theme.footnote)
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    store.loadParams()
+                } label: {
+                    Image(systemName: "arrow.clockwise.circle")
+                }
+                .accessibilityLabel("读取参数")
+                Button {
+                    showDiagnostics = true
+                } label: {
+                    Image(systemName: "waveform.path.ecg")
+                }
+                .accessibilityLabel("诊断")
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("设置")
             }
         }
         .onAppear {
@@ -83,23 +93,8 @@ struct HeadlightDetailView: View {
         .task(id: model.selectedVehicle?.vinNo ?? "none") {
             await loadCarModel()
         }
-        .sheet(isPresented: $showLogs) {
-            NavigationStack {
-                ScrollView {
-                    Text(store.logs.joined(separator: "\n"))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Theme.page)
-                }
-                .background(Theme.groupedBackground)
-                .navigationTitle("指令记录")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) { Button("完成") { showLogs = false } }
-                }
-            }
-        }
+        .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
+        .sheet(isPresented: $showSettings) { settingsSheet }
     }
 
     private func loadCarModel() async {
@@ -119,7 +114,7 @@ struct HeadlightDetailView: View {
         }
     }
 
-    // MARK: - 3D 车模舞台
+    // MARK: - 3D 车模舞台（大灯灯光效果）
 
     private var stage: some View {
         ZStack {
@@ -211,83 +206,70 @@ struct HeadlightDetailView: View {
         .padding(.bottom, 10)
     }
 
-    // MARK: - 高度数字摘要
+    // MARK: - 高度主控（常驻的唯一操作卡）
 
-    private var heightSummary: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text("\(current)")
-                .font(.system(size: 44, weight: .semibold, design: .rounded))
-                .foregroundStyle(Theme.label)
-                .contentTransition(.numericText())
-            Text("%")
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .foregroundStyle(Theme.secondary)
-            Text("当前高度")
-                .font(Theme.caption)
-                .foregroundStyle(Theme.secondary)
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 5) {
-                    Rectangle()
-                        .fill(Theme.orange)
-                        .frame(width: 12, height: 2)
-                    Text("目标 \(target)%")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.orange)
+    private var mainControlCard: some View {
+        AppleCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 16) {
+                // 大数字摘要
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(scrubbing ? Int(scrubValue) : current)")
+                        .font(.system(size: 44, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Theme.label)
+                        .contentTransition(.numericText())
+                    Text("%")
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Theme.secondary)
+                    Text(scrubbing ? "拖动预览" : "当前高度")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Rectangle()
+                                .fill(Theme.orange)
+                                .frame(width: 12, height: 2)
+                            Text("目标 \(target)%")
+                                .font(Theme.footnote)
+                                .foregroundStyle(Theme.orange)
+                        }
+                        Text("限位 \(store.params.minPercent)–\(store.params.maxPercent)%")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.tertiary)
+                    }
                 }
-                Text("限位 \(store.params.minPercent)–\(store.params.maxPercent)%")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-            }
-        }
-        .padding(.top, 12)
-    }
 
-    // MARK: - 设备参数总览（对齐小程序读回的全部字段）
+                // 主滑杆：拖动 3D 光束实时预览，松手一次性下发
+                VStack(alignment: .leading, spacing: 6) {
+                    Slider(
+                        value: Binding(
+                            get: { displayPercent },
+                            set: { newValue in
+                                scrubValue = newValue
+                                store.targetPercent = newValue
+                            }
+                        ),
+                        in: 0...100,
+                        step: 1,
+                        onEditingChanged: { editing in
+                            if editing {
+                                scrubbing = true
+                            } else {
+                                scrubbing = false
+                                store.moveTo(percent: scrubValue)
+                            }
+                        }
+                    )
+                    .tint(accent)
+                    .disabled(!store.paramsLoaded || store.busy)
+                    Text("拖动时 3D 灯光实时预览，松手后大灯移动到该高度")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.tertiary)
+                }
 
-    private var paramsCard: some View {
-        let p = store.params
-        let projectName = MotorProject.all.first(where: { $0.index == p.project })?.name ?? "默认"
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            paramTile("当前车型", projectName, accent)
-            paramTile("绝对位置", "\(p.absolutePercent)%", Theme.label)
-            paramTile("目标位置", "\(p.targetPercent)%", Theme.orange)
-            paramTile("速度等级", "\(p.speedLevel) / 10", accent)
-            paramTile("限位范围", "\(p.minPercent)–\(p.maxPercent)%", Theme.label)
-            paramTile("工作模式", p.workingMode == 0 ? "扫描" : "归位", Theme.label)
-            paramTile("自检", p.selfMode ? "开启" : "关闭", p.selfMode ? Theme.orange : Theme.secondary)
-            paramTile("自检方向", p.selfModeDir == 0 ? "正向" : "反向", Theme.label)
-            paramTile("归位方向", p.homingDir == 0 ? "正向" : "反向", Theme.label)
-            paramTile("方向", p.reverse ? "反转" : "正向", p.reverse ? Theme.orange : Theme.label)
-            paramTile("参数状态", store.paramsLoaded ? "已读取" : "待读取", store.paramsLoaded ? Theme.green : Theme.secondary)
-            paramTile("电机状态", store.busy ? "运行中" : "空闲", store.busy ? Theme.orange : Theme.green)
-        }
-    }
+                Divider().opacity(0.6)
 
-    private func paramTile(_ title: String, _ value: String, _ tint: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(title)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(Theme.tertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(Theme.surfaceAlt)
-        )
-    }
-
-    // MARK: - 快捷高度
-
-    private var quickCard: some View {
-        AppleCard(padding: 14) {
-            VStack(spacing: 10) {
+                // 快捷档位
                 HStack(spacing: 8) {
                     ForEach(quickLevels, id: \.value) { level in
                         Button {
@@ -316,12 +298,6 @@ struct HeadlightDetailView: View {
                         .disabled(!store.paramsLoaded || store.busy)
                     }
                 }
-                Text(store.params.reverse
-                     ? "反转开启：快捷百分比按 100 − 目标换算到电机绝对位置"
-                     : "按目标百分比把大灯移动到对应高度")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-                    .multilineTextAlignment(.center)
             }
         }
     }
@@ -330,192 +306,272 @@ struct HeadlightDetailView: View {
         [(0, "最低"), (25, "较低"), (50, "居中"), (75, "较高"), (100, "最高")]
     }
 
-    // MARK: - 精细调节
-
-    private var fineCard: some View {
+    /// 参数未读取时的引导卡（替代原来的 12 格参数总览）
+    private var loadHintCard: some View {
         AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("目标高度")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                        Spacer()
-                        Text("\(Int(displayPercent))%")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(accent)
-                    }
-                    Slider(
-                        value: Binding(
-                            get: { displayPercent },
-                            set: { newValue in
-                                scrubValue = newValue
-                                store.targetPercent = newValue
-                            }
-                        ),
-                        in: 0...100,
-                        step: 1,
-                        onEditingChanged: { editing in
-                            if editing {
-                                scrubbing = true
-                            } else {
-                                scrubbing = false
-                                // 松手即移动：拖动过程只预览，结束时一次性下发，避免刷屏指令
-                                store.moveTo(percent: scrubValue)
-                            }
-                        }
-                    )
-                    .tint(accent)
-                    .disabled(!store.paramsLoaded || store.busy)
-                    Text("拖动时 3D 光束实时预览，松手后大灯移动到该高度")
+            HStack(spacing: 12) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Theme.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("尚未读取到电机参数")
+                        .font(Theme.headline)
+                        .foregroundStyle(Theme.label)
+                    Text("确认设备已通电后，点右上角刷新重试；读取成功后即可调节。")
                         .font(Theme.caption)
-                        .foregroundStyle(Theme.tertiary)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("运行速度")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                        Spacer()
-                        Text("\(Int(store.speedLevel)) / 10")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundStyle(accent)
-                    }
-                    Slider(value: $store.speedLevel, in: 0...10, step: 1)
-                        .tint(accent)
-                        .disabled(!store.paramsLoaded)
-                    Button { store.setSpeed(store.speedLevel) } label: {
-                        Text("应用速度")
-                            .font(Theme.footnote)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-                    .disabled(!store.paramsLoaded)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("限位范围（需维修密码 0241）")
-                        .font(Theme.footnote)
                         .foregroundStyle(Theme.secondary)
-                    HStack {
-                        Text("下限 \(Int(store.rangeMin))%")
-                        Spacer()
-                        Text("上限 \(Int(store.rangeMax))%")
-                    }
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-                    HStack(spacing: 12) {
-                        Slider(value: $store.rangeMin, in: 0...100, step: 1).tint(accent)
-                        Slider(value: $store.rangeMax, in: 0...100, step: 1).tint(accent)
-                    }
-                    Button {
-                        withServiceAuth { store.setRange() }
-                    } label: {
-                        Text("应用限位")
-                            .font(Theme.footnote)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 0)
             }
         }
     }
 
-    // MARK: - 自检与归位
+    // MARK: - 诊断弹窗（带复制）
 
-    private var actionCard: some View {
-        AppleCard(padding: 14) {
-            VStack(spacing: 14) {
-                Picker("工作模式", selection: Binding(
-                    get: { store.workingMode },
-                    set: { mode in store.setWorkingMode(mode) }
-                )) {
-                    Text("扫描").tag(0)
-                    Text("归位").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .disabled(!store.paramsLoaded)
-
-                Toggle("自检模式", isOn: Binding(
-                    get: { store.selfMode },
-                    set: { newValue in
-                        store.selfMode = newValue
-                        store.setSelfTest(enabled: newValue)
-                    }
-                ))
-                .disabled(!store.paramsLoaded)
-
-                Toggle("反转方向", isOn: Binding(
-                    get: { store.reverse },
-                    set: { newValue in
-                        withServiceAuth {
-                            store.reverse = newValue
-                            store.setReverse(newValue)
+    private var diagnosticsSheet: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    AppleCard(padding: 14) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            diagRow("连接状态", ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "未连接")
+                            diagRow("参数状态", store.paramsLoaded ? "已读取" : "待读取")
+                            diagRow("当前车型", projectName)
+                            diagRow("位置", "当前 \(current)% · 目标 \(target)%")
+                            diagRow("限位范围", "\(store.params.minPercent)–\(store.params.maxPercent)%")
+                            diagRow("方向", store.params.reverse ? "反转" : "正向")
+                            diagRow("电机状态", store.busy ? "运行中" : "空闲")
                         }
                     }
-                ))
-                .disabled(!store.paramsLoaded)
 
-                HStack(spacing: 10) {
+                    LogPanel(title: "指令记录", logs: store.logs)
+
                     Button {
-                        withServiceAuth { store.softZero() }
+                        copyToPasteboard(store.logs.joined(separator: "\n"), fallback: "暂无记录")
                     } label: {
-                        Text("软归零")
-                            .font(Theme.footnote)
+                        Label("复制指令记录", systemImage: "doc.on.doc")
+                            .font(.system(size: 14, weight: .semibold))
                             .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                            .foregroundStyle(Theme.brand)
+                            .background(Theme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
                     }
-                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-                    Button {
-                        withServiceAuth { store.hardZero() }
-                    } label: {
-                        Text("硬归零")
-                            .font(Theme.footnote)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                    .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
                 }
-                .disabled(!store.paramsLoaded || store.busy)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
             }
+            .background(Theme.groupedBackground)
+            .navigationTitle("诊断")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showDiagnostics = false } }
+            }
+            .overlay(alignment: .bottom) {
+                if copyToast {
+                    Text("已复制到剪贴板")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 9)
+                        .background(Theme.label.opacity(0.85), in: Capsule())
+                        .padding(.bottom, 24)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: copyToast)
         }
     }
 
-    // MARK: - 车型预设
+    private var projectName: String {
+        MotorProject.all.first(where: { $0.index == store.params.project })?.name ?? "默认"
+    }
 
-    private var projectCard: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(MotorProject.all) { project in
-                    let selected = store.selectedProject == project.index
-                    Button {
-                        withServiceAuth { store.applyProject(project) }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Text(project.name)
-                                .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                            Text("\(project.min)–\(project.max)%")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.tertiary)
+    private func diagRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(Theme.footnote)
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+            Text(value)
+                .font(Theme.footnote.weight(.medium))
+                .foregroundStyle(Theme.label)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    private func copyToPasteboard(_ text: String, fallback: String) {
+        UIPasteboard.general.string = text.isEmpty ? fallback : text
+        copyToast = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            copyToast = false
+        }
+    }
+
+    // MARK: - 设置弹窗
+
+    private var settingsSheet: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    // 运行速度
+                    AppleCard(padding: 14) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("运行速度")
+                                    .font(Theme.headline)
+                                    .foregroundStyle(Theme.label)
+                                Spacer()
+                                Text("\(Int(store.speedLevel)) / 10")
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(accent)
+                            }
+                            Slider(value: $store.speedLevel, in: 0...10, step: 1)
+                                .tint(accent)
+                                .disabled(!store.paramsLoaded)
+                            Button { store.setSpeed(store.speedLevel) } label: {
+                                Text("应用速度")
+                                    .font(Theme.footnote)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                            .disabled(!store.paramsLoaded)
                         }
-                        .foregroundStyle(selected ? accent : Theme.label)
-                        .frame(width: 84, height: 64)
-                        .background(
-                            selected ? accent.opacity(0.14) : Theme.surface,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(selected ? accent.opacity(0.55) : .clear, lineWidth: 1)
-                        )
                     }
-                    .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+
+                    // 车型预设
+                    AppleCard(padding: 14) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("车型预设")
+                                .font(Theme.headline)
+                                .foregroundStyle(Theme.label)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(MotorProject.all) { project in
+                                        let selected = store.selectedProject == project.index
+                                        Button {
+                                            withServiceAuth { store.applyProject(project) }
+                                        } label: {
+                                            VStack(spacing: 4) {
+                                                Text(project.name)
+                                                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                                                Text("\(project.min)–\(project.max)%")
+                                                    .font(.system(size: 10))
+                                                    .foregroundStyle(Theme.tertiary)
+                                            }
+                                            .foregroundStyle(selected ? accent : Theme.label)
+                                            .frame(width: 84, height: 56)
+                                            .background(
+                                                selected ? accent.opacity(0.14) : Theme.surfaceAlt,
+                                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .strokeBorder(selected ? accent.opacity(0.55) : .clear, lineWidth: 1)
+                                            )
+                                        }
+                                        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+
+                    // 限位范围（维修密码）
+                    AppleCard(padding: 14) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("限位范围（需维修密码 0241）")
+                                .font(Theme.headline)
+                                .foregroundStyle(Theme.label)
+                            HStack {
+                                Text("下限 \(Int(store.rangeMin))%")
+                                Spacer()
+                                Text("上限 \(Int(store.rangeMax))%")
+                            }
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.tertiary)
+                            HStack(spacing: 12) {
+                                Slider(value: $store.rangeMin, in: 0...100, step: 1).tint(accent)
+                                Slider(value: $store.rangeMax, in: 0...100, step: 1).tint(accent)
+                            }
+                            Button {
+                                withServiceAuth { store.setRange() }
+                            } label: {
+                                Text("应用限位")
+                                    .font(Theme.footnote)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                        }
+                    }
+
+                    // 模式与维护
+                    AppleCard(padding: 14) {
+                        VStack(spacing: 14) {
+                            Picker("工作模式", selection: Binding(
+                                get: { store.workingMode },
+                                set: { mode in store.setWorkingMode(mode) }
+                            )) {
+                                Text("扫描").tag(0)
+                                Text("归位").tag(1)
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(!store.paramsLoaded)
+
+                            Toggle("自检模式", isOn: Binding(
+                                get: { store.selfMode },
+                                set: { newValue in
+                                    store.selfMode = newValue
+                                    store.setSelfTest(enabled: newValue)
+                                }
+                            ))
+                            .disabled(!store.paramsLoaded)
+
+                            Toggle("反转方向", isOn: Binding(
+                                get: { store.reverse },
+                                set: { newValue in
+                                    withServiceAuth {
+                                        store.reverse = newValue
+                                        store.setReverse(newValue)
+                                    }
+                                }
+                            ))
+                            .disabled(!store.paramsLoaded)
+
+                            HStack(spacing: 10) {
+                                Button {
+                                    withServiceAuth { store.softZero() }
+                                } label: {
+                                    Text("软归零")
+                                        .font(Theme.footnote)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                                Button {
+                                    withServiceAuth { store.hardZero() }
+                                } label: {
+                                    Text("硬归零")
+                                        .font(Theme.footnote)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                            }
+                            .disabled(!store.paramsLoaded || store.busy)
+                        }
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
             }
-            .padding(.vertical, 2)
+            .background(Theme.groupedBackground)
+            .navigationTitle("大灯设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showSettings = false } }
+            }
         }
     }
 

@@ -132,7 +132,7 @@ final class CPKeepAlive {
 /// `_airplay._tcp` TXT 记录需要的 pi/pk：pi 为持久 UUID，
 /// pk 为 Ed25519 公钥（十六进制），私钥存 Keychain。
 enum CPAirPlayIdentity {
-    private static let keyService = "com.liruixin.jihedrive.airplay.identity.v1"
+    private static let keyService = "com.qianxu.jihedrive.airplay.identity.v1"
     private static let piKey = "cp.airplay.pi"
 
     static var identifier: String {

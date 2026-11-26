@@ -9,6 +9,17 @@ final class BMSStore: ObservableObject {
     @Published private(set) var lastAck = ""
     @Published private(set) var isPolling = false
     @Published private(set) var logs: [String] = []
+    /// 轮询间隔（秒），「我的 → 保护板设置 / 详情页设置」可改，持久化
+    @Published var pollInterval: TimeInterval = {
+        let stored = UserDefaults.standard.double(forKey: "device.bms.pollInterval")
+        return stored >= 0.5 ? stored : 1.0
+    }() {
+        didSet {
+            let clamped = min(max(pollInterval, 0.5), 10)
+            if clamped != pollInterval { pollInterval = clamped; return }
+            UserDefaults.standard.set(pollInterval, forKey: "device.bms.pollInterval")
+        }
+    }
     @Published var readLength: UInt8 = 0
     @Published var customFuncHex = "01"
     @Published var customAddressHex = "0000"
@@ -57,7 +68,7 @@ final class BMSStore: ObservableObject {
             }
             while !Task.isCancelled {
                 await self.pollOnce()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(self.pollInterval * 1_000_000_000))
             }
         }
     }

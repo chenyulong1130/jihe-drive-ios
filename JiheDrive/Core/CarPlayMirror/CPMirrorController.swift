@@ -79,6 +79,38 @@ final class CPMirrorController: ObservableObject {
     @Published private(set) var hasVideo = false
     /// 极核仪表协商出的投屏规格文案（如「极核 6.2 寸 1024×480 · H.264」）。
     @Published private(set) var zeehoSpecText = "极核 6.2 寸 1024×480 · H.264"
+    /// 用户选择的仪表车型档案 ID（"auto" = 自动适配）；「我的/投屏页」可改，持久化。
+    @Published private(set) var zeehoModelID: String =
+        UserDefaults.standard.string(forKey: "mirror.zeeho.model") ?? "auto"
+
+    /// 极核仪表车型选项（与 ZeehoMirrorLink.DisplayProfile 对齐）
+    static let zeehoModels: [(id: String, name: String)] = [
+        ("auto", "自动适配"),
+        ("zeeho62", "极核 6.2 寸"),
+        ("zeeho62New", "极核 6.2 寸(新批次)"),
+        ("zeehoSEPlus", "极核 SE+ 5/5.5 寸"),
+    ]
+
+    var zeehoModelName: String {
+        Self.zeehoModels.first { $0.id == zeehoModelID }?.name ?? "自动适配"
+    }
+
+    /// 选择仪表车型：立即写偏好并在链路存活时热切换
+    func setZeehoModel(_ id: String) {
+        UserDefaults.standard.set(id, forKey: "mirror.zeeho.model")
+        zeehoModelID = id
+        zeehoLink?.preferredProfile = Self.profile(for: id)
+        appendLog("仪表车型已选：\(Self.zeehoModels.first { $0.id == id }?.name ?? "自动适配")")
+    }
+
+    private static func profile(for id: String) -> ZeehoMirrorLink.DisplayProfile? {
+        switch id {
+        case "zeeho62": return .zeeho62
+        case "zeeho62New": return .zeeho62New
+        case "zeehoSEPlus": return .zeehoSEPlus
+        default: return nil
+        }
+    }
 
     func clearLogs() {
         DispatchQueue.main.async { [weak self] in self?.logs.removeAll() }
@@ -406,6 +438,7 @@ final class CPMirrorController: ObservableObject {
 
     private func installZeehoLink() {
         let link = ZeehoMirrorLink()
+        link.preferredProfile = Self.profile(for: zeehoModelID)
         link.onLog = { [weak self] in self?.appendLog($0) }
         link.onState = { [weak self] state in
             guard let self else { return }

@@ -84,11 +84,11 @@ struct CPAccessoryIdentity {
 
     // MARK: - 持久化
 
-    private static let service = "com.liruixin.jihedrive.cp.identity.v1"
+    private static let service = "com.qianxu.jihedrive.cp.identity.v1"
     private static let chainAccount = "certificate-chain"
     private static let leafAccount = "leaf-certificate"
     private static let keyAccount = "private-key-x963"
-    private static let accessGroup = "com.liruixin.jihedrive"
+    private static let accessGroup = "com.qianxu.jihedrive"
 
     static func load() throws -> CPAccessoryIdentity {
         if let (chain, leaf, keyData) = readKeychain() {

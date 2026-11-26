@@ -18,10 +18,22 @@ final class ZeehoMirrorLink {
         static let zeeho62New = DisplayProfile(width: 1024, height: 488, name: "极核 6.2 寸(新批次)")
         /// SE+ 5/5.5 寸实测上报 1600×770；其他 AE2/新屏按上报值自适应。
         static let zeehoSEPlus = DisplayProfile(width: 1600, height: 770, name: "极核 SE+ 5/5.5 寸")
+
+        /// 回给仪表/编码器的输出尺寸：新批次面板上报 488 高，
+        /// 但参考实现回 1024×480 才兼容，这里统一换算。
+        var outputSize: (width: Int, height: Int) {
+            if width == 1024 && height == 488 { return (1024, 480) }
+            return (width, height)
+        }
     }
 
     /// 已知极核屏幕档案；未匹配的尺寸按「合理范围」自适应接受。
     static let knownProfiles: [DisplayProfile] = [.zeeho62, .zeeho62New, .zeehoSEPlus]
+
+    /// 用户在投屏页选择的车型档案；nil = 自动适配。
+    /// 仪表上报与所选档案一致时直接按档案输出；上报的是未知尺寸时也按所选档案输出；
+    /// 上报命中的是另一个已知档案时以仪表上报为准（已实测的路径不冒进）。
+    var preferredProfile: DisplayProfile?
 
     /// 仪表上报的尺寸是否可接受（对齐参考实现 1.0.5 的档案边界）。
     /// AE2 档案：240–1920 × 240–1080；SE+ 档案：宽≥高、偶数尺寸（编码器 4:2:0 要求）。
@@ -55,7 +67,7 @@ final class ZeehoMirrorLink {
         static func current() -> PhoneProfile {
             let screen = UIScreen.main
             return PhoneProfile(
-                packageName: Bundle.main.bundleIdentifier ?? "com.liruixin.jihedrive",
+                packageName: Bundle.main.bundleIdentifier ?? "com.qianxu.jihedrive",
                 versionCode: Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0,
                 model: "iPhone",
                 systemVersion: UIDevice.current.systemVersion,
@@ -251,7 +263,7 @@ final class ZeehoMirrorLink {
                 command: 0x70000010,
                 payload: try ZeehoMirrorFrame.json([
                     "phoneType": "iOS",
-                    "packageName": Bundle.main.bundleIdentifier ?? "com.liruixin.jihedrive",
+                    "packageName": Bundle.main.bundleIdentifier ?? "com.qianxu.jihedrive",
                 ]))
             try awaitWrite(announcement, request)
             let reply = try ZeehoMirrorFrame.decodeControl { count in
@@ -405,7 +417,7 @@ final class ZeehoMirrorLink {
                 "phoneModel": "iPhone",
                 "phoneOsVersion": UIDevice.current.systemVersion,
                 "phoneOs": "iOS",
-                "package": Bundle.main.bundleIdentifier ?? "com.liruixin.jihedrive",
+                "package": Bundle.main.bundleIdentifier ?? "com.qianxu.jihedrive",
                 "versionCode": Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0,
                 "token": 0,
                 "pubkey": try ZeehoMirrorIdentity.publicKeyDER(identity).base64EncodedString(),
@@ -545,11 +557,20 @@ final class ZeehoMirrorLink {
             // 其他未知尺寸按上报值自适应，转码器输出随协商结果走。
             let output: (width: Int, height: Int)
             let name: String
-            if width == 1024 && height == 488 {
-                output = (1024, 480)
+            let reportedKnown = ZeehoMirrorLink.knownProfiles.first { $0.width == Int(width) && $0.height == Int(height) }
+            if let preferred = preferredProfile,
+               reportedKnown == nil || reportedKnown == preferred {
+                // 用户指定了车型：未知尺寸或与所选一致时按所选档案输出
+                output = preferred.outputSize
+                name = preferred.name
+                if reportedKnown == nil {
+                    log("按所选车型 \(preferred.name) 输出 \(output.width)×\(output.height)（仪表上报 \(width)×\(height)）")
+                }
+            } else if width == 1024 && height == 488 {
+                output = DisplayProfile.zeeho62New.outputSize
                 name = DisplayProfile.zeeho62New.name
-            } else if let known = ZeehoMirrorLink.knownProfiles.first(where: { $0.width == width && $0.height == height }) {
-                output = (known.width, known.height)
+            } else if let known = reportedKnown {
+                output = known.outputSize
                 name = known.name
             } else {
                 // AE2 档案同款：上报值取偶（编码器 4:2:0 要求）

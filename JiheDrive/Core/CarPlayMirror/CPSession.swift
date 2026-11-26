@@ -211,6 +211,9 @@ final class CPReceiver {
                 self.connections[id] = connection
                 let state = SessionState()
                 self.sessions[id] = state
+                if state.setup == nil || state.verify == nil {
+                    self.log("警告：配对签名密钥不可用，pair-setup/pair-verify 将失败")
+                }
                 if case .hostPort(let host, _) = connection.endpoint {
                     state.peerAddress = "\(host)"
                 }

@@ -183,7 +183,7 @@ struct WidgetSnap: Equatable {
 
 /// 主 App → 小组件快照（App Group UserDefaults + 共享文件双写）
 enum WidgetSnapshot {
-    static let suiteName = "group.com.liruixin.jihedrive"
+    static let suiteName = "group.com.qianxu.jihedrive"
     static let kind = "JiheDriveWidget"
     private static let fileName = "widget_snapshot.json"
     private static let imageName = "widget_vehicle.png"

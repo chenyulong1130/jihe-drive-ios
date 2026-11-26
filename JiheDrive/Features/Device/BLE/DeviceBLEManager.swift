@@ -88,25 +88,56 @@ final class DeviceBLEManager: NSObject, ObservableObject {
             } else {
                 preferred = bmsChannel.writeID
             }
-        case .shilanLight, .controller: preferred = "FFF2"
+        case .shilanLight: preferred = "FFF2"
         case .none: preferred = ""
         }
         if let exact = characteristics[preferred] { return exact }
-        // 彦阳兜底：FFE2 找不到时试 FFE1
-        if connectedDevice?.bmsBrand == .yanyang, let fallback = characteristics["FFE1"] {
-            return fallback
+        // 部分固件把 FFE1/FFE2 以 128 位形式暴露，iOS 不折叠成短码，
+        // 存 key 时已做归一化；这里再加同服务兜底，避免挑中 OTA/DFU 等无关通道
+        if let notify = activeNotify, let chars = notify.service?.characteristics {
+            let writable = chars.filter {
+                $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
+            }
+            if let sameService = writable.first(where: { Self.shortUUIDKey($0.uuid) == preferred }) { return sameService }
+            if let ffe2 = writable.first(where: { Self.shortUUIDKey($0.uuid) == "FFE2" }) { return ffe2 }
+            if let first = writable.first { return first }
         }
         return characteristics.values.first {
             $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
         }
     }
 
+    /// CBUUID 短码：0000XXXX-0000-1000-8000-00805F9B34FB 形式折叠回 XXXX。
+    /// 彦阳 YY-AE4S 实测以 128 位暴露 FFE0/FFE1，iOS 的 uuidString 不自动折叠，
+    /// 直接用原始串做 key 会查不到 "FFE2"，写帧就进了错误的特征。
+    static func shortUUIDKey(_ uuid: CBUUID) -> String {
+        let raw = uuid.uuidString.uppercased()
+        guard raw.count == 36 else { return raw }
+        let parts = raw.split(separator: "-")
+        if parts.count == 5,
+           parts[1] == "0000", parts[2] == "1000", parts[3] == "8000",
+           parts[4] == "00805F9B34FB", parts[0].hasPrefix("0000") {
+            return String(parts[0].suffix(4))
+        }
+        return raw
+    }
+
+    /// 特征属性速记（发现日志用）
+    private func propTags(_ c: CBCharacteristic) -> String {
+        var tags = ""
+        if c.properties.contains(.read) { tags += "读" }
+        if c.properties.contains(.write) { tags += tags.isEmpty ? "写" : " 写" }
+        if c.properties.contains(.writeWithoutResponse) { tags += " 写无应答" }
+        if c.properties.contains(.notify) { tags += " 通知" }
+        return tags.isEmpty ? "-" : tags
+    }
+
     // MARK: - 扫描
 
     /// - Parameters:
     ///   - kinds: 只保留这些类型；默认保护板 + 石栏，避免满屏无关 BLE。
-    ///   - timeout: 默认 12 秒（小程序 30 秒过长，过滤后命中更快）。
-    func startScan(kinds: Set<DeviceKind>? = nil, timeout: TimeInterval = 12) {
+    ///   - timeout: 默认 10 秒；设备广播间隔约 100ms~1s，正常 1~2 秒内就会出现在列表。
+    func startScan(kinds: Set<DeviceKind>? = nil, timeout: TimeInterval = 10) {
         guard central.state == .poweredOn else {
             lastError = DeviceBLEError.bluetoothOff.localizedDescription
             log("扫描失败：\(lastError ?? "")")
@@ -118,11 +149,10 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         scanKinds = kinds ?? Set(DeviceKind.primaryKinds)
         isScanning = true
         connectionState = .scanning
-        // 不按 UUID 限扫：部分石栏/ANT 广播不含服务 UUID；靠名称过滤即可
-        central.scanForPeripherals(
-            withServices: nil,
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
-        )
+        // 不按 UUID 限扫：部分石栏/ANT 广播不含服务 UUID；靠名称过滤即可。
+        // AllowDuplicates 必须关：开着的话同一设备的每个广播包都会触发回调，
+        // 主线程被发现回调+排序刷满，表现为「扫描很卡、列表抖动」。
+        central.scanForPeripherals(withServices: nil, options: nil)
         let labels = scanKinds.map(\.shortTitle).sorted().joined(separator: "/")
         log("开始扫描（仅 \(labels)，\(Int(timeout))s）")
         let work = DispatchWorkItem { [weak self] in
@@ -278,10 +308,20 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timer)
 
         peripheral?.setNotifyValue(true, for: notify)
-        log("订阅通知 \(notify.uuid.uuidString)")
+        log("订阅通知 \(Self.shortUUIDKey(notify.uuid))")
 
         let write = activeWriteCharacteristic()
-        log("写入特征 \(write?.uuid.uuidString ?? "未找到")")
+        if let write {
+            let mode = write.properties.contains(.writeWithoutResponse) ? "无应答" : "带应答"
+            log("写入特征 \(Self.shortUUIDKey(write.uuid))（\(mode)）")
+        } else {
+            log("写入特征 未找到")
+        }
+        let summary = characteristics.values
+            .sorted { Self.shortUUIDKey($0.uuid) < Self.shortUUIDKey($1.uuid) }
+            .map { "\(Self.shortUUIDKey($0.uuid))[\(propTags($0))]" }
+            .joined(separator: " ")
+        log("服务特征：\(summary)")
     }
 
     /// BMS 通道切换：先关旧通知，再订阅新特征
@@ -317,14 +357,17 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         guard let p = peripheral, p.state == .connected else { throw DeviceBLEError.notConnected }
         guard let characteristic = activeWriteCharacteristic() else { throw DeviceBLEError.characteristicMissing }
 
-        let type: CBCharacteristicWriteType = useResponse ? .withResponse : .withoutResponse
+        // 特征只支持带应答写入时必须用 .withResponse：
+        // 对仅有 .write 属性的特征发 .withoutResponse 会被 CoreBluetooth 静默丢弃（不报错、设备收不到）
+        let useResponseFinal = useResponse || !characteristic.properties.contains(.writeWithoutResponse)
+        let type: CBCharacteristicWriteType = useResponseFinal ? .withResponse : .withoutResponse
         let maxLength = max(20, min(512, p.maximumWriteValueLength(for: type) - 3))
         var offset = 0
 
         while offset < data.count {
             let length = min(maxLength, data.count - offset)
             let chunk = data.subdata(in: offset..<(offset + length))
-            if useResponse {
+            if useResponseFinal {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     writeContinuation = continuation
                     let timer = DispatchWorkItem { [weak self] in
@@ -492,7 +535,8 @@ extension DeviceBLEManager: CBPeripheralDelegate {
             return
         }
         for characteristic in service.characteristics ?? [] {
-            characteristics[characteristic.uuid.uuidString.uppercased()] = characteristic
+            // 归一化成短码 key：128 位暴露的 FFE1/FFE2 也能按短码命中
+            characteristics[Self.shortUUIDKey(characteristic.uuid)] = characteristic
         }
         pendingServices -= 1
         if pendingServices <= 0 { finishDiscovery() }
