@@ -19,6 +19,10 @@ struct HeadlightDetailView: View {
     @State private var showDiagnostics = false
     @State private var showSettings = false
     @State private var copyToast = false
+    /// 用户保存的记忆高度（本地持久化），替代固定快捷档位
+    @State private var memories: [Int] = HeadlightMemory.load()
+    @State private var showSavePrompt = false
+    @State private var pendingSavePercent: Int = 0
 
     private var current: Int { store.params.absolutePercent }
     private var target: Int { store.params.targetPercent }
@@ -95,6 +99,15 @@ struct HeadlightDetailView: View {
         }
         .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
         .sheet(isPresented: $showSettings) { settingsSheet }
+        .alert("保存记忆位置", isPresented: $showSavePrompt) {
+            Button("保存") {
+                memories = HeadlightMemory.add(pendingSavePercent)
+                memorySavedFeedback()
+            }
+            Button("不用", role: .cancel) {}
+        } message: {
+            Text("是否把 \(pendingSavePercent)% 保存为快捷记忆？保存后可在设备列表和本页一键到达。")
+        }
     }
 
     private func loadCarModel() async {
@@ -260,53 +273,96 @@ struct HeadlightDetailView: View {
                             } else {
                                 scrubbing = false
                                 store.moveTo(percent: scrubValue)
+                                // 调好一次后询问是否存为记忆（本地持久化，列表页/下次直接点按直达）
+                                pendingSavePercent = Int(scrubValue.rounded())
+                                showSavePrompt = true
                             }
                         }
                     )
                     .tint(accent)
                     .disabled(!store.paramsLoaded || store.busy)
-                    Text("拖动时 3D 灯光实时预览，松手后大灯移动到该高度")
+                    Text("拖动时 3D 灯光实时预览，松手后大灯移动到该高度，并可存为记忆")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.tertiary)
                 }
 
                 Divider().opacity(0.6)
 
-                // 快捷档位
-                HStack(spacing: 8) {
-                    ForEach(quickLevels, id: \.value) { level in
-                        Button {
-                            store.moveTo(percent: Double(level.value))
-                        } label: {
-                            VStack(spacing: 2) {
-                                Text("\(level.value)")
-                                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                                Text(level.label)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(Theme.secondary)
+                // 记忆位置：用户存的快捷高度，点按直达，长按删除
+                memorySection
+            }
+        }
+    }
+
+    /// 记忆位置区：替代固定快捷档位，内容来自用户保存（本地持久化）
+    private var memorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("记忆位置")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+                Spacer()
+                Button {
+                    memories = HeadlightMemory.add(Int(displayPercent.rounded()))
+                    copyToastFeedback()
+                } label: {
+                    Label("保存当前 \(Int(displayPercent.rounded()))%", systemImage: "plus.circle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                }
+                .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+                .disabled(!store.paramsLoaded)
+            }
+
+            if memories.isEmpty {
+                Text("还没有记忆。调好高度松手时按提示保存，或点右上角「保存当前」。")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(memories, id: \.self) { percent in
+                            Button {
+                                store.moveTo(percent: Double(percent))
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Text("\(percent)")
+                                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                    Text("记忆 %")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(Theme.secondary)
+                                }
+                                .foregroundStyle(percent == current ? accent : Theme.label)
+                                .frame(width: 64, height: 46)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(percent == current ? accent.opacity(0.14) : Theme.surfaceAlt)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(percent == current ? accent.opacity(0.55) : .clear, lineWidth: 1)
+                                )
                             }
-                            .foregroundStyle(Theme.label)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(level.value == current ? accent.opacity(0.14) : Theme.surfaceAlt)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(level.value == current ? accent.opacity(0.55) : .clear, lineWidth: 1)
-                            )
+                            .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+                            .disabled(!store.paramsLoaded || store.busy)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    memories = HeadlightMemory.remove(percent)
+                                } label: {
+                                    Label("删除记忆 \(percent)%", systemImage: "trash")
+                                }
+                            }
                         }
-                        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
-                        .disabled(!store.paramsLoaded || store.busy)
                     }
                 }
             }
         }
     }
 
-    private var quickLevels: [(value: Int, label: String)] {
-        [(0, "最低"), (25, "较低"), (50, "居中"), (75, "较高"), (100, "最高")]
+    private func memorySavedFeedback() {
+        copyToast = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copyToast = false }
     }
 
     /// 参数未读取时的引导卡（替代原来的 12 格参数总览）

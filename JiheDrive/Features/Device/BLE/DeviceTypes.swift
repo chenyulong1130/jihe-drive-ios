@@ -185,6 +185,37 @@ enum DeviceAuth {
     }
 }
 
+/// 石栏大灯记忆位置：本地持久化（用户调好高度后选择保存），设备列表与详情页共用
+enum HeadlightMemory {
+    static let key = "device.headlight.memory.percents"
+
+    static func load() -> [Int] {
+        UserDefaults.standard.array(forKey: key) as? [Int] ?? []
+    }
+
+    static func save(_ list: [Int]) {
+        UserDefaults.standard.set(list, forKey: key)
+    }
+
+    /// 添加记忆（去重排序），返回最新列表
+    static func add(_ percent: Int) -> [Int] {
+        var list = load()
+        if !list.contains(percent) {
+            list.append(min(100, max(0, percent)))
+            list.sort()
+        }
+        save(list)
+        return list
+    }
+
+    static func remove(_ percent: Int) -> [Int] {
+        var list = load()
+        list.removeAll { $0 == percent }
+        save(list)
+        return list
+    }
+}
+
 /// 维修密码（4 位）的一次性校验会话，控制器与灯具共用
 @MainActor
 final class DeviceSession: ObservableObject {

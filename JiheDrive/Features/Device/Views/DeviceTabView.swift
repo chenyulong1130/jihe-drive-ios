@@ -188,25 +188,37 @@ struct DeviceTabView: View {
     }
 
     /// 连接后的实时摘要格（对齐 ALong 参考样式：值大字 + 标签小字）
-    @ViewBuilder
     private func deviceSummary(_ kind: DeviceKind) -> some View {
         switch kind {
         case .bms:
             let rt = bmsStore.realtime
-            HStack(spacing: 8) {
-                summaryTile(value: "\(rt?.soc ?? 0)", unit: "%", label: "电量", color: Theme.green)
+            // SOC 帧未到达时（刚连接）不显示误导性的 0%，只显示已有数据
+            let soc = rt?.soc ?? 0
+            return AnyView(HStack(spacing: 8) {
+                if soc > 0 {
+                    summaryTile(value: "\(soc)", unit: "%", label: "电量", color: Theme.green)
+                }
                 summaryTile(value: fmt1(rt?.totalVoltage), unit: "V", label: "电压", color: Theme.brand)
                 summaryTile(value: fmt1(rt.map { abs($0.current) }), unit: "A", label: "电流", color: Color(hex: 0x0EA5E9))
                 summaryTile(value: "\(rt.map { abs($0.power) } ?? 0)", unit: "W", label: "功率", color: Theme.orange)
-            }
+            })
         case .shilanLight:
-            let p = headlightStore.params
-            HStack(spacing: 8) {
-                summaryTile(value: "\(p.absolutePercent)", unit: "%", label: "当前高度", color: Theme.teal)
-                summaryTile(value: "\(p.targetPercent)", unit: "%", label: "目标", color: Theme.orange)
-                summaryTile(value: "\(p.minPercent)–\(p.maxPercent)", unit: "%", label: "限位", color: Theme.label)
-                summaryTile(value: headlightStore.busy ? "运行" : "空闲", unit: "", label: "电机", color: headlightStore.busy ? Theme.orange : Theme.green)
+            // 已存记忆：显示记忆预设（点进详情可直达）；未存：显示当前角度
+            let saved = HeadlightMemory.load()
+            if saved.isEmpty {
+                let p = headlightStore.params
+                return AnyView(HStack(spacing: 8) {
+                    summaryTile(value: "\(p.absolutePercent)", unit: "%", label: "当前高度", color: Theme.teal)
+                    summaryTile(value: "\(p.targetPercent)", unit: "%", label: "目标", color: Theme.orange)
+                    summaryTile(value: "\(p.minPercent)–\(p.maxPercent)", unit: "%", label: "限位", color: Theme.label)
+                    summaryTile(value: headlightStore.busy ? "运行" : "空闲", unit: "", label: "电机", color: headlightStore.busy ? Theme.orange : Theme.green)
+                })
             }
+            return AnyView(HStack(spacing: 8) {
+                ForEach(Array(saved.prefix(4).enumerated()), id: \.offset) { index, percent in
+                    summaryTile(value: "\(percent)", unit: "%", label: "记忆 \(index + 1)", color: Theme.teal)
+                }
+            })
         }
     }
 
