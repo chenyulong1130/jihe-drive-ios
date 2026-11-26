@@ -1,45 +1,49 @@
 import SwiftUI
 
-/// BMS 专属页：电量环形仪表 + 电压电流主视觉 + 单体电压条 + 保护/告警位 + 通道诊断
+/// 保护板数据页：对齐 Flutter `bms_panel_page` ——
+/// 居中 SOC 环英雄区 + 容量/规格 + 指标网格 + 单体电压条。
 struct BMSDetailView: View {
     @EnvironmentObject private var ble: DeviceBLEManager
     @ObservedObject var store: BMSStore
     @State private var showFlags = false
     @State private var showLogs = false
+    @State private var peakDiff: Double = 0
 
-    private var realtime: BMSRealtime? { store.realtime }
+    private var rt: BMSRealtime? { store.realtime }
+    private var connected: Bool { ble.isConnected }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
+            VStack(spacing: 14) {
+                headerRow
                 heroCard
-                SectionHeader("实时数据")
+                if isCharging { chargeCard }
                 metricsGrid
-                SectionHeader("单体电压")
+                if peakDiff > 0 { peakDiffCard }
+                if hasAlerts { alertsCard }
                 cellsCard
-                SectionHeader("状态与保护")
-                statusCard
-                SectionHeader("通信通道")
-                channelCard
-                SectionHeader("自定义指令")
-                commandCard
+
+                if store.brand == .ant {
+                    SectionHeader("通信通道")
+                    channelCard
+                }
+
                 LogPanel(title: "通信日志", logs: store.logs)
-                    .padding(.top, 8)
-                HStack(spacing: 12) {
+                HStack {
                     Button { showLogs = true } label: {
-                        Label("原始报文", systemImage: "doc.text.magnifyingglass")
+                        Label("原始数据", systemImage: "doc.text.magnifyingglass")
                             .font(Theme.footnote)
                     }
                     .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
                     Spacer()
                 }
-                .padding(.top, 12)
             }
-            .padding(.horizontal, Theme.page)
-            .padding(.bottom, 40)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 48)
         }
         .background(Theme.groupedBackground)
-        .navigationTitle("BMS 保护板")
+        .navigationTitle("保护板")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -58,156 +62,320 @@ struct BMSDetailView: View {
             store.stopPolling()
             store.deactivate()
         }
+        .onChange(of: rt?.voltageDiff ?? 0) { _, diff in
+            if connected, diff > peakDiff { peakDiff = diff }
+        }
         .sheet(isPresented: $showFlags) { flagsSheet }
         .sheet(isPresented: $showLogs) { rawSheet }
     }
 
-    // MARK: - 主视觉
+    private var isCharging: Bool {
+        guard connected, let rt else { return false }
+        if store.brand == .yanyang { return rt.state == 1 }
+        return rt.state == 1
+    }
+
+    private var hasAlerts: Bool {
+        guard let rt else { return false }
+        if !rt.protectNames.isEmpty { return true }
+        let w = BMSProtocol.flagNames(rt.warningFlags, table: BMSProtocol.warningFlags)
+        let p = BMSProtocol.flagNames(rt.protectFlags, table: BMSProtocol.protectFlags)
+        return !w.isEmpty || !p.isEmpty
+    }
+
+    private var flowColor: Color {
+        guard connected, let rt else { return Theme.secondary }
+        switch rt.flowLabel {
+        case "充电中": return Theme.green
+        case "放电中": return Theme.orange
+        case "均衡中": return Theme.teal
+        default: return Theme.brand
+        }
+    }
+
+    // MARK: - Header
+
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ble.connectedDevice?.displayName ?? "保护板")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(1)
+                Text("\(store.brand.title)协议 · \(store.channelStatus)")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondary)
+            }
+            Spacer(minLength: 8)
+            StatusPill(
+                text: connected ? "已连接" : "未连接",
+                color: connected ? Theme.green : Theme.secondary,
+                pulsing: connected
+            )
+        }
+    }
+
+    // MARK: - Hero（居中 SOC 环 + 容量/规格）
 
     private var heroCard: some View {
-        let rt = realtime
-        return AppleCard(padding: 16) {
-            VStack(spacing: 16) {
-                HStack {
-                    Label("电池状态", systemImage: "battery.100.bolt")
-                        .font(Theme.headline)
-                        .foregroundStyle(.white)
-                    Spacer()
-                    StatusPill(
-                        text: store.channelStatus,
-                        color: store.channelStatus.contains("正常") || store.channelStatus.contains("可用") ? .green : .orange
+        let soc = connected ? Double(rt?.soc ?? 0) : 0
+        let remain = rt?.remainingCapacity ?? 0
+        let full = rt?.physicalCapacity ?? 0
+        let series = rt?.cellCount ?? 0
+        let type = rt?.typeLabel ?? "--"
+
+        return AppleCard(padding: 0) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .stroke(Theme.surfaceAlt, lineWidth: 14)
+                    Circle()
+                        .trim(from: 0, to: connected ? CGFloat(min(1, max(0, soc / 100))) : 0)
+                        .stroke(
+                            flowColor,
+                            style: StrokeStyle(lineWidth: 14, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeInOut(duration: 0.45), value: soc)
+
+                    VStack(spacing: 6) {
+                        if connected {
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text("\(Int(soc))")
+                                    .font(.system(size: 46, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Theme.label)
+                                Text("%")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundStyle(Theme.label)
+                            }
+                        } else {
+                            Text("--")
+                                .font(.system(size: 44, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.label)
+                        }
+                        Text(connected ? (rt?.flowLabel ?? "—") : "未连接")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                }
+                .frame(width: 180, height: 180)
+                .padding(.top, 22)
+                .padding(.bottom, 22)
+
+                Divider().opacity(0.6)
+
+                HStack(spacing: 0) {
+                    infoCell(
+                        "容量概览",
+                        connected && full > 0
+                            ? String(format: "%.1f / %.1f", remain, full)
+                            : "--",
+                        connected && full > 0 ? "Ah" : nil
+                    )
+                    Rectangle()
+                        .fill(Theme.separator.opacity(0.5))
+                        .frame(width: 1, height: 34)
+                    infoCell(
+                        "电池规格",
+                        connected ? (series > 0 ? "\(type) / \(series)" : type) : "--",
+                        connected && series > 0 ? "串" : nil
                     )
                 }
-
-                HStack(spacing: 22) {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.20), lineWidth: 13)
-                        Circle()
-                            .trim(from: 0, to: CGFloat(min(100, max(0, Double(rt?.soc ?? 0)))) / 100)
-                            .stroke(
-                                LinearGradient(colors: [.green, .yellow, .orange], startPoint: .bottom, endPoint: .top),
-                                style: StrokeStyle(lineWidth: 13, lineCap: .round)
-                            )
-                            .rotationEffect(.degrees(-90))
-                        VStack(spacing: 0) {
-                            Text("\(rt?.soc ?? 0)")
-                                .font(.system(size: 38, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                            Text("SOC %")
-                                .font(Theme.caption)
-                                .foregroundStyle(Color.white.opacity(0.75))
-                        }
-                    }
-                    .frame(width: 122, height: 122)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        heroLine("总电压", String(format: "%.2f", rt?.totalVoltage ?? 0), "V")
-                        heroLine("电流", String(format: "%.1f", rt?.current ?? 0), "A")
-                        heroLine("功率", "\(rt?.power ?? 0)", "W")
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                Divider().background(Color.white.opacity(0.2))
-
-                HStack {
-                    Text(BMSProtocol.batteryStateText(rt?.state ?? 0))
-                        .font(Theme.callout)
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Text("权限 \(rt?.auth ?? 0) 级 · SOH \(rt?.soh ?? 0)%")
-                        .font(Theme.caption)
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
+                .padding(.vertical, 14)
+                .padding(.horizontal, 8)
             }
         }
-        .background(
-            LinearGradient(
-                colors: [Color(hex: 0x1D2B44), Color(hex: 0x101A2C)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 
-    private func heroLine(_ title: String, _ value: String, _ unit: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title)
-                .font(Theme.caption)
-                .foregroundStyle(Color.white.opacity(0.65))
+    private func infoCell(_ label: String, _ value: String, _ unit: String?) -> some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text(unit)
-                    .font(Theme.caption)
-                    .foregroundStyle(Color.white.opacity(0.7))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if let unit {
+                    Text(unit)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.tertiary)
+                }
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 指标
+    // MARK: - 充电卡
 
-    private var metricsGrid: some View {
-        let rt = realtime
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-            MetricTile(title: "最高单体", value: String(format: "%.3f", rt?.highestCell ?? 0), unit: "V", accent: .orange)
-            MetricTile(title: "最低单体", value: String(format: "%.3f", rt?.lowestCell ?? 0), unit: "V", accent: .teal)
-            MetricTile(title: "压差", value: String(format: "%.3f", rt?.voltageDiff ?? 0), unit: "V", accent: (rt?.voltageDiff ?? 0) > 0.02 ? .red : .green)
-            MetricTile(title: "平均单体", value: String(format: "%.3f", rt?.averageCell ?? 0), unit: "V")
-            MetricTile(title: "MOS 温度", value: "\(rt?.mosTemperature ?? 0)", unit: "℃")
-            MetricTile(title: "剩余容量", value: String(format: "%.2f", rt?.remainingCapacity ?? 0), unit: "Ah", accent: .indigo)
-            MetricTile(title: "物理容量", value: String(format: "%.2f", rt?.physicalCapacity ?? 0), unit: "Ah")
-            MetricTile(title: "充电剩余", value: "\(rt?.chargeRemainingMinutes ?? 0)", unit: "min")
-        }
-    }
+    private var chargeCard: some View {
+        let power = abs(rt?.power ?? 0)
+        let remain = rt?.remainingCapacity ?? 0
+        let full = rt?.physicalCapacity ?? 0
+        let current = abs(rt?.current ?? 0)
+        let est: String = {
+            guard full > remain, current > 0.1 else { return "--" }
+            let hours = (full - remain) / current
+            if hours < 1 { return "\(Int(hours * 60)) 分钟" }
+            return String(format: "%.1f 小时", hours)
+        }()
 
-    private var cellsCard: some View {
-        let rt = realtime
         return AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("\(rt?.cellCount ?? 0) 串")
+            HStack(spacing: 12) {
+                Image(systemName: "bolt.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Theme.green)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("充电中")
                         .font(Theme.headline)
                         .foregroundStyle(Theme.label)
-                    Spacer()
-                    Text("温度 \(rt?.temperatures.map { String($0) }.joined(separator: "/") ?? "—") ℃")
+                    Text("预计充满 \(est) · \(power) W")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
                 }
-                if let rt, !rt.cellVoltages.isEmpty {
-                    ForEach(rt.cellVoltages.indices, id: \.self) { index in
-                        let voltage = rt.cellVoltages[index]
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - 指标网格
+
+    private var metricsGrid: some View {
+        let r = rt
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            MetricTile(title: "总电压", value: fmt(r?.totalVoltage, "%.2f"), unit: "V", accent: Theme.brand)
+            MetricTile(
+                title: "实时电流",
+                value: connected
+                    ? String(format: "%.1f", abs(r?.current ?? 0))
+                    : "--",
+                unit: "A",
+                accent: flowColor
+            )
+            MetricTile(title: "实时功率", value: connected ? "\(abs(r?.power ?? 0))" : "--", unit: "W", accent: Color(hex: 0x0EA5E9))
+            MetricTile(title: "最高电压", value: fmt(r?.highestCell, "%.3f"), unit: "V", accent: Theme.red)
+            MetricTile(title: "最低电压", value: fmt(r?.lowestCell, "%.3f"), unit: "V", accent: Theme.teal)
+            MetricTile(
+                title: "实时压差",
+                value: fmt(r?.voltageDiff, "%.3f"),
+                unit: "V",
+                accent: (r?.voltageDiff ?? 0) > 0.05 ? Theme.red : Theme.orange
+            )
+            MetricTile(title: "MOS 温度", value: connected ? "\(r?.mosTemperature ?? 0)" : "--", unit: "℃", accent: Theme.orange)
+            MetricTile(
+                title: "电芯温度",
+                value: connected
+                    ? (r?.temperatures.first.map(String.init) ?? "--")
+                    : "--",
+                unit: "℃",
+                accent: Color(hex: 0xF59E0B)
+            )
+            MetricTile(
+                title: "循环次数",
+                value: connected
+                    ? "\(r?.cycleCount ?? Int(r?.cycleCapacity ?? 0))"
+                    : "--",
+                unit: "次",
+                accent: Theme.green
+            )
+        }
+    }
+
+    private func fmt(_ value: Double?, _ format: String) -> String {
+        guard connected, let value else { return "--" }
+        return String(format: format, value)
+    }
+
+    private var peakDiffCard: some View {
+        AppleCard(padding: 14) {
+            HStack {
+                Text("峰值压差")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+                Spacer()
+                Text(String(format: "%.3f V", peakDiff))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.orange)
+            }
+        }
+    }
+
+    // MARK: - 告警
+
+    private var alertsCard: some View {
+        let names: [String] = {
+            guard let rt else { return [] }
+            if !rt.protectNames.isEmpty { return rt.protectNames }
+            return BMSProtocol.flagNames(rt.warningFlags, table: BMSProtocol.warningFlags)
+                + BMSProtocol.flagNames(rt.protectFlags, table: BMSProtocol.protectFlags)
+        }()
+        return AppleCard(padding: 14, onTap: { showFlags = true }) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.orange)
+                Text(names.isEmpty ? "状态正常" : names.prefix(2).joined(separator: "、"))
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(names.count)")
+                    .font(Theme.caption.weight(.semibold))
+                    .foregroundStyle(Theme.orange)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+    }
+
+    // MARK: - 单体
+
+    private var cellsCard: some View {
+        let cells = rt?.cellVoltages ?? []
+        let hi = cells.max() ?? 0
+        let lo = cells.min() ?? 0
+        return AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("单体电压")
+                        .font(Theme.headline)
+                        .foregroundStyle(Theme.label)
+                    Spacer()
+                    Text(connected ? "\(cells.count) 串" : "—")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
+                }
+
+                if connected, !cells.isEmpty {
+                    ForEach(cells.indices, id: \.self) { index in
+                        let v = cells[index]
+                        let isHi = abs(v - hi) < 0.0005 && hi > 0
+                        let isLo = abs(v - lo) < 0.0005 && lo > 0
                         HStack(spacing: 8) {
-                            Text("\(index + 1)")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            Text(String(format: "%02d", index + 1))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Theme.tertiary)
-                                .frame(width: 16, alignment: .trailing)
+                                .frame(width: 22, alignment: .trailing)
                             GeometryReader { geo in
-                                let ratio = CGFloat(min(1, max(0, (voltage - 2.5) / 1.7)))
+                                let ratio = CGFloat(min(1, max(0, (v - 2.5) / 1.7)))
                                 ZStack(alignment: .leading) {
                                     Capsule().fill(Theme.surfaceAlt)
                                     Capsule()
-                                        .fill(ratio > 0.85 ? Theme.green : ratio < 0.35 ? Theme.red : Theme.brand)
+                                        .fill(isHi ? Theme.red : isLo ? Theme.teal : Theme.brand)
                                         .frame(width: geo.size.width * ratio)
-                                    if rt.cellBalance.indices.contains(index), rt.cellBalance[index] > 0 {
-                                        Capsule()
-                                            .strokeBorder(Theme.orange, lineWidth: 1.5)
-                                    }
                                 }
                             }
-                            .frame(height: 9)
-                            Text(String(format: "%.3f", voltage))
+                            .frame(height: 8)
+                            Text(String(format: "%.3f", v))
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.secondary)
-                                .frame(width: 52, alignment: .trailing)
+                                .foregroundStyle(isHi ? Theme.red : isLo ? Theme.teal : Theme.secondary)
+                                .frame(width: 48, alignment: .trailing)
                         }
                     }
                 } else {
-                    Text("等待实时数据…")
+                    Text(connected ? "等待单体数据…" : "连接后显示单体电压")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.tertiary)
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -216,43 +384,7 @@ struct BMSDetailView: View {
         }
     }
 
-    private var statusCard: some View {
-        let rt = realtime
-        let warnings = BMSProtocol.flagNames(rt?.warningFlags ?? 0, table: BMSProtocol.warningFlags)
-        let protections = BMSProtocol.flagNames(rt?.protectFlags ?? 0, table: BMSProtocol.protectFlags)
-        return AppleCard(padding: 14) {
-            VStack(spacing: 12) {
-                HStack {
-                    Text("告警 \(warnings.count)")
-                        .font(Theme.footnote)
-                        .foregroundStyle(warnings.isEmpty ? Theme.green : Theme.red)
-                    Spacer()
-                    Text("保护 \(protections.count)")
-                        .font(Theme.footnote)
-                        .foregroundStyle(protections.isEmpty ? Theme.green : Theme.orange)
-                }
-                Button { showFlags = true } label: {
-                    HStack {
-                        Text(warnings.isEmpty ? "无活动告警" : warnings.prefix(2).joined(separator: "、"))
-                            .lineLimit(1)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-                }
-                HStack(spacing: 16) {
-                    Label("放电 MOS \(rt?.dischargeMOS ?? 0)", systemImage: "bolt")
-                    Label("充电 MOS \(rt?.chargeMOS ?? 0)", systemImage: "plug")
-                }
-                .font(Theme.caption)
-                .foregroundStyle(Theme.secondary)
-                Text(BMSProtocol.batteryTypeText(rt?.batteryType ?? 0))
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-            }
-        }
-    }
+    // MARK: - 蚂蚁通道
 
     private var channelCard: some View {
         AppleCard(padding: 14) {
@@ -272,7 +404,8 @@ struct BMSDetailView: View {
                 HStack {
                     StatusPill(
                         text: store.channelStatus,
-                        color: store.channelStatus.contains("正常") || store.channelStatus.contains("可用") ? .green : .orange
+                        color: store.channelStatus.contains("正常") || store.channelStatus.contains("可用")
+                            ? .green : .orange
                     )
                     Spacer()
                     Button {
@@ -283,57 +416,40 @@ struct BMSDetailView: View {
                     }
                     .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
                 }
-                Text("依次探测 FFE1 / FFF3-FFF4 / FFF5-FFF6，命中实时帧后自动锁定通道。")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
             }
         }
     }
 
-    private var commandCard: some View {
-        AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("功能码 / 地址 / 数据均为十六进制，响应码 0x61 会显示在日志中。")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-                HStack(spacing: 8) {
-                    TextField("功能码", text: $store.customFuncHex)
-                    TextField("地址", text: $store.customAddressHex)
-                    TextField("数据", text: $store.customDataHex)
-                }
-                .font(.system(size: 13, design: .monospaced))
-                .textFieldStyle(.roundedBorder)
-                HStack {
-                    Text("应答：\(store.lastAck.isEmpty ? "—" : store.lastAck)")
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                    Spacer()
-                    Button {
-                        Task { await store.sendCustomCommand() }
-                    } label: {
-                        Label("发送", systemImage: "paperplane")
-                            .font(Theme.footnote)
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-                }
-            }
-        }
-    }
+    // MARK: - Sheets
 
     private var flagsSheet: some View {
-        let rt = realtime
-        let warnings = BMSProtocol.flagNames(rt?.warningFlags ?? 0, table: BMSProtocol.warningFlags)
-        let protections = BMSProtocol.flagNames(rt?.protectFlags ?? 0, table: BMSProtocol.protectFlags)
+        let names: [String] = {
+            guard let rt else { return [] }
+            if !rt.protectNames.isEmpty { return rt.protectNames }
+            return BMSProtocol.flagNames(rt.warningFlags, table: BMSProtocol.warningFlags)
+                + BMSProtocol.flagNames(rt.protectFlags, table: BMSProtocol.protectFlags)
+        }()
         return NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    SectionHeader("告警位")
-                    flagList(warnings, empty: "无活动告警", color: Theme.red)
-                    SectionHeader("保护位")
-                    flagList(protections, empty: "无活动保护", color: Theme.orange)
+                VStack(alignment: .leading, spacing: 12) {
+                    if names.isEmpty {
+                        Text("无活动告警 / 保护")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.green)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130))], spacing: 8) {
+                            ForEach(names, id: \.self) { item in
+                                Text(item)
+                                    .font(Theme.caption)
+                                    .foregroundStyle(Theme.orange)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Theme.orange.opacity(0.12), in: Capsule())
+                            }
+                        }
+                    }
                 }
-                .padding(.horizontal, Theme.page)
-                .padding(.bottom, 30)
+                .padding(Theme.page)
             }
             .background(Theme.groupedBackground)
             .navigationTitle("告警与保护")
@@ -346,38 +462,17 @@ struct BMSDetailView: View {
         }
     }
 
-    private func flagList(_ items: [String], empty: String, color: Color) -> some View {
-        Group {
-            if items.isEmpty {
-                Text(empty)
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.green)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130))], spacing: 8) {
-                    ForEach(items, id: \.self) { item in
-                        Text(item)
-                            .font(Theme.caption)
-                            .foregroundStyle(color)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(color.opacity(0.12), in: Capsule())
-                    }
-                }
-            }
-        }
-    }
-
     private var rawSheet: some View {
         NavigationStack {
             ScrollView {
-                Text(realtime?.rawHex ?? "暂无数据")
+                Text(rt?.rawHex.isEmpty == false ? (rt?.rawHex ?? "") : "暂无数据")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Theme.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(Theme.page)
             }
             .background(Theme.groupedBackground)
-            .navigationTitle("0x11 原始 DATA")
+            .navigationTitle("原始数据")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

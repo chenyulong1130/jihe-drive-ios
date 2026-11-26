@@ -1,11 +1,8 @@
 import SwiftUI
 import WebKit
 
-/// CarPlay 页（参考 CarWithin 的接收端视觉与交互）：
-/// 1) 连接卡：彩色图标 + 标题 + 状态胶囊 + 启动步骤进度 + 启动按钮；
-/// 2) 出画后才显示内嵌视频容器、操作行（全屏/画中画/预览窗）与胶囊按键条；
-/// 3) 全屏 = 纯黑容器 + 左上角 5 秒淡出的圆形退出按钮，触摸画面即恢复；
-/// 4) Wi-Fi 与极核仪表输出收进连接设置卡，自检与日志收成一行摘要。
+/// CarPlay 页：按真实失败日志做成「先就绪再启动」引导。
+/// 日志常见卡点：①本地网络 NoAuth ②未填 Wi-Fi 预设 ③0x4301 后回连不到 7000。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
@@ -22,30 +19,35 @@ struct MirrorView: View {
     @State private var wifiSaved = false
     @State private var showPreflight = false
     @State private var showLogs = false
-    /// 启动超过 5 秒仍未出画面时显示的排障提示
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
-    /// 全屏退出按钮可见性（5 秒无操作淡出，触摸恢复）
     @State private var exitButtonVisible = true
     @State private var exitFadeTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 14) {
-                LargeTitle("CarPlay")
-                    .staggerIn(0)
-
-                carPlayHeroCard.staggerIn(1)
+                LargeTitle(
+                    "CarPlay",
+                    subtitle: controller.hasVideo
+                        ? "画面已就绪，可触控操作"
+                        : "先完成本机唤起，再投屏到仪表"
+                )
+                .staggerIn(0)
 
                 if controller.hasVideo {
-                    videoSection.staggerIn(2)
+                    videoSection.staggerIn(1)
                 }
 
-                SectionHeader("连接设置")
-                settingsCard.staggerIn(3)
+                readinessCard.staggerIn(controller.hasVideo ? 2 : 1)
+                wifiSetupCard.staggerIn(3)
+                launchCard.staggerIn(4)
 
-                preflightRow.staggerIn(4)
-                logSection.staggerIn(5)
+                SectionHeader("极核仪表投屏（可选）")
+                zeehoCard.staggerIn(5)
+
+                preflightRow.staggerIn(6)
+                logSection.staggerIn(7)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -55,6 +57,7 @@ struct MirrorView: View {
         .onAppear {
             store.detectSSID()
             store.recheckIdentity()
+            CPLocalNetworkGate.requestAuthorizationIfNeeded()
             if checks.isEmpty {
                 Task { await runChecks() }
             }
@@ -81,47 +84,221 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 连接卡（CarWithin 的 connection card）
+    // MARK: - 就绪清单（对照日志卡点）
 
-    private var carPlayHeroCard: some View {
-        AppleCard(padding: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "car.2.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("本机 CarPlay")
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                        Text("无需外接盒子，直接在这台 iPhone 上使用 CarPlay，画面可触控")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+    private var lanCheck: CPMirrorDiagnostics.CheckResult? {
+        checks.first { $0.name == "本地网络" }
+    }
+    private var wifiPresetOK: Bool {
+        !store.resolvedSSID.isEmpty && (
+            store.wifiPassword.isEmpty || (8...63).contains(store.wifiPassword.utf8.count)
+        )
+    }
+    private var localIPOK: Bool { CPMirrorDiagnostics.localIPv4() != nil }
+    private var lanOK: Bool { lanCheck?.passed != false || (lanCheck == nil && localIPOK) }
+
+    private var readinessCard: some View {
+        AppleCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("启动前检查")
+                        .font(Theme.headline)
+                        .foregroundStyle(Theme.label)
+                    Spacer()
+                    Button {
+                        Task { await runChecks() }
+                    } label: {
+                        if runningChecks {
+                            ProgressView()
+                        } else {
+                            Text("刷新")
+                                .font(Theme.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.brand)
+                        }
                     }
-                    Spacer(minLength: 0)
+                    .disabled(runningChecks)
                 }
 
-                StatusPill(text: controller.phase.label,
-                           color: phaseColor,
-                           pulsing: awaitingPicture)
+                checklistRow(
+                    done: store.identityReady,
+                    title: "1. 配件身份",
+                    detail: store.identityReady
+                        ? "证书与私钥已就绪"
+                        : (store.identityHint ?? "缺少身份三件套")
+                )
+                checklistRow(
+                    done: lanOK,
+                    title: "2. 本地网络权限",
+                    detail: lanOK
+                        ? (lanCheck?.detail ?? "TCP 监听可用")
+                        : "日志 -65555 NoAuth：到 设置 → 极核智行 → 本地网络 打开"
+                )
+                checklistRow(
+                    done: wifiPresetOK && localIPOK,
+                    title: "3. Wi-Fi 预设 + 本机地址",
+                    detail: wifiPresetOK
+                        ? (localIPOK
+                           ? "SSID「\(store.resolvedSSID)」· \(CPMirrorDiagnostics.localIPv4() ?? "")"
+                           : "已填 SSID，但还没拿到 Wi-Fi IP——请先连上热点")
+                        : "必须填写下方 Wi-Fi 名称（密码开放网可留空）——否则 0x4301 发不出去"
+                )
 
-                PhaseStepTracker(steps: Self.phaseSteps,
-                                 completed: phaseProgress.completed,
-                                 active: phaseProgress.active,
-                                 failed: phaseProgress.failed,
-                                 accent: phaseColor)
+                if !store.identityReady {
+                    Text(CPAccessoryIdentity.diagnosticSummary())
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.tertiary)
+                }
+            }
+        }
+    }
 
-                Text(connectionGuide)
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
+    private func checklistRow(done: Bool, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(done ? Theme.green : Theme.tertiary)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(Theme.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.label)
+                Text(detail)
+                    .font(Theme.caption)
+                    .foregroundStyle(done ? Theme.secondary : Theme.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Wi-Fi 设置（日志：「未配置 Wi-Fi 名称与密码」）
+
+    private var wifiSetupCard: some View {
+        AppleCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "wifi")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Wi-Fi 预设（StartSession 必填）")
+                            .font(Theme.headline)
+                            .foregroundStyle(Theme.label)
+                        Text(store.currentSSID.map { "已检测：\($0)" }
+                              ?? (store.locationDenied
+                                  ? "定位被拒，请手填名称"
+                                  : "可手填；须与手机当前网络一致"))
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if wifiSaved {
+                        Label("已保存", systemImage: "checkmark.circle.fill")
+                            .font(Theme.caption.weight(.semibold))
+                            .foregroundStyle(Theme.green)
+                    }
+                    Button { store.detectSSID() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Theme.surfaceAlt))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                }
+
+                TextField("Wi-Fi 名称（SSID）", text: $store.wifiSSID)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onChange(of: store.wifiSSID) { _, _ in scheduleWifiSave() }
+
+                SecureField("Wi-Fi 密码（开放网络留空，否则 8–63 位）", text: $store.wifiPassword)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onChange(of: store.wifiPassword) { _, _ in scheduleWifiSave() }
+
+                Button {
+                    store.commitWiFi()
+                    store.joinDashboardHotspot(ssid: store.resolvedSSID,
+                                               password: store.wifiPassword)
+                } label: {
+                    Label("一键加入此 Wi-Fi", systemImage: "antenna.radiowaves.left.and.right")
+                        .font(Theme.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.brand)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Theme.brand.opacity(0.1)))
+                }
+                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+
+                if let status = store.hotspotStatus {
+                    Text(status)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - 启动本机 CarPlay
+
+    private var launchCard: some View {
+        AppleCard(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [phaseColor.opacity(0.35), phaseColor.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        Image(systemName: "carplay")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(phaseColor)
+                    }
+                    .frame(width: 52, height: 52)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("4. 启动本机 CarPlay")
+                            .font(Theme.headline)
+                            .foregroundStyle(Theme.label)
+                        Text(controller.hasVideo
+                             ? "本地预览与触控可用"
+                             : "先出本机画面，再考虑投仪表")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    StatusPill(text: controller.phase.label,
+                               color: phaseColor,
+                               pulsing: awaitingPicture)
+                }
+
+                if !controller.hasVideo {
+                    PhaseStepTracker(steps: Self.phaseSteps,
+                                     completed: phaseProgress.completed,
+                                     active: phaseProgress.active,
+                                     failed: phaseProgress.failed,
+                                     accent: phaseColor)
+
+                    Text(connectionGuide)
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if showStartupHint {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "info.circle")
                             .foregroundStyle(Theme.orange)
-                        Text("连接较久时，可尝试在系统设置中关闭再打开 Wi-Fi。当前仍在继续连接。")
+                        Text("已发 0x4301 但仍无控制连接时：核对 Wi-Fi 名/密码是否与当前网络完全一致，并确认本地网络已授权。")
                             .font(Theme.caption)
                             .foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -143,6 +320,75 @@ struct MirrorView: View {
                 }
 
                 startButton
+            }
+        }
+    }
+
+    // MARK: - 仪表投屏（本机出画后再开）
+
+    private var zeehoCard: some View {
+        AppleCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("同时投放到极核仪表", isOn: $store.castToZeeho)
+                    .font(Theme.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.label)
+                    .tint(Theme.brand)
+                    .onChange(of: store.castToZeeho) { _, value in
+                        store.commitCastToZeeho()
+                        controller.setCastToZeeho(value)
+                    }
+
+                if !store.castToZeeho {
+                    Text("关掉时只跑本机 CarPlay。出画后再打开此项。")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
+                }
+
+                if store.castToZeeho {
+                    HStack(spacing: 10) {
+                        Image(systemName: "gauge.with.needle")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 24)
+                        TextField("仪表 IP，如 192.168.0.1", text: $store.dashboardIP)
+                            .textFieldStyle(.roundedBorder)
+                            .keyboardType(.decimalPad)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onChange(of: store.dashboardIP) { _, _ in store.commitDashboardIP() }
+                        Menu {
+                            Picker("裁剪", selection: $store.cropMode) {
+                                Text("居中裁剪").tag("crop")
+                                Text("完整画面").tag("fit")
+                            }
+                        } label: {
+                            Image(systemName: "crop.rotate")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.secondary)
+                                .frame(width: 36, height: 36)
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Theme.surfaceAlt))
+                        }
+                        .onChange(of: store.cropMode) { _, value in
+                            store.commitCropMode()
+                            controller.setCropMode(value)
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(controller.zeehoSpecText)
+                                .font(Theme.caption.weight(.semibold))
+                                .foregroundStyle(Theme.label)
+                            Text("投屏规格随仪表协商自动适配")
+                                .font(Theme.caption)
+                                .foregroundStyle(Theme.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        StatusPill(text: controller.zeehoStatus,
+                                   color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
+                    }
+                }
             }
         }
     }
@@ -195,10 +441,14 @@ struct MirrorView: View {
         if case .identityMissing = controller.phase {
             return "需要 CarPlay 配件身份，请把身份三件套放入「文件」App 的 JiheDrive/IdentityImport/ 目录。"
         }
-        if let ssid = store.currentSSID {
-            return "当前 Wi-Fi：\(ssid)。若已保存同名网络密码，直接点下方按钮即可。"
+        if case .failed(let reason) = controller.phase {
+            return reason
         }
-        return "先在系统设置连接 Wi-Fi，再回到这里启动。"
+        let ssid = store.resolvedSSID
+        if !ssid.isEmpty {
+            return "将使用 Wi-Fi「\(ssid)」发起会话。先点启动唤起本机 CarPlay，画面出来后再开「投放到极核仪表」。"
+        }
+        return "请先连上 Wi-Fi/仪表热点，并填写下方 Wi-Fi 名称与密码，否则 iPhone 无法回连控制端口。"
     }
 
     /// 启动阶段计时：5 秒还没出画面才显示提示；出画/停止后清除
@@ -250,8 +500,15 @@ struct MirrorView: View {
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
     }
 
-    /// 启动前预检：硬性失败（身份缺失/无本机地址）不启动，自动弹出自检详情展示原因。
+    /// 启动前预检：硬性失败（身份缺失/无本机地址/无 Wi-Fi 预设）不启动，弹出自检详情。
     private func startCarPlayAfterPreflight() async {
+        // 先写入 Wi-Fi 预设，再预检——否则 StartSession 会因「未配置」直接失败
+        let saved = await MainActor.run { store.commitWiFi() }
+        if !saved {
+            await MainActor.run { showPreflight = true }
+            _ = await runChecks()
+            return
+        }
         let results = await runChecks()
         let hardFailures = results.filter { !$0.passed && !$0.warning }
         guard hardFailures.isEmpty else {
@@ -259,10 +516,13 @@ struct MirrorView: View {
             await MainActor.run { showPreflight = true }
             return
         }
-        store.commitWiFi()
         store.commitDashboardIP()
         store.commitCastToZeeho()
         let localIP = CPMirrorDiagnostics.localIPv4() ?? ""
+        if localIP.isEmpty {
+            await MainActor.run { showPreflight = true }
+            return
+        }
         controller.start(dashboardIP: store.dashboardIP, localIP: localIP,
                          castToZeeho: store.castToZeeho)
     }
@@ -270,16 +530,26 @@ struct MirrorView: View {
     // MARK: - 视频区（出画后才出现，CarWithin 的 inline video container）
 
     private var videoSection: some View {
-        VStack(spacing: 10) {
-            CPPreviewView(controller: controller)
-                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .clipped()
+        VStack(spacing: 12) {
+            ZStack(alignment: .topTrailing) {
+                CPPreviewView(controller: controller)
+                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .clipped()
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.18), radius: 18, y: 8)
 
-            // 操作行：全屏（突出）+ 画中画 + 预览窗
+                StatusPill(text: "LIVE", color: Theme.green, pulsing: true)
+                    .padding(10)
+            }
+
+            // 操作行：全屏突出 + 画中画 + 预览窗
             HStack(spacing: 10) {
-                actionButton("全屏显示", "arrow.up.left.and.arrow.down.right", prominent: true) {
+                actionButton("全屏", "arrow.up.left.and.arrow.down.right", prominent: true) {
                     showFullscreen = true
                 }
                 actionButton("画中画", "pip.enter") {
@@ -290,17 +560,18 @@ struct MirrorView: View {
                 }
             }
 
-            // 按键条：出画后才显示（CarWithin 的胶囊控制条）
-            HStack(spacing: 10) {
+            // CarWithin 风格胶囊按键条
+            HStack(spacing: 8) {
                 pillButton("house.fill", "主页") { controller.pressHome() }
                 pillButton("chevron.backward", "返回") { controller.pressBack() }
                 pillButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
                 pillButton("mic.fill", "Siri") { controller.requestSiri() }
             }
 
-            Text("画面可直接触控操作")
+            Text("点按画面即可触控 · 全屏后轻触可唤出退出")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.tertiary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
@@ -391,138 +662,6 @@ struct MirrorView: View {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 withAnimation(.easeInOut(duration: 0.3)) { exitButtonVisible = false }
-            }
-        }
-    }
-
-    // MARK: - 连接设置卡（Wi-Fi + 画面输出，自动保存）
-
-    /// Wi-Fi 与仪表输出合并为一张设置卡：输入自动保存，去掉多余的按钮组。
-    private var settingsCard: some View {
-        AppleCard(padding: 16) {
-            VStack(spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "wifi")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
-                        .frame(width: 24)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(store.currentSSID ?? "未检测到 Wi-Fi")
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                            .lineLimit(1)
-                        Text(store.locationDenied ? "需要定位权限读取 Wi-Fi 名称" : "与仪表保持同一网络")
-                            .font(Theme.caption)
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    if wifiSaved {
-                        Label("已保存", systemImage: "checkmark.circle.fill")
-                            .font(Theme.caption.weight(.semibold))
-                            .foregroundStyle(Theme.green)
-                            .transition(.opacity)
-                    }
-                    Button {
-                        store.detectSSID()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Theme.surfaceAlt))
-                    }
-                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-                }
-
-                SecureField("Wi-Fi 密码（开放网络留空）", text: $store.wifiPassword)
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .onChange(of: store.wifiPassword) { _, _ in scheduleWifiSave() }
-
-                Button {
-                    store.commitWiFi()
-                    store.joinDashboardHotspot(ssid: store.currentSSID,
-                                               password: store.wifiPassword)
-                } label: {
-                    Label("一键加入此 Wi-Fi", systemImage: "antenna.radiowaves.left.and.right")
-                        .font(Theme.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.brand)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Theme.brand.opacity(0.1)))
-                }
-                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
-
-                if let status = store.hotspotStatus {
-                    Text(status)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                Divider()
-
-                Toggle("同时投放到极核仪表", isOn: $store.castToZeeho)
-                    .font(Theme.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.label)
-                    .tint(Theme.brand)
-                    .onChange(of: store.castToZeeho) { _, value in
-                        store.commitCastToZeeho()
-                        controller.setCastToZeeho(value)
-                    }
-
-                if store.castToZeeho {
-                    HStack(spacing: 10) {
-                        Image(systemName: "gauge.with.needle")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Theme.brand)
-                            .frame(width: 24)
-                        TextField("仪表 IP，如 192.168.0.1", text: $store.dashboardIP)
-                            .textFieldStyle(.roundedBorder)
-                            .keyboardType(.decimalPad)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onChange(of: store.dashboardIP) { _, _ in store.commitDashboardIP() }
-                        Menu {
-                            Picker("裁剪", selection: $store.cropMode) {
-                                Text("居中裁剪").tag("crop")
-                                Text("完整画面").tag("fit")
-                            }
-                        } label: {
-                            Image(systemName: "crop.rotate")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Theme.secondary)
-                                .frame(width: 36, height: 36)
-                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Theme.surfaceAlt))
-                        }
-                        .onChange(of: store.cropMode) { _, value in
-                            store.commitCropMode()
-                            controller.setCropMode(value)
-                        }
-                    }
-
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(controller.zeehoSpecText)
-                                .font(Theme.caption.weight(.semibold))
-                                .foregroundStyle(Theme.label)
-                            Text("投屏输出规格随仪表协商结果自动适配")
-                                .font(Theme.caption)
-                                .foregroundStyle(Theme.secondary)
-                        }
-                        Spacer(minLength: 0)
-                        StatusPill(text: controller.zeehoStatus,
-                                   color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
-                    }
-                } else {
-                    Text("关闭后仅本机显示 CarPlay，预览窗与画中画照常可用。")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
         }
     }
@@ -662,8 +801,12 @@ struct MirrorView: View {
 
     private func runChecks() async -> [CPMirrorDiagnostics.CheckResult] {
         await MainActor.run { runningChecks = true }
-        let results = await CPMirrorDiagnostics.preflight(dashboardIP: store.dashboardIP,
-                                                          includeDashboard: store.castToZeeho)
+        let ssidHint = await MainActor.run { store.resolvedSSID }
+        let results = await CPMirrorDiagnostics.preflight(
+            dashboardIP: store.dashboardIP,
+            includeDashboard: store.castToZeeho,
+            wifiSSIDHint: ssidHint
+        )
         await MainActor.run {
             checks = results
             runningChecks = false

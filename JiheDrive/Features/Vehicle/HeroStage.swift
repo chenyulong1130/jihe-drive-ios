@@ -433,7 +433,7 @@ struct HeroStage: View {
             // 3D 加载中隐藏，避免压在 loading 文案上
             if !seatButtonHidden {
                 Button(action: onOpenCushion) {
-                    SeatIcon(size: 18)
+                    SeatIcon(size: 18, open: seatOpen)
                         .foregroundStyle(Theme.label)
                         .padding(.horizontal, 13)
                         .padding(.vertical, 8)
@@ -446,7 +446,8 @@ struct HeroStage: View {
                 .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
                 .padding(.top, topInset + 126)
                 .padding(.trailing, 30)
-                .accessibilityLabel("打开坐垫")
+                .accessibilityLabel(seatOpen ? "坐垫已打开" : "打开坐垫")
+                .animation(.easeInOut(duration: 0.2), value: seatOpen)
             }
         }
         .transaction { $0.animation = nil }

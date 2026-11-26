@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>158</string>
+	<string>159</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>
@@ -70,10 +70,16 @@
     </dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>投屏功能需要访问本地网络：接收 CarPlay 音视频，并把画面发送到极核仪表。</string>
+	<!-- iOS 14+：未声明 Bonjour 服务时 NWListener/NetService 会报 -65555 NoAuth，控制口 7000 随即被掐 -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_airplay._tcp</string>
+		<string>_tds-carkit._tcp</string>
+	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>设备页需要连接 BMS 保护板、电机控制器与 LED 灯具，读取实时状态并下发控制指令。</string>
+	<string>设备页需要连接蚂蚁保护板与石栏大灯等蓝牙设备，读取实时状态并下发控制指令。</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>用于连接车辆蓝牙设备（BMS 保护板、控制器、灯具）。</string>
+	<string>用于连接车辆蓝牙设备（蚂蚁保护板、石栏大灯、控制器）。</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

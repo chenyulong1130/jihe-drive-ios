@@ -13,8 +13,11 @@ final class CPReceiver {
     private var configuration: CPInfo.Configuration = .default(deviceID: "")
     private var identity: CPAccessoryIdentity?
     private var generation = UUID()
-    /// `_tds-carkit._tcp` 发现服务（与 `_airplay._tcp` 一起构成 CarWithin 同款发现层）
-    private var discoveryService: NetService?
+    /// 发现服务（与 `_airplay._tcp` 一起构成 CarWithin 同款发现层）
+    /// 注意：不要挂在 NWListener.service 上——Bonjour 授权失败会把整个 TCP 监听一起 failed。
+    private var discoveryServices: [NetService] = []
+    /// TCP 已就绪后，后续的 Bonjour/权限错误只记日志，不再杀掉接收端。
+    private var tcpReady = false
     // forceKeyFrame 状态：250ms 节流合并多个恢复方，未收到关键帧前每秒重发。
     private var keyframeWantedSince: DispatchTime?
     private var keyframeLastSent: DispatchTime?
@@ -139,11 +142,12 @@ final class CPReceiver {
 
     private func stopOnQueue() {
         generation = UUID()
+        tcpReady = false
         listener?.cancel()
         listener = nil
         DispatchQueue.main.async { [weak self] in
-            self?.discoveryService?.stop()
-            self?.discoveryService = nil
+            self?.discoveryServices.forEach { $0.stop() }
+            self?.discoveryServices.removeAll()
         }
         sessions.values.forEach { $0.media?.stop() }
         sessions.removeAll()
@@ -159,28 +163,11 @@ final class CPReceiver {
     private func listen(port: UInt16?, identity: CPAccessoryIdentity) {
         let generation = self.generation
         do {
+            // 纯 TCP 监听：Bonjour 改用独立 NetService。
+            // 日志里 -65555 NoAuth 就是把 _airplay._tcp 挂在 NWListener.service 上，
+            // 本地网络未授权时整个 7000 监听被 failed，iPhone 永远回连不上。
             let candidate = try NWListener(using: .tcp,
                                            on: port.flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any)
-            // Bonjour 发布：CarWithin 同机模式同样发布 _airplay._tcp（pi/pk/features）。
-            // 这是工作参考在会话启动路径上我们此前唯一缺失的动作。
-            if let pk = CPAirPlayIdentity.publicKeyHex {
-                let features = CPInfo.features(audio: false)
-                let txt: [String: String] = [
-                    "deviceid": configuration.deviceID,
-                    "features": String(format: "0x%x,0x%x",
-                                       UInt32(truncatingIfNeeded: features),
-                                       UInt32(truncatingIfNeeded: features >> 32)),
-                    "flags": "0x4", "model": "JiheDrive1,1",
-                    "srcvers": "509.11", "protovers": "1.1",
-                    "pi": CPAirPlayIdentity.identifier, "pk": pk,
-                ]
-                candidate.service = NWListener.Service(name: configuration.name,
-                                                       type: "_airplay._tcp",
-                                                       txtRecord: NWTXTRecord(txt))
-                candidate.serviceRegistrationUpdateHandler = { [weak self] change in
-                    self?.log("Bonjour 注册状态：\(change)")
-                }
-            }
             candidate.stateUpdateHandler = { [weak self, weak candidate] state in
                 guard let self, let candidate,
                       self.generation == generation, self.listener === candidate else { return }
@@ -190,20 +177,11 @@ final class CPReceiver {
                         self.fail("监听器未获得端口")
                         return
                     }
+                    self.tcpReady = true
                     self.log("CarPlay 控制监听器已在端口 \(actualPort) 就绪")
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
-                        // _tds-carkit._tcp 发现服务（诊断层，CarWithin 同款）
-                        let service = NetService(domain: "local.", type: "_tds-carkit._tcp",
-                                                 name: self.configuration.name, port: Int32(actualPort))
-                        service.setTXTRecord(NetService.data(fromTXTRecord: [
-                            "app": Data("TDSCarKit".utf8),
-                            "deviceid": Data(self.configuration.deviceID.utf8),
-                        ]))
-                        self.discoveryService?.stop()
-                        self.discoveryService = service
-                        service.publish()
-                        self.log("正在通过 _tds-carkit._tcp 发布 \(self.configuration.name)")
+                        self.publishDiscovery(port: actualPort)
                         self.onListening?(actualPort)
                     }
                 case .failed(let error):
@@ -211,7 +189,11 @@ final class CPReceiver {
                         self.log("端口 \(port) 已被占用，正在申请可用端口")
                         candidate.cancel()
                         self.listener = nil
+                        self.tcpReady = false
                         self.listen(port: nil, identity: identity)
+                    } else if self.tcpReady {
+                        // TCP 已在听：Bonjour/权限类失败不能掐死接收端，否则 0x4301 发出去也没人接
+                        self.log("发现服务/网络权限告警（TCP \(candidate.port?.rawValue ?? 0) 仍在监听）：\(error.localizedDescription)")
                     } else {
                         self.fail("监听器失败：\(error.localizedDescription)")
                     }
@@ -368,6 +350,43 @@ final class CPReceiver {
         default:
             log("未实现：\(request.method) \(request.target.prefix(80))")
             return CPRTSPResponse(status: 501, reason: "Not Implemented")
+        }
+    }
+
+    /// 独立发布 Bonjour，不绑 NWListener——授权失败也不会关掉 7000。
+    private func publishDiscovery(port: UInt16) {
+        discoveryServices.forEach { $0.stop() }
+        discoveryServices.removeAll()
+
+        let tds = NetService(domain: "local.", type: "_tds-carkit._tcp",
+                             name: configuration.name, port: Int32(port))
+        tds.setTXTRecord(NetService.data(fromTXTRecord: [
+            "app": Data("TDSCarKit".utf8),
+            "deviceid": Data(configuration.deviceID.utf8),
+        ]))
+        tds.publish()
+        discoveryServices.append(tds)
+        log("正在通过 _tds-carkit._tcp 发布 \(configuration.name)")
+
+        if let pk = CPAirPlayIdentity.publicKeyHex {
+            let features = CPInfo.features(audio: false)
+            let airplay = NetService(domain: "local.", type: "_airplay._tcp",
+                                     name: configuration.name, port: Int32(port))
+            airplay.setTXTRecord(NetService.data(fromTXTRecord: [
+                "deviceid": Data(configuration.deviceID.utf8),
+                "features": Data(String(format: "0x%x,0x%x",
+                                        UInt32(truncatingIfNeeded: features),
+                                        UInt32(truncatingIfNeeded: features >> 32)).utf8),
+                "flags": Data("0x4".utf8),
+                "model": Data("JiheDrive1,1".utf8),
+                "srcvers": Data("509.11".utf8),
+                "protovers": Data("1.1".utf8),
+                "pi": Data(CPAirPlayIdentity.identifier.utf8),
+                "pk": Data(pk.utf8),
+            ]))
+            airplay.publish()
+            discoveryServices.append(airplay)
+            log("正在通过 _airplay._tcp 发布 \(configuration.name)")
         }
     }
 

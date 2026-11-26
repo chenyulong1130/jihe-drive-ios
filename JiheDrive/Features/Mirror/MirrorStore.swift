@@ -9,6 +9,8 @@ import SystemConfiguration.CaptiveNetwork
 final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     @Published var currentSSID: String?
+    /// 可手填的 Wi-Fi 名称：定位读不到 SSID 时也能发起 CarPlay 会话。
+    @Published var wifiSSID: String = ""
     @Published var locationDenied = false
     @Published var dashboardIP: String
     @Published var wifiPassword: String = ""
@@ -18,7 +20,7 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var identityHint: String?
     /// 整屏镜像裁剪：crop = 居中裁横幅（默认，导航信息区），fit = 完整画面加黑边
     @Published var cropMode: String
-    /// 是否把 CarPlay 画面转投极核仪表；关闭时本地预览与触控照常可用。
+    /// 是否把 CarPlay 画面转投极核仪表；默认关——先把本机 CarPlay 唤起，再开仪表投屏。
     @Published var castToZeeho: Bool
 
     private let locationManager = CLLocationManager()
@@ -29,7 +31,12 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         dashboardIP = savedIP?.isEmpty == false ? savedIP! : "192.168.0.1"
         let group = UserDefaults(suiteName: MirrorLogStore.appGroupID)
         cropMode = group?.string(forKey: "mirror.crop") == "fit" ? "fit" : "crop"
-        castToZeeho = UserDefaults.standard.object(forKey: "mirror.cast.zeeho") as? Bool ?? true
+        // 默认关仪表投屏：避免仪表 IP/热点预检干扰本机 CarPlay 唤起
+        castToZeeho = UserDefaults.standard.object(forKey: "mirror.cast.zeeho") as? Bool ?? false
+        let presetSSID = UserDefaults.standard.string(forKey: "cp.wifi.ssid") ?? ""
+        let presetPassword = UserDefaults.standard.string(forKey: "cp.wifi.password") ?? ""
+        wifiSSID = presetSSID
+        wifiPassword = presetPassword
         super.init()
         locationManager.delegate = self
         recheckIdentity()
@@ -74,9 +81,13 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         DispatchQueue.main.async {
             self.currentSSID = ssid
             if let ssid {
+                // 检测成功时回填可编辑字段；已有手填内容不覆盖
+                if self.wifiSSID.isEmpty { self.wifiSSID = ssid }
                 let remembered = Self.savedPassword(for: ssid)
                 self.rememberedPassword = remembered != nil
-                self.wifiPassword = remembered ?? self.wifiPassword
+                if let remembered, self.wifiPassword.isEmpty {
+                    self.wifiPassword = remembered
+                }
             }
         }
     }
@@ -119,12 +130,23 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         }
     }
 
-    /// 保存当前网络密码，并写入 CarPlay 会话预设（StartSession 时告知 iPhone）。
-    func commitWiFi() {
-        guard let ssid = currentSSID else { return }
+    /// 保存 Wi-Fi 预设（StartSession 必需）。优先用手填 SSID，其次用系统检测到的。
+    @discardableResult
+    func commitWiFi() -> Bool {
+        let ssid = resolvedSSID
+        guard !ssid.isEmpty else { return false }
+        wifiSSID = ssid
         Self.savePassword(wifiPassword, for: ssid)
         rememberedPassword = !wifiPassword.isEmpty
         CPWiFiDefaults.save(ssid: ssid, password: wifiPassword, channel: 36)
+        return true
+    }
+
+    /// 实际用于会话的 SSID：手填 > 系统检测。
+    var resolvedSSID: String {
+        let typed = wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        return currentSSID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     // MARK: - 一键加入仪表热点

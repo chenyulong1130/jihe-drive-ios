@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class BMSStore: ObservableObject {
     @Published private(set) var realtime: BMSRealtime?
+    @Published private(set) var brand: BMSBrand = .ant
     @Published private(set) var channel: BMSChannel = .ffe1
     @Published private(set) var channelStatus = "尚未检测"
     @Published private(set) var lastAck = ""
@@ -13,7 +14,8 @@ final class BMSStore: ObservableObject {
     @Published var customAddressHex = "0000"
     @Published var customDataHex = ""
 
-    private let decoder = BMSFrameDecoder()
+    private let antDecoder = BMSFrameDecoder()
+    private let yanyang = YanyangProtocol()
     private weak var ble: DeviceBLEManager?
     private var pollTask: Task<Void, Never>?
     private var realtimeTick = 0
@@ -21,6 +23,17 @@ final class BMSStore: ObservableObject {
     func attach(_ ble: DeviceBLEManager) {
         self.ble = ble
         channel = ble.bmsChannel
+        // 按已连接设备名判定品牌
+        if let name = ble.connectedDevice?.name,
+           let detected = BMSBrand.detect(name: name) {
+            brand = detected
+        } else if let stored = ble.connectedDevice?.bmsBrand {
+            brand = stored
+        } else {
+            brand = .ant
+        }
+        yanyang.reset()
+        appendLog("保护板协议：\(brand.title)")
         ble.registerDataHandler("bms") { [weak self] data in
             Task { @MainActor in self?.feed(data) }
         }
@@ -38,6 +51,10 @@ final class BMSStore: ObservableObject {
         isPolling = true
         pollTask = Task { [weak self] in
             guard let self else { return }
+            // 彦阳：启动时先探地址 / 协议标志
+            if self.brand == .yanyang {
+                await self.bootstrapYanyang()
+            }
             while !Task.isCancelled {
                 await self.pollOnce()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -51,35 +68,75 @@ final class BMSStore: ObservableObject {
         isPolling = false
     }
 
+    private func bootstrapYanyang() async {
+        guard let ble, ble.isConnected else { return }
+        do {
+            try await ble.write(yanyang.requestSaAddress())
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            try await ble.write(yanyang.requestProtoFlag())
+            appendLog("彦阳：已发送地址/协议探测")
+        } catch {
+            appendLog("彦阳探测失败：\(error.localizedDescription)")
+        }
+    }
+
     private func pollOnce() async {
         guard let ble, ble.isConnected else { return }
-        let frame = BMSProtocol.frame(funcCode: 0x11, address: 0x0000, readLength: readLength)
-        do {
-            try await ble.write(frame)
-        } catch {
-            appendLog("读取失败：\(error.localizedDescription)")
+        switch brand {
+        case .ant:
+            let frame = BMSProtocol.frame(funcCode: 0x11, address: 0x0000, readLength: readLength)
+            do {
+                try await ble.write(frame)
+            } catch {
+                appendLog("读取失败：\(error.localizedDescription)")
+            }
+        case .yanyang:
+            for req in yanyang.pollRequests() {
+                guard !Task.isCancelled else { return }
+                do {
+                    try await ble.write(req)
+                    try? await Task.sleep(nanoseconds: 80_000_000)
+                } catch {
+                    appendLog("彦阳轮询失败：\(error.localizedDescription)")
+                    break
+                }
+            }
         }
     }
 
     private func feed(_ data: Data) {
-        for frame in decoder.feed(data) {
-            switch frame.funcCode {
-            case 0x11:
-                if let parsed = BMSProtocol.parseRealtime(frame.data) {
-                    realtime = parsed
-                    realtimeTick += 1
-                    if channelStatus != "实时通信正常" { channelStatus = "实时通信正常" }
+        switch brand {
+        case .ant:
+            for frame in antDecoder.feed(data) {
+                switch frame.funcCode {
+                case 0x11:
+                    if var parsed = BMSProtocol.parseRealtime(frame.data) {
+                        parsed.brand = .ant
+                        realtime = parsed
+                        realtimeTick += 1
+                        if channelStatus != "实时通信正常" { channelStatus = "实时通信正常" }
+                    }
+                case 0x61:
+                    lastAck = BMSProtocol.ackMessage(frame.data)
+                    appendLog("控制应答：\(lastAck)")
+                default:
+                    appendLog("收到功能码 0x\(String(format: "%02X", frame.funcCode))，\(frame.data.count) 字节")
                 }
-            case 0x61:
-                lastAck = BMSProtocol.ackMessage(frame.data)
-                appendLog("控制应答：\(lastAck)")
-            default:
-                appendLog("收到功能码 0x\(String(format: "%02X", frame.funcCode))，\(frame.data.count) 字节")
+            }
+        case .yanyang:
+            if let snap = yanyang.onNotify(data) {
+                realtime = snap
+                realtimeTick += 1
+                if channelStatus != "实时通信正常" { channelStatus = "实时通信正常" }
             }
         }
     }
 
     func diagnoseChannels() async {
+        guard brand == .ant else {
+            channelStatus = "彦阳固定 FFE1/FFE2，无需通道诊断"
+            return
+        }
         guard let ble, ble.isConnected else {
             channelStatus = "请先连接设备"
             return
@@ -119,6 +176,10 @@ final class BMSStore: ObservableObject {
     }
 
     func sendCustomCommand() async {
+        guard brand == .ant else {
+            appendLog("自定义指令目前仅支持蚂蚁协议")
+            return
+        }
         guard let ble, ble.isConnected else { return }
         guard let funcCode = Self.bytes(from: customFuncHex)?.first,
               let addressBytes = Self.bytes(from: customAddressHex),

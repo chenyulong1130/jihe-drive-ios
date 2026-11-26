@@ -163,7 +163,50 @@ final class BMSFrameDecoder {
 
 // MARK: - 0x11 实时数据
 
+enum BMSBrand: String, CaseIterable, Identifiable {
+    case ant
+    case yanyang
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ant: return "蚂蚁"
+        case .yanyang: return "彦阳"
+        }
+    }
+
+    var hint: String {
+        switch self {
+        case .ant: return "ANT"
+        case .yanyang: return "YY"
+        }
+    }
+
+    /// 写特征优先短 UUID
+    var writeID: String {
+        switch self {
+        case .ant: return "FFE1"
+        case .yanyang: return "FFE2"
+        }
+    }
+
+    var notifyID: String { "FFE1" }
+
+    static func detect(name: String) -> BMSBrand? {
+        let upper = name.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if upper.hasPrefix("YY") || upper.contains("YANYANG") || name.contains("彦阳") {
+            return .yanyang
+        }
+        if upper.hasPrefix("ANT") || upper.contains("ANT-BMS") || name.contains("蚂蚁") {
+            return .ant
+        }
+        return nil
+    }
+}
+
 struct BMSRealtime {
+    var brand: BMSBrand = .ant
     var auth: UInt8 = 0
     var state: UInt8 = 0
     var cellCount: Int = 0
@@ -202,7 +245,29 @@ struct BMSRealtime {
     var chargerCurrent: Double = 0
     var chargerState: UInt16 = 0
     var batteryType: UInt16 = 0
+    /// 彦阳等协议直接给出的类型名 / 告警名 / 循环次数
+    var batteryTypeLabel = ""
+    var protectNames: [String] = []
+    var cycleCount: Int = 0
     var rawHex = ""
+
+    var flowLabel: String {
+        switch brand {
+        case .yanyang:
+            switch state {
+            case 1: return "充电中"
+            case 2: return "放电中"
+            default: return balanceState > 0 ? "均衡中" : "静置"
+            }
+        case .ant:
+            return BMSProtocol.batteryStateText(state)
+        }
+    }
+
+    var typeLabel: String {
+        if !batteryTypeLabel.isEmpty { return batteryTypeLabel }
+        return BMSProtocol.batteryTypeText(batteryType)
+    }
 }
 
 private struct ByteReader {

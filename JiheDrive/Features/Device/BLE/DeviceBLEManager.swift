@@ -75,26 +75,27 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         dataHandlers.removeValue(forKey: key)
     }
 
-    private static func classify(name: String, serviceUUIDs: [CBUUID]?) -> DeviceKind {
-        let upper = name.uppercased()
-        // NB- / SL- 在石栏小程序里都进「调整灯光高低」，同属大灯调节设备
-        if upper.hasPrefix("NB-") || upper.hasPrefix("SL-") { return .shilanLight }
-        if upper.contains("ANT") || upper.contains("BMS") || upper.contains("蚂蚁") { return .bms }
-        if upper.contains("MOTOR") || upper.contains("CTRL") || upper.contains("DRL") { return .controller }
-        let ids = (serviceUUIDs ?? []).map { $0.uuidString.uppercased() }
-        if ids.contains(where: { $0.hasPrefix("FFE0") }) { return .bms }
-        if ids.contains(where: { $0.hasPrefix("FFF0") }) { return .controller }
-        return .controller
-    }
+    /// 当前扫描允许的设备类型；nil = 主推类型（保护板 + 石栏）
+    private var scanKinds: Set<DeviceKind> = Set(DeviceKind.primaryKinds)
 
     private func activeWriteCharacteristic() -> CBCharacteristic? {
         let preferred: String
         switch connectedDevice?.kind {
-        case .bms: preferred = bmsChannel.writeID
+        case .bms:
+            // 彦阳写 FFE2；蚂蚁默认走通道写特征（FFE1 / FFF3 / FFF5）
+            if connectedDevice?.bmsBrand == .yanyang {
+                preferred = BMSBrand.yanyang.writeID
+            } else {
+                preferred = bmsChannel.writeID
+            }
         case .shilanLight, .controller: preferred = "FFF2"
         case .none: preferred = ""
         }
         if let exact = characteristics[preferred] { return exact }
+        // 彦阳兜底：FFE2 找不到时试 FFE1
+        if connectedDevice?.bmsBrand == .yanyang, let fallback = characteristics["FFE1"] {
+            return fallback
+        }
         return characteristics.values.first {
             $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
         }
@@ -102,7 +103,10 @@ final class DeviceBLEManager: NSObject, ObservableObject {
 
     // MARK: - 扫描
 
-    func startScan(timeout: TimeInterval = 30) {
+    /// - Parameters:
+    ///   - kinds: 只保留这些类型；默认保护板 + 石栏，避免满屏无关 BLE。
+    ///   - timeout: 默认 12 秒（小程序 30 秒过长，过滤后命中更快）。
+    func startScan(kinds: Set<DeviceKind>? = nil, timeout: TimeInterval = 12) {
         guard central.state == .poweredOn else {
             lastError = DeviceBLEError.bluetoothOff.localizedDescription
             log("扫描失败：\(lastError ?? "")")
@@ -111,17 +115,20 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         stopScan()
         discovered = []
         lastError = nil
+        scanKinds = kinds ?? Set(DeviceKind.primaryKinds)
         isScanning = true
         connectionState = .scanning
+        // 不按 UUID 限扫：部分石栏/ANT 广播不含服务 UUID；靠名称过滤即可
         central.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
-        log("开始扫描设备")
+        let labels = scanKinds.map(\.shortTitle).sorted().joined(separator: "/")
+        log("开始扫描（仅 \(labels)，\(Int(timeout))s）")
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isScanning else { return }
             self.stopScan()
-            self.log("扫描 30 秒结束")
+            self.log("扫描结束 · 发现 \(self.discovered.count) 台")
         }
         scanTimeout = work
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: work)
@@ -243,7 +250,14 @@ final class DeviceBLEManager: NSObject, ObservableObject {
             failConnect(DeviceBLEError.characteristicMissing)
             return
         }
-        let preferredNotify = kind == .bms ? bmsChannel.notifyID : "FFF1"
+        let preferredNotify: String
+        if kind == .bms {
+            preferredNotify = (connectedDevice?.bmsBrand == .yanyang)
+                ? BMSBrand.yanyang.notifyID
+                : bmsChannel.notifyID
+        } else {
+            preferredNotify = "FFF1"
+        }
         guard let notify = characteristics[preferredNotify]
                 ?? characteristics.values.first(where: { $0.properties.contains(.notify) }) else {
             failConnect(DeviceBLEError.characteristicMissing)
@@ -387,24 +401,33 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
-        cbPeripherals[peripheral.identifier] = peripheral
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
             ?? peripheral.name
             ?? ""
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]
+        // 无名 + 无法分类 = 噪声，直接丢弃（这是扫描变慢、列表太脏的主因）
+        guard let kind = DeviceKind.classify(name: name, serviceUUIDs: services) else { return }
+        guard scanKinds.contains(kind) else { return }
+
+        cbPeripherals[peripheral.identifier] = peripheral
         let device = BLEDevice(
             id: peripheral.identifier,
             name: name,
             rssi: RSSI.intValue,
-            kind: Self.classify(name: name, serviceUUIDs: services)
+            kind: kind,
+            bmsBrand: kind == .bms ? BMSBrand.detect(name: name) : nil
         )
         if let index = discovered.firstIndex(where: { $0.id == device.id }) {
             var old = discovered[index]
             old.rssi = device.rssi
             if old.name.isEmpty, !device.name.isEmpty { old.name = device.name }
             discovered[index] = old
+            // 信号变强时上浮，方便点最近的那台
+            discovered.sort { $0.rssi > $1.rssi }
         } else {
             discovered.append(device)
+            discovered.sort { $0.rssi > $1.rssi }
+            log("发现 \(device.kind.shortTitle)：\(device.displayName)（\(device.rssi) dBm）")
         }
     }
 

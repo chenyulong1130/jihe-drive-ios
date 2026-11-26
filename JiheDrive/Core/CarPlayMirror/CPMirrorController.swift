@@ -184,6 +184,14 @@ final class CPMirrorController: ObservableObject {
         }
         receiver.onFailure = { [weak self] reason in
             guard let self, self.startToken == token else { return }
+            // NoAuth / Bonjour 类失败不应整页判死——TCP 7000 可能仍在听；
+            // 真正无端口时 listen 失败会在启动早期触发，这里降级为告警并允许引导继续。
+            let soft = reason.contains("NoAuth") || reason.contains("-65555")
+                || reason.contains("发现服务") || reason.contains("Bonjour")
+            if soft {
+                self.appendLog("本地接收端告警（不中断引导）：\(reason)")
+                return
+            }
             self.setPhase(.failed(reason))
             self.appendLog("本地接收端失败：\(reason)")
         }

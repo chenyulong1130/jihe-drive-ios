@@ -7,16 +7,18 @@ Payload/
 *.xcodeproj
 .DS_Store
 xcuserdata/
-
-
 .workbuddy/
-
-analysis/carwithin/repo
-analysis/carwithin/identity_files/
 
 # 本地产物（不进仓库）
 tools/gh/
 dist/
 dist_buildlog*/
 analysis/
+ipa_analysis/
 demo_seat/
+_carwithin102/
+
+# 大体积素材 / 小程序解包（不进仓库）
+*.glb
+wx*/
+ZLink*/

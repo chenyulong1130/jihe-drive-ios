@@ -5,42 +5,45 @@ import CoreBluetooth
 
 enum DeviceKind: String, CaseIterable, Identifiable {
     case bms
-    case controller
     case shilanLight
+    case controller
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .bms: return "BMS 保护板"
+        case .bms: return "保护板"
+        case .shilanLight: return "石栏大灯"
         case .controller: return "电机控制器"
-        case .shilanLight: return "石栏大灯调节"
         }
     }
 
     var shortTitle: String {
         switch self {
-        case .bms: return "BMS"
+        case .bms: return "保护板"
+        case .shilanLight: return "石栏"
         case .controller: return "控制器"
-        case .shilanLight: return "石栏大灯"
         }
     }
 
     var detail: String {
         switch self {
-        case .bms: return "实时电压 / 电流 / 单体 / 保护状态 / 通道诊断"
-        case .controller: return "电机位置 / 限位 / 速度 / 自检 / 车型预设"
-        case .shilanLight: return "SL- 前缀：调节大灯高低 / 8 位开机密码校验"
+        case .bms: return "蚂蚁 / 彦阳 · 电压 / 电流 / 单体 / 保护"
+        case .shilanLight: return "石栏协议 · NB- / SL- 大灯高低调节"
+        case .controller: return "电机位置 / 限位 / 速度 / 车型预设"
         }
     }
 
     var icon: String {
         switch self {
         case .bms: return "battery.100.bolt"
-        case .controller: return "gearshape.2"
-        case .shilanLight: return "headlight.beam"
+        case .shilanLight: return "headlight.high.beam"
+        case .controller: return "gearshape.2.fill"
         }
     }
+
+    /// 设备页主推：保护板 + 石栏（先做这两类）
+    static let primaryKinds: [DeviceKind] = [.bms, .shilanLight]
 
     /// 石栏与控制器共用 5A A5 电机帧，进入前需要 8 位开机密码校验
     var requiresPowerAuth: Bool {
@@ -48,6 +51,26 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         case .bms: return false
         case .controller, .shilanLight: return true
         }
+    }
+
+    /// 广播名 / 服务 UUID 分类；无法识别则返回 nil（扫描时直接丢弃）
+    static func classify(name: String, serviceUUIDs: [CBUUID]?) -> DeviceKind? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = trimmed.uppercased()
+        // 石栏：NB- / SL-
+        if upper.contains("NB-") || upper.contains("SL-") { return .shilanLight }
+        // 保护板：蚂蚁 ANT / 彦阳 YY（先接这两家）
+        if BMSBrand.detect(name: trimmed) != nil { return .bms }
+        let ids = (serviceUUIDs ?? []).map { $0.uuidString.uppercased() }
+        if !upper.isEmpty, ids.contains(where: { $0.contains("FFF0") }) {
+            if upper.contains("MOTOR") || upper.contains("CTRL") || upper.contains("DRL") {
+                return .controller
+            }
+        }
+        if upper.contains("MOTOR") || upper.contains("CTRL") || upper.contains("DRL") {
+            return .controller
+        }
+        return nil
     }
 }
 
@@ -60,6 +83,8 @@ struct BLEDevice: Identifiable, Hashable {
     var name: String
     var rssi: Int
     var kind: DeviceKind
+    /// 保护板协议品牌；非 BMS 为 nil
+    var bmsBrand: BMSBrand? = nil
 
     var displayName: String { name.isEmpty ? "未命名设备" : name }
 }

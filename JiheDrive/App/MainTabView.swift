@@ -18,10 +18,11 @@ enum MainTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /// 仅使用系统确认存在的 SF Symbol；`bluetooth` / `carplay.fill` 无效会导致空白图标。
     var icon: String {
         switch self {
         case .vehicle: return "bolt.car"
-        case .device: return "bluetooth"
+        case .device: return "antenna.radiowaves.left.and.right"
         case .mirror: return "carplay"
         case .settings: return "person"
         }
@@ -30,8 +31,8 @@ enum MainTab: String, CaseIterable, Identifiable {
     var activeIcon: String {
         switch self {
         case .vehicle: return "bolt.car.fill"
-        case .device: return "bluetooth"
-        case .mirror: return "carplay.fill"
+        case .device: return "antenna.radiowaves.left.and.right"
+        case .mirror: return "carplay"
         case .settings: return "person.fill"
         }
     }
