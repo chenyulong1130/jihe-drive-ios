@@ -801,11 +801,9 @@ struct MirrorView: View {
 
     private func runChecks() async -> [CPMirrorDiagnostics.CheckResult] {
         await MainActor.run { runningChecks = true }
-        let ssidHint = await MainActor.run { store.resolvedSSID }
         let results = await CPMirrorDiagnostics.preflight(
             dashboardIP: store.dashboardIP,
-            includeDashboard: store.castToZeeho,
-            wifiSSIDHint: ssidHint
+            includeDashboard: store.castToZeeho
         )
         await MainActor.run {
             checks = results
