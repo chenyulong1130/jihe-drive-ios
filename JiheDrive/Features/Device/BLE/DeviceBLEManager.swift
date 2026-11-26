@@ -53,7 +53,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         central = CBCentralManager(
             delegate: self,
             queue: .main,
-            options: [CBCentralManagerOptionShowPowerPromptKey: false]
+            options: ["CBCentralManagerOptionShowPowerPromptKey": false]
         )
     }
 

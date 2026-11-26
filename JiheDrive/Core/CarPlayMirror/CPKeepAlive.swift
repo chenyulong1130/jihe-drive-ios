@@ -75,7 +75,7 @@ final class CPKeepAlive {
         append("RIFF")
         let dataSize = samples * 2
         appendLE(UInt32(36 + dataSize)); append("WAVE")
-        append("fmt "); appendLE(16); appendLE(UInt16(1)); appendLE(UInt16(1))
+        append("fmt "); appendLE(UInt32(16)); appendLE(UInt16(1)); appendLE(UInt16(1))
         appendLE(UInt32(sampleRate)); appendLE(UInt32(sampleRate * 2))
         appendLE(UInt16(2)); appendLE(UInt16(16))
         append("data"); appendLE(UInt32(dataSize))

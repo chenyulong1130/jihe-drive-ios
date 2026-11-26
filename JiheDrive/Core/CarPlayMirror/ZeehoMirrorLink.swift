@@ -530,7 +530,7 @@ final class ZeehoMirrorLink {
             guard request.payload.count >= 32 else { throw CPError.malformed("媒体配置载荷不足 32 字节") }
             let width = request.payload.uint16LE(0)
             let height = request.payload.uint16LE(2)
-            guard ZeehoMirrorLink.acceptable(width: width, height: height) else {
+            guard ZeehoMirrorLink.acceptable(width: Int(width), height: Int(height)) else {
                 throw CPError.rejected("仪表媒体尺寸 \(width)×\(height) 与极核配置不符")
             }
             guard let signature = signedHUID, let huid, let identity else {
@@ -553,8 +553,8 @@ final class ZeehoMirrorLink {
                 name = known.name
             } else {
                 // AE2 档案同款：上报值取偶（编码器 4:2:0 要求）
-                output = (Self.even(width), Self.even(height))
-                name = "极核仪表 \(Self.even(width))×\(Self.even(height))"
+                output = (Self.even(Int(width)), Self.even(Int(height)))
+                name = "极核仪表 \(Self.even(Int(width)))×\(Self.even(Int(height)))"
             }
             ZeehoMirrorFrame.appendLE(&payload, UInt32(2)) // codec = H.264
             ZeehoMirrorFrame.appendLE(&payload, UInt16(output.width))

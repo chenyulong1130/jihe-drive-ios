@@ -159,15 +159,15 @@ final class MotorStore: ObservableObject {
         let logical = reverse ? 100 - value : value
         let span = Double(max(0, params.maxPercent - params.minPercent))
         let absolute = Int(round(Double(params.minPercent) + span * logical / 100.0))
-        Task { await send([7, 2, 1, min(100, max(0, absolute)), Int(value), flag]) }
+        Task { await send([7, 2, 1, UInt8(min(100, max(0, absolute))), UInt8(Int(value)), UInt8(flag)]) }
     }
 
     func setSpeed(_ level: Double) {
-        Task { await send([5, 2, 2, min(10, max(0, Int(level)))]) }
+        Task { await send([5, 2, 2, UInt8(min(10, max(0, Int(level))))]) }
     }
 
     func setSelfTest(enabled: Bool) {
-        Task { await send([7, 2, 3, enabled ? 1 : 0, workingMode, params.selfModeDir]) }
+        Task { await send([7, 2, 3, UInt8(enabled ? 1 : 0), UInt8(workingMode), UInt8(params.selfModeDir)]) }
     }
 
     func softZero() {
@@ -175,11 +175,11 @@ final class MotorStore: ObservableObject {
     }
 
     func hardZero() {
-        Task { await send([5, 2, 5, params.homingDir]) }
+        Task { await send([5, 2, 5, UInt8(params.homingDir)]) }
     }
 
     func setReverse(_ enabled: Bool) {
-        Task { await send([5, 2, 6, enabled ? 1 : 0]) }
+        Task { await send([5, 2, 6, UInt8(enabled ? 1 : 0)]) }
     }
 
     func setRange() {
@@ -188,13 +188,13 @@ final class MotorStore: ObservableObject {
             status = "限位无效：需满足 0 ≤ 下限 < 上限 ≤ 100"
             return
         }
-        Task { await send([6, 2, 7, minValue, maxValue]) }
+        Task { await send([6, 2, 7, UInt8(minValue), UInt8(maxValue)]) }
     }
 
     func setWorkingMode(_ mode: Int) {
         guard mode == 0 || mode == 1 else { return }
         workingMode = mode
-        Task { await send([5, 2, 7, mode]) }
+        Task { await send([5, 2, 7, UInt8(mode)]) }
     }
 
     func applyProject(_ project: MotorProject) {

@@ -57,7 +57,7 @@ extension Data {
 
 struct BLEDevice: Identifiable, Hashable {
     let id: UUID
-    let name: String
+    var name: String
     var rssi: Int
     var kind: DeviceKind
 

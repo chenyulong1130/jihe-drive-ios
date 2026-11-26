@@ -2,19 +2,7 @@ import SwiftUI
 
 // MARK: - 通用小件
 
-struct StatusPill: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(color.opacity(0.14), in: Capsule())
-    }
-}
+// StatusPill 用 Core/Design/AppleUI.swift 的版本（支持 pulsing 呼吸动画）。
 
 struct MetricTile: View {
     let title: String
