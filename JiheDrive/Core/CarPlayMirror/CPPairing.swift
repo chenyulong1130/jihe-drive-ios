@@ -93,20 +93,32 @@ enum CPPairingStore {
 
     static func save(identifier: String, publicKey: Curve25519.Signing.PublicKey) throws {
         let data = publicKey.rawRepresentation
-        let add: [String: Any] = [
+        let account = "ctl-" + identifier
+        var add: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: "ctl-" + identifier,
+            kSecAttrAccount as String: account,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecAttrAccessGroup as String: accessGroup,
         ]
         var status = SecItemAdd(add as CFDictionary, nil)
+        if status != errSecSuccess, status != errSecDuplicateItem {
+            // 访问组不可用（侧载/重签后团队前缀不匹配，-34018）时退回默认组重试，
+            // 与 localSigningKey 的兜底一致，否则 pair-setup 最后一步必然失败
+            add.removeValue(forKey: kSecAttrAccessGroup as String)
+            SecItemDelete([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ] as CFDictionary)
+            status = SecItemAdd(add as CFDictionary, nil)
+        }
         if status == errSecDuplicateItem {
             status = SecItemUpdate(
                 [kSecClass as String: kSecClassGenericPassword,
                  kSecAttrService as String: service,
-                 kSecAttrAccount as String: "ctl-" + identifier] as CFDictionary,
+                 kSecAttrAccount as String: account] as CFDictionary,
                 [kSecValueData as String: data] as CFDictionary)
         }
         guard status == errSecSuccess else { throw CPError.rejected("保存配对失败 \(status)") }
