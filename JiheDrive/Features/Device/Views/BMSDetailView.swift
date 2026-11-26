@@ -276,7 +276,7 @@ struct BMSDetailView: View {
 
         return AppleCard(padding: 14) {
             HStack(spacing: 12) {
-                IconBadge(icon: "bolt.fill", color: flowColor, size: 42)
+                CircleIconBadge(icon: "bolt.fill", color: flowColor, size: 42)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(charging ? "预计充满" : "电池状态")
                         .font(.system(size: 12, weight: .semibold))
@@ -354,7 +354,7 @@ struct BMSDetailView: View {
     private var diffPeakCard: some View {
         AppleCard(padding: 12) {
             HStack(spacing: 10) {
-                IconBadge(icon: "waveform.path.ecg", color: Theme.orange, size: 34)
+                CircleIconBadge(icon: "waveform.path.ecg", color: Theme.orange, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("动态压差峰值")
                         .font(.system(size: 14, weight: .bold))

@@ -147,6 +147,57 @@ struct DeviceTabView: View {
         }
     }
 
+    // MARK: - 交互
+
+    private func requestScan(filter: DeviceKind?) {
+        // 石栏大灯（NB-/SL-）沿用小程序的 8 位开机密码；BMS 不需要
+        if let filter, filter.requiresPowerAuth, !DeviceAuth.isVerified() {
+            pendingKind = filter
+            showPowerPassword = true
+            return
+        }
+        scanFilter = filter
+        showScan = true
+    }
+
+    private var bleLogSheet: some View {
+        NavigationStack {
+            ScrollView {
+                if ble.logs.isEmpty {
+                    Text("暂无通信记录")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.page)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button {
+                            UIPasteboard.general.string = ble.logs.joined(separator: "\n")
+                        } label: {
+                            Label("复制全部日志", systemImage: "doc.on.doc")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .padding(.bottom, 4)
+
+                        ForEach(ble.logs.indices, id: \.self) { index in
+                            Text(ble.logs[index])
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(Theme.page)
+                }
+            }
+            .background(Theme.groupedBackground)
+            .navigationTitle("蓝牙日志")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showBLELogs = false } }
+            }
+        }
+    }
+
     private func accentColor(for kind: DeviceKind) -> Color {
         switch kind {
         case .bms: return .green

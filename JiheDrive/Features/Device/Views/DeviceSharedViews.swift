@@ -32,8 +32,8 @@ struct MetricTile: View {
     }
 }
 
-/// 彩色圆形图标底座（充电卡 / 峰值压差卡等行卡用）
-struct IconBadge: View {
+/// 彩色圆形图标底座（充电卡 / 峰值压差卡等行卡用；AppleUI.IconBadge 是圆角矩形底，勿混用）
+struct CircleIconBadge: View {
     let icon: String
     let color: Color
     var size: CGFloat = 42
