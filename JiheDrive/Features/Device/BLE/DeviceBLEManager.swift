@@ -47,6 +47,8 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     private var autoReconnect = false
     private var reconnectTask: Task<Void, Never>?
     private var dataHandlers: [String: (Data) -> Void] = [:]
+    /// 自动连接防重入：一次开机只尝试一次存档设备
+    private var autoConnectAttempted = false
 
     override init() {
         super.init()
@@ -130,6 +132,55 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         if c.properties.contains(.writeWithoutResponse) { tags += " 写无应答" }
         if c.properties.contains(.notify) { tags += " 通知" }
         return tags.isEmpty ? "-" : tags
+    }
+
+    // MARK: - 连接记忆（下次启动自动重连）
+
+    private static let archiveKey = "device.last.connection"
+
+    /// 连接成功后存档：id/名称/类型/品牌，下次启动自动回连
+    private func saveConnectionArchive() {
+        guard let device = connectedDevice else { return }
+        let archive: [String: String] = [
+            "id": device.id.uuidString,
+            "name": device.name,
+            "kind": device.kind.rawValue,
+            "brand": device.bmsBrand?.rawValue ?? "",
+        ]
+        UserDefaults.standard.set(archive, forKey: Self.archiveKey)
+    }
+
+    private func clearConnectionArchive() {
+        UserDefaults.standard.removeObject(forKey: Self.archiveKey)
+    }
+
+    static func savedConnectionName() -> String? {
+        let archive = UserDefaults.standard.dictionary(forKey: archiveKey) as? [String: String]
+        return archive?["name"].flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// 启动时回连上次设备：无需扫描，直接 retrievePeripherals + connect
+    func autoConnectSavedDevice() {
+        guard central.state == .poweredOn, connectionState == .idle, !autoConnectAttempted else { return }
+        guard let archive = UserDefaults.standard.dictionary(forKey: Self.archiveKey) as? [String: String],
+              let idString = archive["id"],
+              let id = UUID(uuidString: idString),
+              let kindRaw = archive["kind"],
+              let kind = DeviceKind(rawValue: kindRaw) else { return }
+        autoConnectAttempted = true
+        let name = archive["name"] ?? ""
+        let brand = archive["brand"].flatMap { BMSBrand(rawValue: $0) }
+        let device = BLEDevice(id: id, name: name, rssi: 0, kind: kind, bmsBrand: brand)
+        log("自动连接上次设备：\(device.displayName)")
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.connect(device)
+                self.log("自动连接成功")
+            } catch {
+                self.log("自动连接失败：\(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: - 扫描
@@ -253,6 +304,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         connectedDevice = nil
         characteristics = [:]
         activeNotify = nil
+        clearConnectionArchive()
         connectionState = .idle
         log("已断开连接")
     }
@@ -564,6 +616,7 @@ extension DeviceBLEManager: CBPeripheralDelegate {
             let cont = connectContinuation
             connectContinuation = nil
             cont?.resume()
+            saveConnectionArchive()
             log("连接就绪")
         }
         continuation?.resume()

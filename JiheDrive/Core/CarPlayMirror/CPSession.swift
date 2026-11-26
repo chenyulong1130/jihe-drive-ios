@@ -357,6 +357,8 @@ final class CPReceiver {
     }
 
     /// 独立发布 Bonjour，不绑 NWListener——授权失败也不会关掉 7000。
+    /// 只发 _tds-carkit._tcp（对齐可用参考实现；多发的 _airplay._tcp 曾在
+    /// 本地网络未授权时干扰监听，且 iPhone 回连发现并不依赖它）。
     private func publishDiscovery(port: UInt16) {
         discoveryServices.forEach { $0.stop() }
         discoveryServices.removeAll()
@@ -370,27 +372,6 @@ final class CPReceiver {
         tds.publish()
         discoveryServices.append(tds)
         log("正在通过 _tds-carkit._tcp 发布 \(configuration.name)")
-
-        if let pk = CPAirPlayIdentity.publicKeyHex {
-            let features = CPInfo.features(audio: false)
-            let airplay = NetService(domain: "local.", type: "_airplay._tcp",
-                                     name: configuration.name, port: Int32(port))
-            airplay.setTXTRecord(NetService.data(fromTXTRecord: [
-                "deviceid": Data(configuration.deviceID.utf8),
-                "features": Data(String(format: "0x%x,0x%x",
-                                        UInt32(truncatingIfNeeded: features),
-                                        UInt32(truncatingIfNeeded: features >> 32)).utf8),
-                "flags": Data("0x4".utf8),
-                "model": Data("JiheDrive1,1".utf8),
-                "srcvers": Data("509.11".utf8),
-                "protovers": Data("1.1".utf8),
-                "pi": Data(CPAirPlayIdentity.identifier.utf8),
-                "pk": Data(pk.utf8),
-            ]))
-            airplay.publish()
-            discoveryServices.append(airplay)
-            log("正在通过 _airplay._tcp 发布 \(configuration.name)")
-        }
     }
 
     private func fail(_ message: String) {

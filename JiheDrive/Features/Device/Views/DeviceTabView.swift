@@ -84,6 +84,40 @@ struct DeviceTabView: View {
         .onChange(of: activeMainTab) { _, tab in
             if tab != .device { ble.stopScan() }
         }
+        .onChange(of: ble.powerState) { _, state in
+            if state == .poweredOn { ble.autoConnectSavedDevice() }
+        }
+        .onAppear {
+            ble.autoConnectSavedDevice()
+            syncListPolling()
+        }
+        .onChange(of: ble.connectionState) { _, _ in
+            syncListPolling()
+        }
+        .onChange(of: path) { _, newPath in
+            // 从详情页返回列表时恢复列表卡片的实时轮询
+            if newPath.isEmpty { syncListPolling() }
+        }
+    }
+
+    /// 列表卡片实时摘要的数据源：连接期间保持对应 Store 轮询；
+    /// 进入详情页后由详情页接管，返回列表（path 清空）时恢复。
+    private func syncListPolling() {
+        guard ble.isConnected, let kind = ble.connectedDevice?.kind else {
+            bmsStore.stopPolling()
+            headlightStore.stopPolling()
+            return
+        }
+        switch kind {
+        case .bms:
+            headlightStore.stopPolling()
+            bmsStore.attach(ble)
+            bmsStore.startPolling()
+        case .shilanLight:
+            bmsStore.stopPolling()
+            headlightStore.attach(ble, handlerKey: "headlight")
+            if !headlightStore.paramsLoaded { headlightStore.loadParams() }
+        }
     }
 
     /// 标题右侧圆形图标按钮（扫描 / 日志）
@@ -109,42 +143,99 @@ struct DeviceTabView: View {
                 requestScan(filter: kind)
             }
         }) {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [accent.opacity(0.24), accent.opacity(0.08)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent.opacity(0.24), accent.opacity(0.08)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                    Image(systemName: kind.icon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(accent)
-                }
-                .frame(width: 46, height: 46)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(kind.title)
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                        if connected {
-                            StatusPill(text: "已连接", color: Theme.green, pulsing: true)
-                        }
+                        Image(systemName: kind.icon)
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(accent)
                     }
-                    Text(kind.detail)
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
+                    .frame(width: 46, height: 46)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(kind.title)
+                                .font(Theme.headline)
+                                .foregroundStyle(Theme.label)
+                            if connected {
+                                StatusPill(text: "已连接", color: Theme.green, pulsing: true)
+                            }
+                        }
+                        Text(connected ? (ble.connectedDevice?.displayName ?? kind.detail) : kind.detail)
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
+                    Image(systemName: connected ? "chevron.right" : "magnifyingglass")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(connected ? Theme.tertiary : accent)
                 }
 
-                Spacer(minLength: 4)
-                Image(systemName: connected ? "chevron.right" : "magnifyingglass")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(connected ? Theme.tertiary : accent)
+                if connected {
+                    deviceSummary(kind)
+                }
             }
         }
+    }
+
+    /// 连接后的实时摘要格（对齐 ALong 参考样式：值大字 + 标签小字）
+    @ViewBuilder
+    private func deviceSummary(_ kind: DeviceKind) -> some View {
+        switch kind {
+        case .bms:
+            let rt = bmsStore.realtime
+            HStack(spacing: 8) {
+                summaryTile(value: "\(rt?.soc ?? 0)", unit: "%", label: "电量", color: Theme.green)
+                summaryTile(value: fmt1(rt?.totalVoltage), unit: "V", label: "电压", color: Theme.brand)
+                summaryTile(value: fmt1(rt?.current.map(abs)), unit: "A", label: "电流", color: Color(hex: 0x0EA5E9))
+                summaryTile(value: "\(rt.map { abs($0.power) } ?? 0)", unit: "W", label: "功率", color: Theme.orange)
+            }
+        case .shilanLight:
+            let p = headlightStore.params
+            HStack(spacing: 8) {
+                summaryTile(value: "\(p.absolutePercent)", unit: "%", label: "当前高度", color: Theme.teal)
+                summaryTile(value: "\(p.targetPercent)", unit: "%", label: "目标", color: Theme.orange)
+                summaryTile(value: "\(p.minPercent)–\(p.maxPercent)", unit: "%", label: "限位", color: Theme.label)
+                summaryTile(value: headlightStore.busy ? "运行" : "空闲", unit: "", label: "电机", color: headlightStore.busy ? Theme.orange : Theme.green)
+            }
+        }
+    }
+
+    private func fmt1(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return String(format: "%.1f", value)
+    }
+
+    private func summaryTile(value: String, unit: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if !unit.isEmpty {
+                    Text(unit)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                }
+            }
+            Text(label)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - 交互

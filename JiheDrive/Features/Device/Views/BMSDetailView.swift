@@ -24,7 +24,6 @@ struct BMSDetailView: View {
                 if connected { chargeCard }
                 metricsGrid
                 diffPeakCard
-                if connected { statusCard }
                 cellsSection
             }
             .padding(.horizontal, 20)
@@ -516,6 +515,8 @@ struct BMSDetailView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
+                    if connected { statusCard }
+
                     AppleCard(padding: 14) {
                         VStack(alignment: .leading, spacing: 10) {
                             diagRow("连接状态", connected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "未连接")

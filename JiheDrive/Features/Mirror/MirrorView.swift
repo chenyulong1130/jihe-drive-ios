@@ -19,6 +19,7 @@ struct MirrorView: View {
     @State private var wifiSaved = false
     @State private var showPreflight = false
     @State private var showLogs = false
+    @State private var showSettingsSheet = false
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
     @State private var exitButtonVisible = true
@@ -32,7 +33,12 @@ struct MirrorView: View {
                     subtitle: controller.hasVideo
                         ? "画面已就绪，可触控操作"
                         : "先完成本机唤起，再投屏到仪表"
-                )
+                ) {
+                    HStack(spacing: 8) {
+                        circleIcon("gearshape", label: "投屏设置") { showSettingsSheet = true }
+                        circleIcon("doc.text.magnifyingglass", label: "运行日志") { showLogs = true }
+                    }
+                }
                 .staggerIn(0)
 
                 if controller.hasVideo {
@@ -40,14 +46,10 @@ struct MirrorView: View {
                 }
 
                 readinessCard.staggerIn(controller.hasVideo ? 2 : 1)
-                wifiSetupCard.staggerIn(3)
-                launchCard.staggerIn(4)
+                launchCard.staggerIn(controller.hasVideo ? 3 : 2)
 
-                SectionHeader("极核仪表投屏（可选）")
-                zeehoCard.staggerIn(5)
-
-                preflightRow.staggerIn(6)
-                logSection.staggerIn(7)
+                zeehoSummaryRow.staggerIn(controller.hasVideo ? 4 : 3)
+                preflightRow.staggerIn(controller.hasVideo ? 5 : 4)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -73,6 +75,8 @@ struct MirrorView: View {
         .sheet(isPresented: $showPreflight) {
             preflightSheet
         }
+        .sheet(isPresented: $showSettingsSheet) { settingsSheet }
+        .sheet(isPresented: $showLogs) { logsSheet }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
         }
@@ -121,26 +125,26 @@ struct MirrorView: View {
 
                 checklistRow(
                     done: store.identityReady,
-                    title: "1. 配件身份",
+                    title: "配件身份",
                     detail: store.identityReady
                         ? "证书与私钥已就绪"
                         : (store.identityHint ?? "缺少身份三件套")
                 )
                 checklistRow(
                     done: lanOK,
-                    title: "2. 本地网络权限",
+                    title: "本地网络权限",
                     detail: lanOK
                         ? (lanCheck?.detail ?? "TCP 监听可用")
                         : "日志 -65555 NoAuth：到 设置 → 极核智行 → 本地网络 打开"
                 )
                 checklistRow(
                     done: wifiPresetOK && localIPOK,
-                    title: "3. Wi-Fi 预设 + 本机地址",
+                    title: "Wi-Fi 预设 + 本机地址",
                     detail: wifiPresetOK
                         ? (localIPOK
                            ? "SSID「\(store.resolvedSSID)」· \(CPMirrorDiagnostics.localIPv4() ?? "")"
                            : "已填 SSID，但还没拿到 Wi-Fi IP——请先连上热点")
-                        : "必须填写下方 Wi-Fi 名称（密码开放网可留空）——否则 0x4301 发不出去"
+                        : "必须填写 Wi-Fi 名称（密码开放网可留空）——否则 0x4301 发不出去"
                 )
 
                 if !store.identityReady {
@@ -171,7 +175,126 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - Wi-Fi 设置（日志：「未配置 Wi-Fi 名称与密码」）
+    // MARK: - Wi-Fi 预设（图标弹窗；日志：「未配置 Wi-Fi 名称与密码」）
+
+    /// 标题右侧圆形图标按钮
+    private func circleIcon(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 36, height: 36)
+                .background(Theme.surfaceAlt, in: Circle())
+        }
+        .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
+        .accessibilityLabel(label)
+    }
+
+    /// 投屏设置弹窗：Wi-Fi 预设 + 极核仪表投屏
+    private var settingsSheet: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 14) {
+                    wifiSetupCard
+                    zeehoCard
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+            .background(Theme.groupedBackground)
+            .navigationTitle("投屏设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showSettingsSheet = false } }
+            }
+        }
+    }
+
+    /// 页面常驻的投屏摘要行：点击打开设置弹窗
+    private var zeehoSummaryRow: some View {
+        AppleCard(padding: 12, onTap: { showSettingsSheet = true }) {
+            HStack(spacing: 10) {
+                Image(systemName: "gauge.with.needle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(store.castToZeeho ? Theme.brand : Theme.secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.castToZeeho ? "极核仪表投屏" : "极核仪表投屏（已关闭）")
+                        .font(Theme.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.label)
+                    Text(store.castToZeeho ? controller.zeehoSpecText : "出画后在此开启，或点右上角仪表图标配置")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if store.castToZeeho {
+                    StatusPill(text: controller.zeehoStatus,
+                               color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+    }
+
+    /// 运行日志弹窗：完整列表 + 导出 / 清空 / 复制
+    private var logsSheet: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 16) {
+                        Button {
+                            exportURL = MirrorLogStore.exportFile()
+                            showExport = exportURL != nil
+                        } label: {
+                            Label("导出", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        Button {
+                            UIPasteboard.general.string = controller.logs.joined(separator: "\n")
+                        } label: {
+                            Label("复制", systemImage: "doc.on.doc")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        Button {
+                            controller.clearLogs()
+                            MirrorLogStore.clearAll()
+                        } label: {
+                            Label("清空", systemImage: "trash")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        Spacer()
+                    }
+
+                    if controller.logs.isEmpty {
+                        Text("暂无日志")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        ForEach(Array(controller.logs.suffix(200).enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+            .background(Theme.groupedBackground)
+            .navigationTitle("运行日志")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showLogs = false } }
+            }
+        }
+    }
+
+    // MARK: - Wi-Fi 预设卡片（弹窗内容）
 
     private var wifiSetupCard: some View {
         AppleCard(padding: 16) {
@@ -259,14 +382,14 @@ struct MirrorView: View {
                                     endPoint: .bottomTrailing
                                 )
                             )
-                        Image(systemName: "carplay")
+                        Image(systemName: "car.fill")
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundStyle(phaseColor)
                     }
                     .frame(width: 52, height: 52)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("4. 启动本机 CarPlay")
+                        Text("启动本机 CarPlay")
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
                         Text(controller.hasVideo
@@ -957,68 +1080,6 @@ struct MirrorView: View {
                     .font(Theme.footnote)
                     .foregroundStyle(Theme.secondary)
             }
-        }
-    }
-
-    // MARK: - 日志：默认收起，点开看详情
-
-    private var logSection: some View {
-        AppleCard(padding: 16) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("运行日志", systemImage: "doc.text.magnifyingglass")
-                        .font(Theme.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.label)
-                    Spacer(minLength: 0)
-                    Button {
-                        exportURL = MirrorLogStore.exportFile()
-                        showExport = exportURL != nil
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    Button {
-                        controller.clearLogs()
-                        MirrorLogStore.clearAll()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.secondary)
-                    }
-                    Button {
-                        withAnimation { showLogs.toggle() }
-                    } label: {
-                        Image(systemName: showLogs ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
-                            .frame(width: 24)
-                    }
-                }
-
-                if showLogs {
-                    if controller.logs.isEmpty {
-                        Text("暂无日志")
-                            .font(Theme.caption)
-                            .foregroundStyle(Theme.tertiary)
-                    } else {
-                        ForEach(Array(controller.logs.suffix(20).enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                        }
-                    }
-                } else if let last = controller.logs.last {
-                    Text(last)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
