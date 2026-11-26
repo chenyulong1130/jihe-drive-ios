@@ -304,7 +304,7 @@ struct HeadlightDetailView: View {
                 Spacer()
                 Button {
                     memories = HeadlightMemory.add(Int(displayPercent.rounded()))
-                    copyToastFeedback()
+                    memorySavedFeedback()
                 } label: {
                     Label("保存当前 \(Int(displayPercent.rounded()))%", systemImage: "plus.circle")
                         .font(.system(size: 12, weight: .semibold))
