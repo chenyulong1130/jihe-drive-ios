@@ -13,6 +13,8 @@ final class CPReceiver {
     private var configuration: CPInfo.Configuration = .default(deviceID: "")
     private var identity: CPAccessoryIdentity?
     private var generation = UUID()
+    /// `_tds-carkit._tcp` 发现服务（与 `_airplay._tcp` 一起构成 CarWithin 同款发现层）
+    private var discoveryService: NetService?
     // forceKeyFrame 状态：250ms 节流合并多个恢复方，未收到关键帧前每秒重发。
     private var keyframeWantedSince: DispatchTime?
     private var keyframeLastSent: DispatchTime?
@@ -139,6 +141,10 @@ final class CPReceiver {
         generation = UUID()
         listener?.cancel()
         listener = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.discoveryService?.stop()
+            self?.discoveryService = nil
+        }
         sessions.values.forEach { $0.media?.stop() }
         sessions.removeAll()
         connections.values.forEach { $0.cancel() }
@@ -155,6 +161,26 @@ final class CPReceiver {
         do {
             let candidate = try NWListener(using: .tcp,
                                            on: port.flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any)
+            // Bonjour 发布：CarWithin 同机模式同样发布 _airplay._tcp（pi/pk/features）。
+            // 这是工作参考在会话启动路径上我们此前唯一缺失的动作。
+            if let pk = CPAirPlayIdentity.publicKeyHex {
+                let features = CPInfo.features(audio: false)
+                let txt: [String: String] = [
+                    "deviceid": configuration.deviceID,
+                    "features": String(format: "0x%x,0x%x",
+                                       UInt32(truncatingIfNeeded: features),
+                                       UInt32(truncatingIfNeeded: features >> 32)),
+                    "flags": "0x4", "model": "JiheDrive1,1",
+                    "srcvers": "509.11", "protovers": "1.1",
+                    "pi": CPAirPlayIdentity.identifier, "pk": pk,
+                ]
+                candidate.service = NWListener.Service(name: configuration.name,
+                                                       type: "_airplay._tcp",
+                                                       txtRecord: NWTXTRecord(txt))
+                candidate.serviceRegistrationUpdateHandler = { [weak self] change in
+                    self?.log("Bonjour 注册状态：\(change)")
+                }
+            }
             candidate.stateUpdateHandler = { [weak self, weak candidate] state in
                 guard let self, let candidate,
                       self.generation == generation, self.listener === candidate else { return }
@@ -165,7 +191,21 @@ final class CPReceiver {
                         return
                     }
                     self.log("CarPlay 控制监听器已在端口 \(actualPort) 就绪")
-                    DispatchQueue.main.async { [weak self] in self?.onListening?(actualPort) }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        // _tds-carkit._tcp 发现服务（诊断层，CarWithin 同款）
+                        let service = NetService(domain: "local.", type: "_tds-carkit._tcp",
+                                                 name: self.configuration.name, port: Int32(actualPort))
+                        service.setTXTRecord(NetService.data(fromTXTRecord: [
+                            "app": Data("TDSCarKit".utf8),
+                            "deviceid": Data(self.configuration.deviceID.utf8),
+                        ]))
+                        self.discoveryService?.stop()
+                        self.discoveryService = service
+                        service.publish()
+                        self.log("正在通过 _tds-carkit._tcp 发布 \(self.configuration.name)")
+                        self.onListening?(actualPort)
+                    }
                 case .failed(let error):
                     if let port, case .posix(.EADDRINUSE) = error {
                         self.log("端口 \(port) 已被占用，正在申请可用端口")

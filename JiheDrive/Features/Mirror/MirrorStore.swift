@@ -183,15 +183,6 @@ final class MirrorStore: NSObject, ObservableObject, CLLocationManagerDelegate {
         UserDefaults.standard.set(castToZeeho, forKey: "mirror.cast.zeeho")
     }
 
-    /// 广播扩展最近状态（5 秒内视为活跃）。
-    static func extensionStatus() -> String? {
-        let group = UserDefaults(suiteName: MirrorLogStore.appGroupID)
-        guard let text = group?.string(forKey: "mirror.status"),
-              let stamp = group?.double(forKey: "mirror.status.ts"),
-              Date().timeIntervalSince1970 - stamp < 5 else { return nil }
-        return text
-    }
-
     /// 重新检查身份（进入页面时调用；IdentityImport/ 里有三件套会在这里真正导入）。
     func recheckIdentity() {
         do {

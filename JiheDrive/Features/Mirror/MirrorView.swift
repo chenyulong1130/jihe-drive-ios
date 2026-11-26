@@ -1,19 +1,16 @@
 import SwiftUI
-import ReplayKit
 import WebKit
 
-/// 投屏页。信息层次：
-/// 1) 一个 hero 卡承载标题、一句话说明、状态胶囊、启动步骤进度、连接指导、启动按钮；
-/// 2) 卡在连接超过 5 秒才出现排障提示，不打扰正常启动；
-/// 3) 视频区启动后才出现，带全屏；
-/// 4) Wi-Fi 与输出分区收纳，首页保持清爽；
-/// 5) 自检与日志收成一行摘要，点开看详情。
+/// CarPlay 页（参考 CarWithin 的接收端视觉与交互）：
+/// 1) 连接卡：彩色图标 + 标题 + 状态胶囊 + 启动步骤进度 + 启动按钮；
+/// 2) 出画后才显示内嵌视频容器、操作行（全屏/画中画/预览窗）与胶囊按键条；
+/// 3) 全屏 = 纯黑容器 + 左上角 5 秒淡出的圆形退出按钮，触摸画面即恢复；
+/// 4) Wi-Fi 与极核仪表输出收进连接设置卡，自检与日志收成一行摘要。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
     @StateObject private var controller = CPMirrorController()
 
-    @State private var mode = "carplay"
     @State private var checks: [CPMirrorDiagnostics.CheckResult] = []
     @State private var runningChecks = false
     @State private var showExport = false
@@ -28,22 +25,20 @@ struct MirrorView: View {
     /// 启动超过 5 秒仍未出画面时显示的排障提示
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
+    /// 全屏退出按钮可见性（5 秒无操作淡出，触摸恢复）
+    @State private var exitButtonVisible = true
+    @State private var exitFadeTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 14) {
-                LargeTitle("投屏")
+                LargeTitle("CarPlay")
                     .staggerIn(0)
 
-                modeSelector.staggerIn(0)
+                carPlayHeroCard.staggerIn(1)
 
-                if mode == "carplay" {
-                    carPlayHeroCard.staggerIn(1)
-                    if controller.phase.isRunning {
-                        previewCard.staggerIn(2)
-                    }
-                } else {
-                    screenMirrorHeroCard.staggerIn(1)
+                if controller.hasVideo {
+                    videoSection.staggerIn(2)
                 }
 
                 SectionHeader("连接设置")
@@ -86,31 +81,20 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 模式选择
-
-    private var modeSelector: some View {
-        Picker("模式", selection: $mode) {
-            Text("同机 CarPlay").tag("carplay")
-            Text("整屏镜像").tag("screen")
-        }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 4)
-    }
-
-    // MARK: - Hero：本机 CarPlay
+    // MARK: - 连接卡（CarWithin 的 connection card）
 
     private var carPlayHeroCard: some View {
         AppleCard(padding: 20) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "carplay")
-                        .font(.system(size: 30, weight: .semibold))
+                    Image(systemName: "car.2.fill")
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Theme.brand)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("本机 CarPlay")
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
-                        Text("无需外接盒子，直接在这台 iPhone 上使用 CarPlay")
+                        Text("无需外接盒子，直接在这台 iPhone 上使用 CarPlay，画面可触控")
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -240,38 +224,7 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - Hero：整屏镜像
-
-    private var screenExtStatus: String? { MirrorStore.extensionStatus() }
-
-    private var screenMirrorHeroCard: some View {
-        AppleCard(padding: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "rectangle.on.rectangle.angled")
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(Theme.teal)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("整屏镜像")
-                            .font(Theme.headline)
-                            .foregroundStyle(Theme.label)
-                        Text("把任意 App 的整屏画面投到极核仪表，熄屏即停止")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                StatusPill(text: screenExtStatus ?? "未运行",
-                           color: screenExtStatus != nil ? Theme.green : Theme.secondary)
-
-                broadcastButton
-            }
-        }
-    }
-
-    // MARK: - 启动按钮（CarPlay 模式）
+    // MARK: - 启动按钮
 
     private var startButton: some View {
         Button {
@@ -314,29 +267,131 @@ struct MirrorView: View {
                          castToZeeho: store.castToZeeho)
     }
 
-    // MARK: - 广播按钮（整屏镜像模式）
+    // MARK: - 视频区（出画后才出现，CarWithin 的 inline video container）
 
-    private var broadcastButton: some View {
-        VStack(spacing: 8) {
-            BroadcastPickerView(preferredExtension: "com.liruixin.jihedrive.mirror")
-                .frame(height: 48)
+    private var videoSection: some View {
+        VStack(spacing: 10) {
+            CPPreviewView(controller: controller)
+                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous)
-                        .fill(Theme.brand)
-                )
-                .overlay(
-                    HStack(spacing: 8) {
-                        Image(systemName: "record.circle")
-                        Text("开始整屏镜像")
-                            .font(Theme.headline)
-                    }
-                    .foregroundStyle(.white)
-                    .allowsHitTesting(false)
-                )
-            Text("在系统面板选择「极核投屏」")
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .clipped()
+
+            // 操作行：全屏（突出）+ 画中画 + 预览窗
+            HStack(spacing: 10) {
+                actionButton("全屏显示", "arrow.up.left.and.arrow.down.right", prominent: true) {
+                    showFullscreen = true
+                }
+                actionButton("画中画", "pip.enter") {
+                    _ = controller.startPictureInPicture()
+                }
+                actionButton("预览窗", "rectangle.inset.filled") {
+                    showPreviewWindow = true
+                }
+            }
+
+            // 按键条：出画后才显示（CarWithin 的胶囊控制条）
+            HStack(spacing: 10) {
+                pillButton("house.fill", "主页") { controller.pressHome() }
+                pillButton("chevron.backward", "返回") { controller.pressBack() }
+                pillButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
+                pillButton("mic.fill", "Siri") { controller.requestSiri() }
+            }
+
+            Text("画面可直接触控操作")
                 .font(Theme.caption)
-                .foregroundStyle(Theme.secondary)
+                .foregroundStyle(Theme.tertiary)
+        }
+    }
+
+    private func actionButton(_ title: String, _ icon: String,
+                              prominent: Bool = false,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
+                    .font(Theme.footnote.weight(.semibold))
+            }
+            .foregroundStyle(prominent ? Color.white : Theme.brand)
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(prominent ? AnyShapeStyle(Theme.brand)
+                                    : AnyShapeStyle(Theme.brand.opacity(0.12)))
+            )
+        }
+        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+    }
+
+    private func pillButton(_ icon: String, _ label: String,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(Theme.brand)
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .background(
+                RoundedRectangle(cornerRadius: 25, style: .continuous)
+                    .fill(Theme.brand.opacity(0.1))
+            )
+        }
+        .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+    }
+
+    // MARK: - 全屏（纯黑容器 + 5 秒淡出退出按钮）
+
+    private var fullscreenView: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            CPPreviewView(controller: controller, fullscreen: true)
+                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { reviveFullscreenExit() }
+
+            if exitButtonVisible {
+                Button {
+                    showFullscreen = false
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Color.black.opacity(0.55)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                }
+                .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
+                .padding(16)
+                .transition(.opacity)
+            }
+        }
+        .onAppear { reviveFullscreenExit() }
+        .onDisappear {
+            exitFadeTask?.cancel()
+            exitFadeTask = nil
+            exitButtonVisible = true
+        }
+    }
+
+    /// 全屏退出按钮：5 秒无操作淡出到消失，触摸画面立即恢复。
+    private func reviveFullscreenExit() {
+        exitFadeTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.2)) { exitButtonVisible = true }
+        exitFadeTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.3)) { exitButtonVisible = false }
+            }
         }
     }
 
@@ -451,10 +506,10 @@ struct MirrorView: View {
 
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("极核 6.2 寸仪表")
+                            Text(controller.zeehoSpecText)
                                 .font(Theme.caption.weight(.semibold))
                                 .foregroundStyle(Theme.label)
-                            Text("1024×480 · H.264 25帧")
+                            Text("投屏输出规格随仪表协商结果自动适配")
                                 .font(Theme.caption)
                                 .foregroundStyle(Theme.secondary)
                         }
@@ -619,96 +674,10 @@ struct MirrorView: View {
         return results
     }
 
-    // MARK: - CarPlay 预览卡
-
-    private var previewCard: some View {
-        AppleCard {
-            VStack(spacing: 10) {
-                CPPreviewView(controller: controller)
-                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(alignment: .topTrailing) {
-                        HStack(spacing: 8) {
-                            previewOverlayButton("pip.enter", "画中画") {
-                                _ = controller.startPictureInPicture()
-                            }
-                            previewOverlayButton("rectangle.inset.filled", "预览窗") {
-                                showPreviewWindow = true
-                            }
-                            previewOverlayButton("arrow.up.left.and.arrow.down.right", "全屏") {
-                                showFullscreen = true
-                            }
-                        }
-                        .padding(8)
-                    }
-                Text("画面可直接触控操作")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-            }
-        }
-    }
-
-    /// 预览画面右上角的半透明快捷钮（替代原来的按钮组）。
-    private func previewOverlayButton(_ icon: String, _ label: String,
-                                      action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(label)
-                    .font(.system(size: 9, weight: .medium))
-            }
-            .foregroundStyle(.white)
-            .frame(width: 46, height: 40)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.black.opacity(0.45)))
-        }
-        .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
-    }
-
-    private func controlButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                Text(label)
-                    .font(Theme.caption)
-            }
-            .foregroundStyle(Theme.label)
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Theme.groupedBackground)
-            )
-        }
-        .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-    }
-
-    private var fullscreenView: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(spacing: 12) {
-                CPPreviewView(controller: controller, fullscreen: true)
-                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                HStack(spacing: 12) {
-                    controlButton("house.fill", "主页") { controller.pressHome() }
-                    controlButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
-                    controlButton("chevron.backward", "返回") { controller.pressBack() }
-                    controlButton("mic.fill", "Siri") { controller.requestSiri() }
-                    controlButton("xmark.circle.fill", "退出") { showFullscreen = false }
-                }
-                .padding(.horizontal, Theme.page)
-            }
-        }
-    }
-
     // MARK: - 可操作预览窗口
 
     /// 弹出的可操作预览窗口：内嵌触控画面，同一 Wi-Fi 下的 iPad/电脑
-    /// 打开提示地址也能看到同一画面并回传触控。可最小化成悬浮窗、可全屏。
+    /// 打开提示地址也能看到同一画面并回传触控。可全屏。
     private var previewWindowSheet: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -811,9 +780,6 @@ struct MirrorView: View {
             }
         }
     }
-
-    /// 最小化悬浮窗已由系统画中画取代：预览窗顶栏的画中画按钮启动后，
-    /// 悬浮窗由系统提供（可拖动/缩放/覆盖其他 App/离开 App 保持）。
 
     // MARK: - 日志：默认收起，点开看详情
 
@@ -966,21 +932,6 @@ private struct PhaseStepTracker: View {
         }
         return Theme.surfaceAlt
     }
-}
-
-// MARK: - 系统广播选择器
-
-private struct BroadcastPickerView: UIViewRepresentable {
-    let preferredExtension: String
-
-    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let picker = RPSystemBroadcastPickerView(frame: .zero)
-        picker.preferredExtension = preferredExtension
-        picker.showsMicrophoneButton = false
-        return picker
-    }
-
-    func updateUIView(_ picker: RPSystemBroadcastPickerView, context: Context) {}
 }
 
 // MARK: - 分享面板

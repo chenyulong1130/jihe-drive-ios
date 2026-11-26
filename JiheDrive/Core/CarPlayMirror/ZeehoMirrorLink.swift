@@ -1,10 +1,40 @@
 import Foundation
 import UIKit
 
-/// 极核仪表 PXC 投屏会话（6.2 寸，1024×480 H.264）。
+/// 极核仪表 PXC 投屏会话（档案驱动，支持极核各尺寸仪表）。
 /// 手机监听 10922(控制)/10711(媒体)/10710(视频)，主动连仪表 10930 发起投屏请求；
 /// 仪表回连后完成 RSA 身份协商，随后逐帧拉取 H.264。
+/// 显示差异收敛在 DisplayProfile：媒体配置阶段仪表会上报实际面板尺寸，
+/// 会话按协商结果回 0x11 并把输出尺寸暴露给上层（转码器按此重编码）。
 final class ZeehoMirrorLink {
+
+    /// 显示档案：一类极核仪表屏幕 = 一个档案（对齐参考实现 1.0.5 的 TailingDisplayProfile）。
+    struct DisplayProfile: Equatable {
+        let width: Int
+        let height: Int
+        let name: String
+
+        static let zeeho62 = DisplayProfile(width: 1024, height: 480, name: "极核 6.2 寸")
+        static let zeeho62New = DisplayProfile(width: 1024, height: 488, name: "极核 6.2 寸(新批次)")
+        /// SE+ 5/5.5 寸实测上报 1600×770；其他 AE2/新屏按上报值自适应。
+        static let zeehoSEPlus = DisplayProfile(width: 1600, height: 770, name: "极核 SE+ 5/5.5 寸")
+    }
+
+    /// 已知极核屏幕档案；未匹配的尺寸按「合理范围」自适应接受。
+    static let knownProfiles: [DisplayProfile] = [.zeeho62, .zeeho62New, .zeehoSEPlus]
+
+    /// 仪表上报的尺寸是否可接受（对齐参考实现 1.0.5 的档案边界）。
+    /// AE2 档案：240–1920 × 240–1080；SE+ 档案：宽≥高、偶数尺寸（编码器 4:2:0 要求）。
+    static func acceptable(width: Int, height: Int) -> Bool {
+        if knownProfiles.contains(where: { $0.width == width && $0.height == height }) { return true }
+        return (240...1920).contains(width) && (240...1080).contains(height)
+            && width >= height
+            && width.isMultiple(of: 2) && height.isMultiple(of: 2)
+    }
+
+    /// 编码器 4:2:0 需要偶数尺寸：向下取整到偶数。
+    static func even(_ value: Int) -> Int { value & ~1 }
+
 
     struct Ports {
         let control: UInt16
@@ -47,6 +77,12 @@ final class ZeehoMirrorLink {
 
     let width = 1024
     let height = 480
+
+    /// 媒体协商完成后确定的实际输出尺寸（0x11 回给仪表的值）。
+    /// 默认 1024×480；仪表上报 1024×488 时按参考实现回 480；
+    /// 未知尺寸按上报值自适应。上层（转码器/界面）应读取此值。
+    private(set) var outputSize: (width: Int, height: Int) = (1024, 480)
+    private(set) var negotiatedName: String = DisplayProfile.zeeho62.name
 
     private let queue = DispatchQueue(label: "jihedrive.zeeho.link", qos: .userInitiated)
     private var controlListener: ZeehoMirrorListener?
@@ -93,6 +129,8 @@ final class ZeehoMirrorLink {
         stop()
         self.localIP = localIP
         self.targetIP = targetIP
+        outputSize = (1024, 480)
+        negotiatedName = Self.DisplayProfile.zeeho62.name
         closed = false
         failure = nil
         currentState = .listening
@@ -394,7 +432,11 @@ final class ZeehoMirrorLink {
         case 0x20021, 0x20031, 0x204c1, 0x20491, 0x20051, 0x20591, 0x205a1, 0x70000001:
             return // 回应不再回应，避免往返循环
         default:
-            log("未知协商命令 0x\(String(request.command, radix: 16))，已忽略")
+            // 新屏幕（SE+/AE2 固件）会发 MotoPlay 等扩展通知：按参考实现 1.0.5 的
+            // zeehoExtensionReply 策略，保留 identifier 回空载荷确认（命令+1），不中断协商。
+            log("极核扩展通知 0x\(String(request.command, radix: 16))（\(request.payload.count) 字节），已回复接收确认")
+            try await channel.write(try ZeehoMirrorFrame.encodeControl(
+                command: request.command &+ 1, identifier: request.identifier, payload: Data()))
             return
         }
         try await replyControl(request, channel: channel, payload: payload)
@@ -488,7 +530,7 @@ final class ZeehoMirrorLink {
             guard request.payload.count >= 32 else { throw CPError.malformed("媒体配置载荷不足 32 字节") }
             let width = request.payload.uint16LE(0)
             let height = request.payload.uint16LE(2)
-            guard width == 1024, height == 480 || height == 488 else {
+            guard ZeehoMirrorLink.acceptable(width: width, height: height) else {
                 throw CPError.rejected("仪表媒体尺寸 \(width)×\(height) 与极核配置不符")
             }
             guard let signature = signedHUID, let huid, let identity else {
@@ -499,12 +541,29 @@ final class ZeehoMirrorLink {
                   ZeehoMirrorIdentity.verifyEcho(identity, signature: echoed, huid: huid) else {
                 throw CPError.rejected("媒体身份回显不匹配")
             }
+            // 1024×488 的新批次仪表：按参考实现回 1024×480（已实测兼容）；
+            // 其他未知尺寸按上报值自适应，转码器输出随协商结果走。
+            let output: (width: Int, height: Int)
+            let name: String
+            if width == 1024 && height == 488 {
+                output = (1024, 480)
+                name = DisplayProfile.zeeho62New.name
+            } else if let known = ZeehoMirrorLink.knownProfiles.first(where: { $0.width == width && $0.height == height }) {
+                output = (known.width, known.height)
+                name = known.name
+            } else {
+                // AE2 档案同款：上报值取偶（编码器 4:2:0 要求）
+                output = (Self.even(width), Self.even(height))
+                name = "极核仪表 \(Self.even(width))×\(Self.even(height))"
+            }
             ZeehoMirrorFrame.appendLE(&payload, UInt32(2)) // codec = H.264
-            ZeehoMirrorFrame.appendLE(&payload, UInt16(width))
-            ZeehoMirrorFrame.appendLE(&payload, UInt16(height))
+            ZeehoMirrorFrame.appendLE(&payload, UInt16(output.width))
+            ZeehoMirrorFrame.appendLE(&payload, UInt16(output.height))
             response = 0x11
             configured = true
-            log("媒体身份回显校验通过，回应 H.264 / \(width)×\(height)")
+            outputSize = output
+            negotiatedName = name
+            log("媒体身份回显校验通过：仪表面板 \(width)×\(height)，投屏输出 \(name) \(output.width)×\(output.height) H.264")
         case 0x70:
             guard configured else { throw CPError.rejected("仪表在配置完成前请求媒体启动") }
             try await channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: 0x71, token: request.token))

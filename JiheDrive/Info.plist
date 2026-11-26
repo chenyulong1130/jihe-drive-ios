@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>156</string>
+	<string>157</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>
@@ -68,8 +68,12 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>投屏功能需要访问本地网络：接收 CarPlay 音视频，并把画面发送到极核仪表。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>投屏功能需要访问本地网络：接收 CarPlay 音视频，并把画面发送到极核仪表。</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>设备页需要连接 BMS 保护板、电机控制器与 LED 灯具，读取实时状态并下发控制指令。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>用于连接车辆蓝牙设备（BMS 保护板、控制器、灯具）。</string>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

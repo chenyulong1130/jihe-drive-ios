@@ -234,11 +234,15 @@ final class CPBootstrap {
             if controlConnected || requested { return }
             try requestSession(configuration)
             if !requested {
-                // 3/6/9 秒重试，等待 Wi-Fi 路由就绪
+                // 3/6/9 秒重试，等待 Wi-Fi 路由就绪；出错立即终止并给出原因（不再静默吞掉）
                 for delay in [3.0, 6.0, 9.0] {
                     schedule(after: delay) { [weak self] in
                         guard let self, self.active, !self.controlConnected else { return }
-                        try? self.requestSession(self.configuration ?? CPInfo.Configuration.default(deviceID: ""))
+                        do {
+                            try self.requestSession(self.configuration ?? CPInfo.Configuration.default(deviceID: ""))
+                        } catch {
+                            self.finish("重发 CarPlay 会话失败：\(error.localizedDescription)")
+                        }
                     }
                 }
             }
@@ -254,7 +258,7 @@ final class CPBootstrap {
         // StartSession 必须带 Wi-Fi 信息：缺失时 iOS 无法回连 7000 端口。
         // 缺失时 iOS 可能无法回连 7000 端口，表现为「已请求会话但永远等不到控制连接」。
         guard let wifi = CPWiFiDefaults.validated() else {
-            throw CPError.malformed("未配置 Wi-Fi 名称与密码，无法发起 CarPlay 会话（请在投屏页填写 Wi-Fi 预设）")
+            throw CPError.malformed(CPWiFiDefaults.validationError() ?? "Wi-Fi 预设无效")
         }
         let wifiInfo = CPIAP2.WiFiInfo(ssid: wifi.ssid, password: wifi.password, channel: wifi.channel)
         try send(CPIAP2.carPlayStartSession(address: configuration.address,
@@ -275,13 +279,30 @@ enum CPWiFiDefaults {
 
     private static let defaults = UserDefaults.standard
 
+    /// CarPlay 对 Wi-Fi 预设有硬性约束：SSID 1–32 字节、密码为空或 8–63 字节、信道 1–196。
+    /// 不满足时 iOS 无法回连 7000 端口，表现为「已请求会话但永远等不到控制连接」。
     static func validated() -> Preset? {
-        guard let ssid = defaults.string(forKey: "cp.wifi.ssid"), !ssid.isEmpty else { return nil }
+        if let error = validationError() { return nil }
+        let ssid = defaults.string(forKey: "cp.wifi.ssid") ?? ""
         let password = defaults.string(forKey: "cp.wifi.password") ?? ""
-        let channel = UInt8(defaults.integer(forKey: "cp.wifi.channel")) == 0
-            ? 36
-            : UInt8(defaults.integer(forKey: "cp.wifi.channel"))
+        var channel = UInt8(defaults.integer(forKey: "cp.wifi.channel"))
+        if channel == 0 { channel = 36 }
         return Preset(ssid: ssid, password: password, channel: channel)
+    }
+
+    /// 预设无效时的人类可读原因；nil 表示有效。
+    static func validationError() -> String? {
+        guard let ssid = defaults.string(forKey: "cp.wifi.ssid"), !ssid.isEmpty else {
+            return "未配置 Wi-Fi 名称与密码，无法发起 CarPlay 会话（请在 CarPlay 页填写 Wi-Fi 预设）"
+        }
+        let password = defaults.string(forKey: "cp.wifi.password") ?? ""
+        let channel = UInt8(defaults.integer(forKey: "cp.wifi.channel"))
+        if ssid.utf8.count > 32 { return "Wi-Fi 名称超过 32 字节（当前 \(ssid.utf8.count)），iPhone 无法使用该预设" }
+        if !password.isEmpty && !(8...63).contains(password.utf8.count) {
+            return "Wi-Fi 密码需为 8–63 字节（开放网络留空），当前 \(password.utf8.count) 字节"
+        }
+        if channel != 0 && !(1...196).contains(Int(channel)) { return "Wi-Fi 信道无效（\(channel)）" }
+        return nil
     }
 
     static func save(ssid: String, password: String, channel: UInt8) {

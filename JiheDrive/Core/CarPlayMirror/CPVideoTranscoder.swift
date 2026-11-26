@@ -5,9 +5,9 @@ import CoreImage
 import ImageIO
 import VideoToolbox
 
-/// 视频转码器：任意来源（CarPlay 流 / 整屏广播）→ 解码 → 缩放 → 按
-/// 极核仪表验证过的参数重编码（1024×480 @25fps / 2.5Mbps / H.264 Baseline，
-/// 首帧强制 IDR）。与极核仪表实测兼容的出帧规格一致。
+/// 视频转码器：任意来源（CarPlay 流）→ 解码 → 缩放 → 按仪表协商规格重编码
+/// （默认 1024×480 @25fps / 2.5Mbps / H.264 Baseline，首帧强制 IDR；
+/// 极核其他尺寸仪表经 setOutputSize 切换）。
 final class CPVideoTranscoder {
 
     enum ScaleMode {
@@ -15,14 +15,30 @@ final class CPVideoTranscoder {
         case crop   // 居中裁出横幅窗口填满仪表（竖屏导航信息区）
     }
 
-    let width = 1024
-    let height = 480
-    let fps: Double = 25
-    let bitrate: Int = 2_500_000
-
     var scaleMode: ScaleMode = .fit
     /// 解码失效时由上层请求系统重发关键帧（恢复闭环）。
     var onKeyframeNeeded: (() -> Void)?
+
+    // 输出尺寸：默认极核 6.2 寸；媒体协商出其他仪表尺寸时由上层 setOutputSize 切换
+    private(set) var width = 1024
+    private(set) var height = 480
+    let fps: Double = 25
+    let bitrate: Int = 2_500_000
+
+    /// 按协商结果切换输出尺寸（如极核其他尺寸仪表）。下一次编码前生效，
+    /// 旧编码器即刻废弃，新会话按新尺寸创建。
+    func setOutputSize(width newWidth: Int, height newHeight: Int) {
+        guard newWidth != width || newHeight != height else { return }
+        encodeLock.lock()
+        width = newWidth
+        height = newHeight
+        if let encoder { VTCompressionSessionInvalidate(encoder) }
+        encoder = nil
+        encoderParamSets = nil
+        encodedResult = nil
+        encodeLock.unlock()
+        MirrorLogStore.append("投屏输出尺寸切换为 \(newWidth)×\(newHeight)")
+    }
 
     // 解码状态
     private let decodeQueue = DispatchQueue(label: "cp.transcode.decode")

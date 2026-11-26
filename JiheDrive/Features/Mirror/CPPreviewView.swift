@@ -258,8 +258,11 @@ final class CPDisplaySurface: UIView {
         var picture: [Data] = []
         var changed = false
         for unit in units {
-            if parameters?.absorb(unit) == true { changed = true }
-            else { picture.append(unit) }
+            if parameters?.absorb(unit) == true { changed = true; continue }
+            // 参数集 NAL（含与缓存相同的重复包）一律不进画面数据——
+            // 与参考实现保持一致，避免重复 SPS/PPS 混入解码队列。
+            if codec.parameterSet(unit) != nil { continue }
+            picture.append(unit)
         }
         if (changed || format == nil), let sets = parameters, sets.isComplete {
             let newFormat = try makeFormat(sets)

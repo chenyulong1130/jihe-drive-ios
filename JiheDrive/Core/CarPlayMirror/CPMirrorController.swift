@@ -75,6 +75,10 @@ final class CPMirrorController: ObservableObject {
     /// 本地 CarPlay 与极核输出解耦：关闭后仍保留预览和触控。
     @Published private(set) var castToZeeho = true
     @Published private(set) var zeehoStatus = "未启用"
+    /// 已收到第一帧 CarPlay 视频（出画后才显示视频区/操作行/按键条）。
+    @Published private(set) var hasVideo = false
+    /// 极核仪表协商出的投屏规格文案（如「极核 6.2 寸 1024×480 · H.264」）。
+    @Published private(set) var zeehoSpecText = "极核 6.2 寸 1024×480 · H.264"
 
     func clearLogs() {
         DispatchQueue.main.async { [weak self] in self?.logs.removeAll() }
@@ -114,6 +118,8 @@ final class CPMirrorController: ObservableObject {
         let token = UUID()
         startToken = token
         UIApplication.shared.isIdleTimerDisabled = true
+        // 黑屏修复关键：音频会话必须在前台、虚拟 CarPlay 路由被选中之前激活并全程持有。
+        CPKeepAlive.shared.start()
         DispatchQueue.main.async { [weak self] in
             self?.logs.removeAll(keepingCapacity: true)
         }
@@ -121,6 +127,7 @@ final class CPMirrorController: ObservableObject {
         self.localIP = localIP
         self.castToZeeho = castToZeeho
         self.localVideoReceived = false
+        self.hasVideo = false
         self.pendingControlConnected = false
         self.transcoder.onKeyframeNeeded = { [weak self] in self?.requestKeyFrame() }
         self.zeehoStatus = castToZeeho ? "等待连接" : "未启用"
@@ -155,15 +162,16 @@ final class CPMirrorController: ObservableObject {
             self.videoBox.store(data)
             // 预览直接吃原始访问单元；转码器只服务于后续极核输出。
             self.frameHub.publish(.frame(data, codec))
-            guard codec == .h264 else { return }
-            self.transcoder.appendAnnexB(data)
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.localVideoReceived else { return }
                 self.localVideoReceived = true
+                self.hasVideo = true
                 self.pip.startFeed()
                 self.appendLog("已收到 CarPlay 视频，本地预览与触控可用")
                 self.setPhase(.localStreaming)
             }
+            guard codec == .h264 else { return }
+            self.transcoder.appendAnnexB(data)
         }
         receiver.onControlConnected = { [weak self] in
             guard let self, self.startToken == token else { return }
@@ -194,6 +202,7 @@ final class CPMirrorController: ObservableObject {
     func stop() {
         startToken = UUID()
         UIApplication.shared.isIdleTimerDisabled = false
+        CPKeepAlive.shared.stop()
         bootstrapWatchTask?.cancel()
         bootstrapWatchTask = nil
         networkRestartCount = 0
@@ -219,6 +228,7 @@ final class CPMirrorController: ObservableObject {
         currentConfiguration = nil
         currentIdentity = nil
         zeehoStatus = "未启用"
+        zeehoSpecText = "极核 6.2 寸 1024×480 · H.264"
         if phase.isRunning {
             setPhase(.stopped(nil))
         }
@@ -397,6 +407,10 @@ final class CPMirrorController: ObservableObject {
                 if self.localVideoReceived { self.setPhase(.streaming) }
             case .ready:
                 self.zeehoStatus = "协商完成"
+                // 媒体协商完成：按仪表实际上报尺寸切换转码输出，适配极核各尺寸屏幕
+                let size = link.outputSize
+                self.transcoder.setOutputSize(width: size.width, height: size.height)
+                self.zeehoSpecText = "\(link.negotiatedName) \(size.width)×\(size.height) · H.264"
             case .failed(let reason):
                 self.zeehoStatus = "失败：\(reason)"
                 self.appendLog("仪表链路失败：\(reason)（本地 CarPlay 不受影响）")

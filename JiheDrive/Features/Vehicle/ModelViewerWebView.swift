@@ -26,6 +26,8 @@ struct ModelViewerWebView: UIViewRepresentable {
     /// 页面不在前台时置 false：暂停渲染，翻页不吃 WebGL
     var active: Bool = true
     var lightsOn: Bool? = nil        // 全车灯（不含转向灯）：深色主题 true / 浅色 false
+    /// 大灯光锥仰角 0~100（大灯调节页专用）：0 明显下压 → 100 抬升过水平
+    var beamPercent: Int? = nil
     var onDrag: ((Bool) -> Void)? = nil
     var onOrbitChanged: ((Bool) -> Void)? = nil
     var onReady: (() -> Void)? = nil
@@ -46,6 +48,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.resetToken = resetToken
         context.coordinator.active = active
         context.coordinator.desiredLightsOn = lightsOn
+        context.coordinator.desiredBeamPercent = beamPercent
         context.coordinator.desiredSeatOpen = seatOpen
         context.coordinator.desiredSeatToken = seatToken
 
@@ -97,6 +100,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.onSeatChange = onSeatChange
         context.coordinator.onSeatProgress = onSeatProgress
         context.coordinator.desiredLightsOn = lightsOn
+        context.coordinator.desiredBeamPercent = beamPercent
         context.coordinator.desiredSeatOpen = seatOpen
         context.coordinator.desiredSeatToken = seatToken
         context.coordinator.applyDesired(view, force: false) // 状态变化即时下发（token 变化触发）
@@ -195,9 +199,11 @@ struct ModelViewerWebView: UIViewRepresentable {
         var active = true
         var reuseKey = ""
         var desiredLightsOn: Bool?
+        var desiredBeamPercent: Int?
         var desiredSeatOpen: Bool = false
         var desiredSeatToken: Int = 0
         private var appliedLights: Bool?
+        private var appliedBeam: Int?
         private var appliedSeatToken: Int?
         private var loadedFile: URL?
         private var loadedInteractive: Bool?
@@ -214,6 +220,12 @@ struct ModelViewerWebView: UIViewRepresentable {
                 appliedLights = desiredLightsOn
                 if let on = desiredLightsOn {
                     view.evaluateJavaScript("window.jhSetLights && window.jhSetLights(\(on))", completionHandler: nil)
+                }
+            }
+            if force || appliedBeam != desiredBeamPercent {
+                appliedBeam = desiredBeamPercent
+                if let p = desiredBeamPercent {
+                    view.evaluateJavaScript("window.jhSetBeamAngle && window.jhSetBeamAngle(\(p))", completionHandler: nil)
                 }
             }
             if force || appliedSeatToken != desiredSeatToken {
@@ -640,7 +652,7 @@ enum ModelViewerAsset {
         // 之前的“中间束+左右两束+远光锥+聚光灯”全部去掉。车头朝 -x（AE4 实测）；
         // 灯口取 L-HighBeam/L-LowBeam 包围盒中心（节点原点≠灯面中心）。
         // 画布是透明背景，AdditiveBlending 会被 alpha 合成吃掉，必须用普通混合。
-        const BEAM_DIR = new THREE.Vector3(-1, -0.18, 0); // 照向前方、略微下压
+        let beamDir = new THREE.Vector3(-1, -0.45, 0); // 仰角由 jhSetBeamAngle 按高度百分比驱动（默认下压，模型就绪前兜底）
         let beamGroup = null;
         let beamOrigin = null;
         const beams = { main: null };
@@ -682,9 +694,18 @@ enum ModelViewerAsset {
           beamGroup.visible = on;
           // 开灯不压暗环境光：日间观感一致，光锥靠普通混合保证可见
           if (!on) return;
-          aimBeam(beams.main, beamOrigin, BEAM_DIR, 6.0, 1.05); // 单束：长而宽，侧影近似三角
+          aimBeam(beams.main, beamOrigin, beamDir, 6.0, 1.05); // 单束：长而宽，侧影近似三角
           beams.main.visible = true;
         }
+        window.jhSetBeamAngle = (p) => {
+          const t = Math.min(Math.max(Number(p) || 0, 0), 100) / 100;
+          beamDir.y = -0.45 + t * 0.78; // 0% 明显下压 → 100% 抬升越过水平线
+          beamDir.normalize();
+          if (beamGroup && beams.main && beamOrigin && lightsState) {
+            aimBeam(beams.main, beamOrigin, beamDir, 6.0, 1.05);
+          }
+          needsRender = true;
+        };
         const lampMats = [];
         let lightsState = false; // 最近一次 jhSetLights 的目标状态，模型就绪后立即补挂
         function applyLights(on) {

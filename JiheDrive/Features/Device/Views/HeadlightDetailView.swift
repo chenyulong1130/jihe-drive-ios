@@ -1,0 +1,663 @@
+import SwiftUI
+
+/// 石栏大灯调节专属页：调节大灯高低位置
+/// 走 motor_handle 的 5A A5 电机帧，复用 MotorStore。
+/// 主视觉用当前车辆的 3D 模型（GLB）+ 大灯光锥，仰角实时跟随高度百分比；
+/// 没有可用模型时降级为 2D 光束示意。页面不使用 SF 符号图标。
+struct HeadlightDetailView: View {
+    @EnvironmentObject private var ble: DeviceBLEManager
+    @EnvironmentObject private var session: DeviceSession
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var appearance: AppearanceStore
+    @ObservedObject var store: MotorStore
+
+    @State private var glbFile: URL?
+    @State private var glbFailed = false
+    @State private var showLogs = false
+    @State private var resetToken = 0
+    @State private var scrubbing = false
+    @State private var scrubValue: Double = 0
+
+    private var current: Int { store.params.absolutePercent }
+    private var target: Int { store.params.targetPercent }
+    private var accent: Color { Theme.teal }
+
+    /// 滑块拖动中显示拖动值，否则显示目标值
+    private var displayPercent: Double {
+        scrubbing ? scrubValue : store.targetPercent
+    }
+
+    /// 3D 光束跟随：拖动中跟手指，移动中乐观指向目标，空闲时设备回报的真实位置
+    private var beamPercent: Int {
+        if scrubbing { return Int(scrubValue) }
+        if store.busy { return Int(store.targetPercent) }
+        return current
+    }
+
+    private var stageDark: Bool { appearance.resolvedScheme == .dark }
+
+    private var stageColors: [Color] {
+        stageDark
+            ? [Color(hex: 0x081018), Color(hex: 0x122236), Color(hex: 0x060B10)]
+            : [Color(hex: 0xE9EDF3), Color(hex: 0xF4F6F9), Color(hex: 0xDCE3EC)]
+    }
+
+    private var stageFg: Color { stageDark ? .white : Theme.label }
+    private var stageFgSoft: Color { stageDark ? Color.white.opacity(0.62) : Theme.secondary }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 0) {
+                stage
+                heightSummary
+                SectionHeader("设备参数")
+                paramsCard
+                SectionHeader("快捷高度")
+                quickCard
+                SectionHeader("精细调节")
+                fineCard
+                SectionHeader("自检与归位")
+                actionCard
+                SectionHeader("车型预设")
+                projectCard
+                SectionHeader("通信日志")
+                LogPanel(title: "指令记录", logs: store.logs)
+            }
+            .padding(.horizontal, Theme.page)
+            .padding(.bottom, 40)
+        }
+        .background(Theme.groupedBackground)
+        .navigationTitle("石栏大灯调节")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("读取参数") { store.loadParams() }
+                    .font(Theme.footnote)
+            }
+        }
+        .onAppear {
+            store.attach(ble, handlerKey: "headlight")
+            if !store.paramsLoaded { store.loadParams() }
+        }
+        .onDisappear { store.deactivate() }
+        .task(id: model.selectedVehicle?.vinNo ?? "none") {
+            await loadCarModel()
+        }
+        .sheet(isPresented: $showLogs) {
+            NavigationStack {
+                ScrollView {
+                    Text(store.logs.joined(separator: "\n"))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.page)
+                }
+                .background(Theme.groupedBackground)
+                .navigationTitle("指令记录")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) { Button("完成") { showLogs = false } }
+                }
+            }
+        }
+    }
+
+    private func loadCarModel() async {
+        guard let vehicle = model.selectedVehicle,
+              let url = vehicle.model3DURL,
+              vehicle.isGLBModel else {
+            glbFile = nil
+            glbFailed = model.selectedVehicle != nil
+            return
+        }
+        do {
+            glbFile = try await GLBModelStore.localFile(for: url, vin: vehicle.vinNo)
+            glbFailed = false
+        } catch {
+            glbFile = nil
+            glbFailed = true
+        }
+    }
+
+    // MARK: - 3D 车模舞台
+
+    private var stage: some View {
+        ZStack {
+            LinearGradient(colors: stageColors, startPoint: .top, endPoint: .bottom)
+
+            stageContent
+                .padding(.horizontal, 10)
+                .padding(.top, 40)
+                .padding(.bottom, 30)
+
+            VStack {
+                stageHeader
+                Spacer(minLength: 0)
+                stageHint
+            }
+        }
+        .frame(height: 300)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var stageContent: some View {
+        if let glbFile {
+            Color.clear.overlay {
+                ModelViewerWebView(
+                    glbFile: glbFile,
+                    reuseKey: "headlight3d",
+                    interactive: true,
+                    autoRotate: false,
+                    resetToken: resetToken,
+                    lightsOn: true,
+                    beamPercent: beamPercent
+                )
+            }
+        } else if glbFailed {
+            VStack(spacing: 8) {
+                Text("3D 模型不可用")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(stageFg)
+                Text("当前车辆未提供 3D 模型，下方为示意视图")
+                    .font(Theme.caption)
+                    .foregroundStyle(stageFgSoft)
+                HeadlightBeamView(current: current, target: Int(displayPercent), accent: accent)
+                    .frame(height: 140)
+                    .padding(.horizontal, 8)
+            }
+        } else {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("正在加载车模")
+                    .font(Theme.caption)
+                    .foregroundStyle(stageFgSoft)
+            }
+        }
+    }
+
+    private var stageHeader: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("大灯高度")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(stageFg)
+                Text(model.selectedVehicle?.name ?? "石栏大灯")
+                    .font(Theme.caption)
+                    .foregroundStyle(stageFgSoft)
+            }
+            Spacer(minLength: 8)
+            StatusPill(
+                text: store.status,
+                color: store.busy ? Theme.orange : (store.paramsLoaded ? Theme.green : Theme.secondary)
+            )
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+    }
+
+    private var stageHint: some View {
+        HStack(spacing: 10) {
+            Text("拖动旋转 · 双击复位")
+                .font(Theme.caption)
+                .foregroundStyle(stageFgSoft)
+            Spacer()
+            Button("复位视角") { withAnimation(Motion.quick) { resetToken += 1 } }
+                .font(Theme.caption)
+                .foregroundStyle(stageDark ? .white : Theme.brand)
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
+    // MARK: - 高度数字摘要
+
+    private var heightSummary: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("\(current)")
+                .font(.system(size: 44, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.label)
+                .contentTransition(.numericText())
+            Text("%")
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.secondary)
+            Text("当前高度")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 5) {
+                    Rectangle()
+                        .fill(Theme.orange)
+                        .frame(width: 12, height: 2)
+                    Text("目标 \(target)%")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.orange)
+                }
+                Text("限位 \(store.params.minPercent)–\(store.params.maxPercent)%")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+        .padding(.top, 12)
+    }
+
+    // MARK: - 设备参数总览（对齐小程序读回的全部字段）
+
+    private var paramsCard: some View {
+        let p = store.params
+        let projectName = MotorProject.all.first(where: { $0.index == p.project })?.name ?? "默认"
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            paramTile("当前车型", projectName, accent)
+            paramTile("绝对位置", "\(p.absolutePercent)%", Theme.label)
+            paramTile("目标位置", "\(p.targetPercent)%", Theme.orange)
+            paramTile("速度等级", "\(p.speedLevel) / 10", accent)
+            paramTile("限位范围", "\(p.minPercent)–\(p.maxPercent)%", Theme.label)
+            paramTile("工作模式", p.workingMode == 0 ? "扫描" : "归位", Theme.label)
+            paramTile("自检", p.selfMode ? "开启" : "关闭", p.selfMode ? Theme.orange : Theme.secondary)
+            paramTile("自检方向", p.selfModeDir == 0 ? "正向" : "反向", Theme.label)
+            paramTile("归位方向", p.homingDir == 0 ? "正向" : "反向", Theme.label)
+            paramTile("方向", p.reverse ? "反转" : "正向", p.reverse ? Theme.orange : Theme.label)
+            paramTile("参数状态", store.paramsLoaded ? "已读取" : "待读取", store.paramsLoaded ? Theme.green : Theme.secondary)
+            paramTile("电机状态", store.busy ? "运行中" : "空闲", store.busy ? Theme.orange : Theme.green)
+        }
+    }
+
+    private func paramTile(_ title: String, _ value: String, _ tint: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(title)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Theme.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Theme.surfaceAlt)
+        )
+    }
+
+    // MARK: - 快捷高度
+
+    private var quickCard: some View {
+        AppleCard(padding: 14) {
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    ForEach(quickLevels, id: \.value) { level in
+                        Button {
+                            store.moveTo(percent: Double(level.value))
+                        } label: {
+                            VStack(spacing: 2) {
+                                Text("\(level.value)")
+                                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                Text(level.label)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            .foregroundStyle(Theme.label)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(level.value == current ? accent.opacity(0.14) : Theme.surfaceAlt)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(level.value == current ? accent.opacity(0.55) : .clear, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+                        .disabled(!store.paramsLoaded || store.busy)
+                    }
+                }
+                Text(store.params.reverse
+                     ? "反转开启：快捷百分比按 100 − 目标换算到电机绝对位置"
+                     : "按目标百分比把大灯移动到对应高度")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var quickLevels: [(value: Int, label: String)] {
+        [(0, "最低"), (25, "较低"), (50, "居中"), (75, "较高"), (100, "最高")]
+    }
+
+    // MARK: - 精细调节
+
+    private var fineCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("目标高度")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                        Spacer()
+                        Text("\(Int(displayPercent))%")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(accent)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { displayPercent },
+                            set: { newValue in
+                                scrubValue = newValue
+                                store.targetPercent = newValue
+                            }
+                        ),
+                        in: 0...100,
+                        step: 1,
+                        onEditingChanged: { editing in
+                            if editing {
+                                scrubbing = true
+                            } else {
+                                scrubbing = false
+                                // 松手即移动：拖动过程只预览，结束时一次性下发，避免刷屏指令
+                                store.moveTo(percent: scrubValue)
+                            }
+                        }
+                    )
+                    .tint(accent)
+                    .disabled(!store.paramsLoaded || store.busy)
+                    Text("拖动时 3D 光束实时预览，松手后大灯移动到该高度")
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.tertiary)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("运行速度")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                        Spacer()
+                        Text("\(Int(store.speedLevel)) / 10")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(accent)
+                    }
+                    Slider(value: $store.speedLevel, in: 0...10, step: 1)
+                        .tint(accent)
+                        .disabled(!store.paramsLoaded)
+                    Button { store.setSpeed(store.speedLevel) } label: {
+                        Text("应用速度")
+                            .font(Theme.footnote)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                    .disabled(!store.paramsLoaded)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("限位范围（需维修密码 0241）")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.secondary)
+                    HStack {
+                        Text("下限 \(Int(store.rangeMin))%")
+                        Spacer()
+                        Text("上限 \(Int(store.rangeMax))%")
+                    }
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+                    HStack(spacing: 12) {
+                        Slider(value: $store.rangeMin, in: 0...100, step: 1).tint(accent)
+                        Slider(value: $store.rangeMax, in: 0...100, step: 1).tint(accent)
+                    }
+                    Button {
+                        withServiceAuth { store.setRange() }
+                    } label: {
+                        Text("应用限位")
+                            .font(Theme.footnote)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                }
+            }
+        }
+    }
+
+    // MARK: - 自检与归位
+
+    private var actionCard: some View {
+        AppleCard(padding: 14) {
+            VStack(spacing: 14) {
+                Picker("工作模式", selection: Binding(
+                    get: { store.workingMode },
+                    set: { mode in store.setWorkingMode(mode) }
+                )) {
+                    Text("扫描").tag(0)
+                    Text("归位").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!store.paramsLoaded)
+
+                Toggle("自检模式", isOn: Binding(
+                    get: { store.selfMode },
+                    set: { newValue in
+                        store.selfMode = newValue
+                        store.setSelfTest(enabled: newValue)
+                    }
+                ))
+                .disabled(!store.paramsLoaded)
+
+                Toggle("反转方向", isOn: Binding(
+                    get: { store.reverse },
+                    set: { newValue in
+                        withServiceAuth {
+                            store.reverse = newValue
+                            store.setReverse(newValue)
+                        }
+                    }
+                ))
+                .disabled(!store.paramsLoaded)
+
+                HStack(spacing: 10) {
+                    Button {
+                        withServiceAuth { store.softZero() }
+                    } label: {
+                        Text("软归零")
+                            .font(Theme.footnote)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                    Button {
+                        withServiceAuth { store.hardZero() }
+                    } label: {
+                        Text("硬归零")
+                            .font(Theme.footnote)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                }
+                .disabled(!store.paramsLoaded || store.busy)
+            }
+        }
+    }
+
+    // MARK: - 车型预设
+
+    private var projectCard: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(MotorProject.all) { project in
+                    let selected = store.selectedProject == project.index
+                    Button {
+                        withServiceAuth { store.applyProject(project) }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(project.name)
+                                .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                            Text("\(project.min)–\(project.max)%")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.tertiary)
+                        }
+                        .foregroundStyle(selected ? accent : Theme.label)
+                        .frame(width: 84, height: 64)
+                        .background(
+                            selected ? accent.opacity(0.14) : Theme.surface,
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(selected ? accent.opacity(0.55) : .clear, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func withServiceAuth(_ action: @escaping () -> Void) {
+        if session.serviceVerified {
+            action()
+        } else {
+            session.requestServiceAuth { ok in
+                if ok { action() }
+            }
+        }
+    }
+}
+
+// MARK: - 2D 光束降级视图（无 3D 模型时）
+
+/// 车身侧视图：大灯光束的仰角随当前高度百分比变化，橙色虚线标出目标高度
+private struct HeadlightBeamView: View {
+    let current: Int
+    let target: Int
+    let accent: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            let groundY = h - 14
+            let wheelR: CGFloat = 10
+            let bodyW = min(w * 0.38, 140)
+            let carLeading: CGFloat = 4
+            let bodyH: CGFloat = 26
+            let bodyY = groundY - wheelR * 2 - bodyH + 5
+
+            let lampX = carLeading + bodyW - 5
+            let lampY = bodyY + 9
+
+            let beamTop: CGFloat = 12
+            let span = lampY - beamTop
+            let beamCenter = lampY - CGFloat(min(100, max(0, current))) / 100 * span
+            let targetCenter = lampY - CGFloat(min(100, max(0, target))) / 100 * span
+            let beamEndX = w - 8
+            let spread: CGFloat = 12
+
+            ZStack {
+                Capsule()
+                    .fill(Theme.separator)
+                    .frame(height: 2)
+                    .position(x: w / 2, y: groundY)
+
+                BeamWedgeShape(
+                    fromX: lampX, fromY: lampY,
+                    toX: beamEndX, centerY: beamCenter, spread: spread
+                )
+                .fill(
+                    LinearGradient(
+                        colors: [Theme.yellow.opacity(0.42), accent.opacity(0.05)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                )
+
+                TargetMarkShape(centerY: targetCenter, x: beamEndX)
+                    .stroke(Theme.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 4]))
+
+                Group {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Theme.label.opacity(0.14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Theme.label.opacity(0.35), lineWidth: 1)
+                        )
+                        .frame(width: bodyW * 0.52, height: 17)
+                        .position(x: carLeading + bodyW * 0.42, y: bodyY - 3)
+
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Theme.label.opacity(0.14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Theme.label.opacity(0.35), lineWidth: 1)
+                        )
+                        .frame(width: bodyW, height: bodyH)
+                        .position(x: carLeading + bodyW / 2, y: bodyY + bodyH / 2)
+
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(accent.opacity(0.18))
+                        .frame(width: bodyW * 0.34, height: 9)
+                        .position(x: carLeading + bodyW * 0.42, y: bodyY - 3)
+
+                    ForEach([0.26, 0.76], id: \.self) { ratio in
+                        Circle()
+                            .fill(Theme.surface)
+                            .overlay(Circle().strokeBorder(Theme.label.opacity(0.45), lineWidth: 2))
+                            .frame(width: wheelR * 2, height: wheelR * 2)
+                            .position(x: carLeading + bodyW * ratio, y: groundY - wheelR)
+                    }
+
+                    Circle()
+                        .fill(Theme.yellow)
+                        .shadow(color: Theme.yellow.opacity(0.85), radius: 5)
+                        .frame(width: 9, height: 9)
+                        .position(x: lampX, y: lampY)
+                }
+
+                Text("高")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Theme.tertiary)
+                    .position(x: beamEndX - 2, y: beamTop + 2)
+                Text("低")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Theme.tertiary)
+                    .position(x: beamEndX - 2, y: lampY - 4)
+            }
+        }
+    }
+}
+
+/// 光束扇形：灯珠 → 右侧上下展开
+private struct BeamWedgeShape: Shape {
+    let fromX: CGFloat
+    let fromY: CGFloat
+    let toX: CGFloat
+    let centerY: CGFloat
+    let spread: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: fromX, y: fromY))
+        p.addLine(to: CGPoint(x: toX, y: centerY - spread))
+        p.addLine(to: CGPoint(x: toX, y: centerY + spread))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// 目标高度竖虚线
+private struct TargetMarkShape: Shape {
+    let centerY: CGFloat
+    let x: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: x, y: centerY - 16))
+        p.addLine(to: CGPoint(x: x, y: centerY + 16))
+        return p
+    }
+}

@@ -3,6 +3,7 @@ import UIKit
 
 enum MainTab: String, CaseIterable, Identifiable {
     case vehicle
+    case device
     case mirror
     case settings
 
@@ -11,7 +12,8 @@ enum MainTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .vehicle: return "车辆"
-        case .mirror: return "投屏"
+        case .device: return "设备"
+        case .mirror: return "CarPlay"
         case .settings: return "我的"
         }
     }
@@ -19,7 +21,8 @@ enum MainTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .vehicle: return "bolt.car"
-        case .mirror: return "rectangle.on.rectangle"
+        case .device: return "bluetooth"
+        case .mirror: return "carplay"
         case .settings: return "person"
         }
     }
@@ -27,7 +30,8 @@ enum MainTab: String, CaseIterable, Identifiable {
     var activeIcon: String {
         switch self {
         case .vehicle: return "bolt.car.fill"
-        case .mirror: return "rectangle.on.rectangle.fill"
+        case .device: return "bluetooth"
+        case .mirror: return "carplay.fill"
         case .settings: return "person.fill"
         }
     }
@@ -129,6 +133,7 @@ struct MainTabView: View {
     private func pageContent(_ item: MainTab) -> some View {
         switch item {
         case .vehicle: VehicleView()
+        case .device: DeviceTabView()
         case .mirror: MirrorView()
         case .settings: SettingsView()
         }
@@ -259,8 +264,8 @@ private struct LiquidTabBar: View {
                 )
         )
         .shadow(color: Theme.softShadow, radius: 24, x: 0, y: 10)
-        // 3 个 tab 时 360 太宽（每格 120pt，选中胶囊显得空旷），收到 272
-        .frame(maxWidth: 272)
+        // 4 个 tab：选中项带文字，每格至少 ~80pt，避免「CarPlay」被压扁
+        .frame(maxWidth: 340)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
@@ -283,7 +288,7 @@ private struct LiquidTabBar: View {
                 }
             }
             .foregroundStyle(selected ? Color.white : Theme.secondary)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .frame(height: 44)
             // 胶囊只在内容宽度内绘制，视觉保持紧凑
             .background {
@@ -294,7 +299,7 @@ private struct LiquidTabBar: View {
                         .matchedGeometryEffect(id: "liqid-pill", in: pill)
                 }
             }
-            // 但点击区域横向撑满整段 1/3，不再是图标周围那一小块
+            // 但点击区域横向撑满整格，不再是图标周围那一小块
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
