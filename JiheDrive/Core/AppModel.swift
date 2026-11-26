@@ -500,6 +500,19 @@ final class AppModel: ObservableObject {
         try ZeehoClient.requireOK(res, fallback: "寻车失败")
     }
 
+    /// 轻量刷新坐垫状态：只拉 vehicleHomePageV2 解析 seat。
+    /// IoT 指令执行 + 云端上报有数秒延迟，开坐垫后应由调用方短轮询此方法确认。
+    func refreshSeat(vin: String) async {
+        let v2Res = try? await client.get("/v1.0/app/cfmotoserverapp/vehicleHomePageV2/\(vin)")
+        guard let seat = v2Res.flatMap({ Vehicle.parseSeat(from: $0) }) else { return }
+        if detailVehicle?.vinNo == vin {
+            detailVehicle = detailVehicle?.withSeat(seat)
+        }
+        if let index = vehicles.firstIndex(where: { $0.vinNo == vin }) {
+            vehicles[index] = vehicles[index].withSeat(seat)
+        }
+    }
+
     func openCushion(_ vehicle: Vehicle) async throws {
         let res = try await client.put(
             "/v1.0/app/cfmotoserverapp/vehicleSet/propertyTwo/one",

@@ -28,6 +28,10 @@ struct ModelViewerWebView: UIViewRepresentable {
     var lightsOn: Bool? = nil        // 全车灯（不含转向灯）：深色主题 true / 浅色 false
     /// 大灯光锥仰角 0~100（大灯调节页专用）：0 明显下压 → 100 抬升过水平
     var beamPercent: Int? = nil
+    /// 模型水平偏移（米，默认视角下 +x 画面向右）：大灯页把车靠右，光束朝左侧留出可视空间
+    var modelOffsetX: Double = 0
+    /// 相机初始距离（米），0 用默认 4.35；拉远可看到更长光束
+    var cameraDistance: Double = 0
     var onDrag: ((Bool) -> Void)? = nil
     var onOrbitChanged: ((Bool) -> Void)? = nil
     var onReady: (() -> Void)? = nil
@@ -49,6 +53,8 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.active = active
         context.coordinator.desiredLightsOn = lightsOn
         context.coordinator.desiredBeamPercent = beamPercent
+        context.coordinator.modelOffsetX = modelOffsetX
+        context.coordinator.cameraDistance = cameraDistance
         context.coordinator.desiredSeatOpen = seatOpen
         context.coordinator.desiredSeatToken = seatToken
 
@@ -101,6 +107,8 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.onSeatProgress = onSeatProgress
         context.coordinator.desiredLightsOn = lightsOn
         context.coordinator.desiredBeamPercent = beamPercent
+        context.coordinator.modelOffsetX = modelOffsetX
+        context.coordinator.cameraDistance = cameraDistance
         context.coordinator.desiredSeatOpen = seatOpen
         context.coordinator.desiredSeatToken = seatToken
         context.coordinator.applyDesired(view, force: false) // 状态变化即时下发（token 变化触发）
@@ -200,6 +208,9 @@ struct ModelViewerWebView: UIViewRepresentable {
         var reuseKey = ""
         var desiredLightsOn: Bool?
         var desiredBeamPercent: Int?
+        /// 模型水平偏移 / 相机初始距离（大灯调节页用，普通页面为 0）
+        var modelOffsetX: Double = 0
+        var cameraDistance: Double = 0
         var desiredSeatOpen: Bool = false
         var desiredSeatToken: Int = 0
         private var appliedLights: Bool?
@@ -207,6 +218,8 @@ struct ModelViewerWebView: UIViewRepresentable {
         private var appliedSeatToken: Int?
         private var loadedFile: URL?
         private var loadedInteractive: Bool?
+        private var loadedOffsetX: Double = 0
+        private var loadedCameraDistance: Double = 0
         var processDied = false
         var currentFile: URL? { loadedFile }
         /// 车模区 pan（require(toFail:) 的依赖方，页面滚动须让它先失败）
@@ -288,12 +301,16 @@ struct ModelViewerWebView: UIViewRepresentable {
         }
 
         func load(into view: WKWebView, glbFile: URL, interactive: Bool, autoRotate: Bool, force: Bool = false) {
-            guard force || loadedFile != glbFile || loadedInteractive != interactive else { return }
+            // 偏移/相机距离也是加载参数：变化时同样需要重载
+            guard force || loadedFile != glbFile || loadedInteractive != interactive
+                    || loadedOffsetX != modelOffsetX || loadedCameraDistance != cameraDistance else { return }
             guard let data = try? Data(contentsOf: glbFile), data.count > 1024 else { return }
             guard let script = ModelViewerAsset.shared.scriptData else { return }
 
             loadedFile = glbFile
             loadedInteractive = interactive
+            loadedOffsetX = modelOffsetX
+            loadedCameraDistance = cameraDistance
             ModelViewerPool.remember(file: glbFile, for: reuseKey)
             var extra: [String: (data: Data, mime: String)] = [:]
             if let d = ModelViewerAsset.shared.threeData { extra["/three.module.min.js"] = (d, "text/javascript") }
@@ -310,7 +327,12 @@ struct ModelViewerWebView: UIViewRepresentable {
             let token = String(UUID().uuidString.prefix(8)).lowercased()
             scheme.replace(token: token, glb: data, script: script, extra: extra)
 
-            let html = ModelViewerAsset.html(interactive: interactive, autoRotate: autoRotate)
+            let html = ModelViewerAsset.html(
+                interactive: interactive,
+                autoRotate: autoRotate,
+                modelOffsetX: modelOffsetX,
+                cameraDistance: cameraDistance
+            )
             let base = URL(string: "\(ModelSchemeHandler.scheme)://local/\(token)/index.html")!
             view.loadHTMLString(html, baseURL: base)
         }
@@ -448,7 +470,8 @@ enum ModelViewerAsset {
     /// three.js 自绘 viewer（three r160 + GLTFLoader + OrbitControls + RoomEnvironment）。
     /// 相机参数与原 model-viewer 对齐：orbit 0deg 90deg 4.35m / target 0.02 0.74 / fov 26。
     /// JS 桥：jhSetSeat(坐垫开合) / jhSeatState / jhSetLights(全车灯自发光+近光侧散光扇,不含转向灯) / jhResetOrbit。
-    static func html(interactive: Bool, autoRotate: Bool) -> String {
+    static func html(interactive: Bool, autoRotate: Bool, modelOffsetX: Double = 0, cameraDistance: Double = 0) -> String {
+        let camDist = cameraDistance > 0 ? cameraDistance : 4.35
         return """
         <!DOCTYPE html>
         <html>
@@ -501,7 +524,8 @@ enum ModelViewerAsset {
         }, undefined, () => { pmrem.dispose(); });
 
         // 相机与视点同时抬高 0.14：模型在画面里整体下移，避免车顶贴着上边缘
-        const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, 4.35);
+        const MODEL_OFFSET_X = \(modelOffsetX); // 大灯页把车靠右，光束朝左留出可视空间
+        const DEFAULT_POS = new THREE.Vector3(0.02, 0.88, \(camDist));
         const DEFAULT_TARGET = new THREE.Vector3(0.02, 0.88, 0);
         const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 100);
         camera.position.copy(DEFAULT_POS);
@@ -774,10 +798,11 @@ enum ModelViewerAsset {
           // 模型加载晚于页面就绪：补挂最近的灯光/坐垫目标状态
           if (lampMats.length > 0) applyLights(lightsState);
           // 对齐 model-viewer 的 camera-target auto 语义：把包围盒中心挪到
-          // 相机 target（0.02, 0.74, 0），模型不再依赖原始坐标摆放
+          // 相机 target（0.02, 0.74, 0），模型不再依赖原始坐标摆放；
+          // MODEL_OFFSET_X 在居中的基础上再平移（大灯页靠右看光束角度）
           const box = new THREE.Box3().setFromObject(gltf.scene);
           const center = box.getCenter(new THREE.Vector3());
-          gltf.scene.position.x += 0.02 - center.x;
+          gltf.scene.position.x += 0.02 - center.x + MODEL_OFFSET_X;
           gltf.scene.position.z += 0 - center.z;
           gltf.scene.position.y += 0.74 - center.y;
           buildBeam(gltf.scene);

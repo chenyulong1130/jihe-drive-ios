@@ -57,6 +57,7 @@ final class MotorStore: ObservableObject {
                     self.retryCount += 1
                     self.requestParams()
                 } else {
+                    self.busy = false // 重试耗尽要解除占用，否则滑块一直禁用
                     self.status = "读取参数失败，请重连"
                     self.retryCount = 0
                 }

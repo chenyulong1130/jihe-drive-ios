@@ -56,7 +56,7 @@ struct HeadlightDetailView: View {
                     loadHintCard
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 14)
             .padding(.top, 8)
             .padding(.bottom, 40)
         }
@@ -121,7 +121,7 @@ struct HeadlightDetailView: View {
             LinearGradient(colors: stageColors, startPoint: .top, endPoint: .bottom)
 
             stageContent
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 4)
                 .padding(.top, 40)
                 .padding(.bottom, 30)
 
@@ -147,7 +147,10 @@ struct HeadlightDetailView: View {
                     autoRotate: false,
                     resetToken: resetToken,
                     lightsOn: true,
-                    beamPercent: beamPercent
+                    beamPercent: beamPercent,
+                    // 车靠右、相机拉远：光束朝左侧伸展，仰角变化一目了然
+                    modelOffsetX: 0.6,
+                    cameraDistance: 5.1
                 )
             }
         } else if glbFailed {
@@ -334,23 +337,44 @@ struct HeadlightDetailView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
                     AppleCard(padding: 14) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            diagRow("连接状态", ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "未连接")
-                            diagRow("参数状态", store.paramsLoaded ? "已读取" : "待读取")
-                            diagRow("当前车型", projectName)
-                            diagRow("位置", "当前 \(current)% · 目标 \(target)%")
-                            diagRow("限位范围", "\(store.params.minPercent)–\(store.params.maxPercent)%")
-                            diagRow("方向", store.params.reverse ? "反转" : "正向")
-                            diagRow("电机状态", store.busy ? "运行中" : "空闲")
+                        VStack(alignment: .leading, spacing: 8) {
+                            ConnectionBannerTile(
+                                connected: ble.isConnected,
+                                deviceName: ble.connectedDevice?.displayName ?? ""
+                            )
+                            LazyVGrid(
+                                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                                spacing: 8
+                            ) {
+                                StatusTile(icon: "checkmark.seal.fill", title: "参数状态",
+                                           value: store.paramsLoaded ? "已读取" : "待读取",
+                                           valueColor: store.paramsLoaded ? Theme.green : Theme.orange)
+                                StatusTile(icon: "gearshape.fill", title: "电机状态",
+                                           value: store.busy ? "运行中" : "空闲",
+                                           valueColor: store.busy ? Theme.orange : Theme.green)
+                                StatusTile(icon: "car.2.fill", title: "当前车型",
+                                           value: projectName)
+                                StatusTile(icon: "arrow.up.and.down", title: "位置",
+                                           value: "\(current)% → \(target)%",
+                                           valueColor: accent)
+                                StatusTile(icon: "ruler.fill", title: "限位范围",
+                                           value: "\(store.params.minPercent)–\(store.params.maxPercent)%")
+                                StatusTile(icon: "arrow.2.squarepath", title: "方向",
+                                           value: store.params.reverse ? "反转" : "正向",
+                                           valueColor: store.params.reverse ? Theme.orange : Theme.label)
+                            }
                         }
                     }
 
                     LogPanel(title: "指令记录", logs: store.logs)
 
+                    LogPanel(title: "蓝牙日志", logs: ble.logs)
+
                     Button {
-                        copyToPasteboard(store.logs.joined(separator: "\n"), fallback: "暂无记录")
+                        let all = (store.logs + ["", "—— 蓝牙日志 ——"] + ble.logs).joined(separator: "\n")
+                        copyToPasteboard(all, fallback: "暂无记录")
                     } label: {
-                        Label("复制指令记录", systemImage: "doc.on.doc")
+                        Label("复制全部日志", systemImage: "doc.on.doc")
                             .font(.system(size: 14, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .frame(height: 42)
@@ -386,20 +410,6 @@ struct HeadlightDetailView: View {
 
     private var projectName: String {
         MotorProject.all.first(where: { $0.index == store.params.project })?.name ?? "默认"
-    }
-
-    private func diagRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(Theme.footnote)
-                .foregroundStyle(Theme.secondary)
-            Spacer()
-            Text(value)
-                .font(Theme.footnote.weight(.medium))
-                .foregroundStyle(Theme.label)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
     }
 
     private func copyToPasteboard(_ text: String, fallback: String) {

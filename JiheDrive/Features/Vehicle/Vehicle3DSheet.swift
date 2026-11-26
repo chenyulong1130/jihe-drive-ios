@@ -46,8 +46,16 @@ struct Vehicle3DSheet: View {
         do {
             try await model.openCushion(live)
             seatHint = "已发送开坐垫指令"
-            // 尽快拉一次真实状态，让模型与实车对齐
-            await model.loadBattery(vin: live.vinNo, quiet: true)
+            // 短轮询确认真实状态（loadBattery 不含坐垫，必须走 refreshSeat）：
+            // IoT 执行 + 云端上报有延迟，间隔 2/4/8/10 秒共四轮，确认打开即停
+            for gap in [2.0, 4.0, 8.0, 10.0] {
+                try? await Task.sleep(nanoseconds: UInt64(gap * 1_000_000_000))
+                await model.refreshSeat(vin: live.vinNo)
+                if model.selectedVehicle?.seat?.isOpen() == true {
+                    seatHint = "坐垫已打开"
+                    break
+                }
+            }
         } catch {
             seatOpen = realSeatOpen == true
             seatToken += 1

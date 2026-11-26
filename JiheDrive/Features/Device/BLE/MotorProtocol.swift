@@ -61,7 +61,9 @@ final class MotorFrameDecoder {
             if index + total > buffer.count { break }
             let tail = buffer[index + total - 1]
             let receivedChecksum = buffer[index + total - 2]
-            let sum = (index + 3..<(index + total - 1)).reduce(0) { ($0 + Int(buffer[$1])) & 0xFF }
+            // 校验 = ~(长度字节起共 length-1 字节之和)：e[3..length+1]，不含校验码自身
+            // （对齐 motor_handle 小程序 processCommand：g=0..<d-1 累加 e[3+g]）
+            let sum = (index + 3..<(index + total - 2)).reduce(0) { ($0 + Int(buffer[$1])) & 0xFF }
             guard tail == 0xAA, receivedChecksum == ((~sum) & 0xFF) else {
                 index += 1
                 continue

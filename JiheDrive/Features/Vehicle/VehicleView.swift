@@ -224,18 +224,15 @@ struct VehicleView: View {
             syncChargeIsland()
             model.markUpdated()
 
-            // 充电中约 20 秒刷电池；平时约 90 秒。离开车辆 Tab 不刷
+            // 统一 60 秒节拍：电池 + 坐垫 + 详情 + 胎压 + 消息 + 骑行汇总 + 小组件。
+            // 离开车辆 Tab 或退后台不刷（scenePhase/activeMainTab 守卫）
             while !Task.isCancelled {
-                let charging = model.liveBatteryOfSelected?.isLiveCharging == true
-                try? await Task.sleep(nanoseconds: charging ? 20_000_000_000 : 90_000_000_000)
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
                 guard !Task.isCancelled else { break }
                 guard scenePhase == .active, activeMainTab == .vehicle else { continue }
-                if charging {
-                    if let vin = model.selectedVehicle?.vinNo {
-                        await model.loadBattery(vin: vin, quiet: true)
-                    }
-                    syncChargeIsland()
-                    continue
+                if let vin = model.selectedVehicle?.vinNo {
+                    await model.loadBattery(vin: vin, quiet: true)
+                    await model.refreshSeat(vin: vin)
                 }
                 await model.refreshQuiet()
                 await messages.refresh()
@@ -295,6 +292,7 @@ struct VehicleView: View {
             // 回前台轻量刷新，不整页重载 3D/视频，避免闪白
             Task {
                 await model.refreshQuiet()
+                await model.refreshSeat(vin: model.selectedVehicle?.vinNo ?? "")
                 await messages.refresh()
                 syncChargeIsland()
                 if let vin = model.selectedVehicle?.vinNo {
@@ -380,11 +378,13 @@ struct VehicleView: View {
     private func openCushion(_ vehicle: Vehicle) {
         optimisticSeatOpen = true // 3D 模型立即开盖，不等云端
         run("cushion") { try await model.openCushion(vehicle) }
-        // 开坐垫后尽快拉状态，让主页/弹层的 3D 模型跟上（云端上报有延迟，多试几轮）
+        // 开坐垫后尽快拉坐垫状态（注意：loadBattery 不含坐垫，必须走 refreshSeat）；
+        // IoT 执行 + 云端上报有延迟，8/16/30 秒三轮确认，坐垫确认打开即停
         Task {
-            for delay in [8.0, 20.0, 40.0] {
+            for delay in [8.0, 16.0, 30.0] {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                await model.loadBattery(vin: vehicle.vinNo, quiet: true)
+                await model.refreshSeat(vin: vehicle.vinNo)
+                if model.selectedVehicle?.seat?.isOpen() == true { break }
             }
         }
     }
@@ -490,13 +490,14 @@ struct VehicleView: View {
             ?? WidgetSnapshot.displayImage(vin: vehicle.vinNo)
     }
 
-    private func reloadPage() async {
+    private     func reloadPage() async {
         await model.loadVehicles()
         guard let vin = model.selectedVehicle?.vinNo else { return }
         async let battery: Void = model.loadBattery(vin: vin, quiet: true)
         async let detail: Void = model.loadDetail(vin: vin)
         async let tire: Void = model.loadTire(vin: vin)
-        _ = await (battery, detail, tire)
+        async let seat: Void = model.refreshSeat(vin: vin)
+        _ = await (battery, detail, tire, seat)
         await loadRideSummary(vin: vin)
         await resolveAddressIfNeeded()
         await signin.syncWidget(model: model, ride: rideExtra)

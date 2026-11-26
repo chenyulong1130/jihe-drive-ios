@@ -105,12 +105,12 @@ struct DeviceTabView: View {
     private func syncListPolling() {
         guard ble.isConnected, let kind = ble.connectedDevice?.kind else {
             bmsStore.stopPolling()
-            headlightStore.stopPolling()
+            headlightStore.deactivate()
             return
         }
         switch kind {
         case .bms:
-            headlightStore.stopPolling()
+            headlightStore.deactivate()
             bmsStore.attach(ble)
             bmsStore.startPolling()
         case .shilanLight:
@@ -196,7 +196,7 @@ struct DeviceTabView: View {
             HStack(spacing: 8) {
                 summaryTile(value: "\(rt?.soc ?? 0)", unit: "%", label: "电量", color: Theme.green)
                 summaryTile(value: fmt1(rt?.totalVoltage), unit: "V", label: "电压", color: Theme.brand)
-                summaryTile(value: fmt1(rt?.current.map(abs)), unit: "A", label: "电流", color: Color(hex: 0x0EA5E9))
+                summaryTile(value: fmt1(rt.map { abs($0.current) }), unit: "A", label: "电流", color: Color(hex: 0x0EA5E9))
                 summaryTile(value: "\(rt.map { abs($0.power) } ?? 0)", unit: "W", label: "功率", color: Theme.orange)
             }
         case .shilanLight:

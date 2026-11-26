@@ -26,7 +26,7 @@ struct BMSDetailView: View {
                 diffPeakCard
                 cellsSection
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 14)
             .padding(.top, 8)
             .padding(.bottom, 48)
         }
@@ -374,38 +374,52 @@ struct BMSDetailView: View {
 
     private var statusCard: some View {
         let r = rt
-        let entries: [(label: String, value: String, warn: Bool)] = [
-            ("电池状态", connected ? (r?.flowLabel ?? "—") : "未连接", false),
-            ("电池类型", r?.typeLabel ?? "--", false),
-            ("电芯串数", (r?.cellCount ?? 0) > 0 ? "\(r?.cellCount ?? 0) 串" : "--", false),
-            ("SOH", connected && (r?.soh ?? 0) > 0 ? "\(r?.soh ?? 0)%" : "--", false),
-            ("运行时间", connected ? runningTimeText(r?.runningTime ?? 0) : "--", false),
-            ("放电 MOS", (r?.dischargeMOS ?? 0) == 1 ? "开" : "关", false),
-            ("充电 MOS", (r?.chargeMOS ?? 0) == 1 ? "开" : "关", false),
-            ("均衡", (r?.balanceState ?? 0) == 1 ? "均衡中" : "关闭", (r?.balanceState ?? 0) == 1),
-        ]
+        // 与 heroCard 的 flowColor 同一套语义：充绿 / 放蓝 / 均衡橙
+        let flowTint: Color = {
+            guard connected else { return Theme.secondary }
+            switch r?.flowLabel ?? "" {
+            case "充电中": return Theme.green
+            case "放电中": return Color(hex: 0x0EA5E9)
+            case "均衡中": return Theme.orange
+            default: return Theme.label
+            }
+        }()
+        let soh = connected ? (r?.soh ?? 0) : 0
+        let dischargeOn = (r?.dischargeMOS ?? 0) == 1
+        let chargeOn = (r?.chargeMOS ?? 0) == 1
+        let balancing = (r?.balanceState ?? 0) == 1
+        let offTint = Theme.tertiary
+
         return AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("状态信息")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.label)
-                    .padding(.bottom, 6)
-                ForEach(entries.indices, id: \.self) { index in
-                    if index > 0 {
-                        Rectangle()
-                            .fill(Theme.separator.opacity(0.6))
-                            .frame(height: 0.5)
-                    }
-                    HStack {
-                        Text(entries[index].label)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
-                        Spacer()
-                        Text(entries[index].value)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(entries[index].warn ? Theme.red : Theme.label)
-                    }
-                    .padding(.vertical, 5)
+                LazyVGrid(
+                    columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                    spacing: 8
+                ) {
+                    StatusTile(icon: "bolt.fill", title: "电池状态",
+                               value: connected ? (r?.flowLabel ?? "—") : "未连接",
+                               valueColor: flowTint)
+                    StatusTile(icon: "battery.100.fill", title: "电池类型",
+                               value: r?.typeLabel ?? "--")
+                    StatusTile(icon: "square.grid.2x2.fill", title: "电芯串数",
+                               value: (r?.cellCount ?? 0) > 0 ? "\(r?.cellCount ?? 0) 串" : "--")
+                    StatusTile(icon: "heart.fill", title: "SOH",
+                               value: soh > 0 ? "\(soh)%" : "--",
+                               valueColor: soh <= 0 ? Theme.label : (soh >= 80 ? Theme.green : Theme.orange))
+                    StatusTile(icon: "clock.fill", title: "运行时间",
+                               value: connected ? runningTimeText(r?.runningTime ?? 0) : "--")
+                    StatusTile(icon: "arrow.down.circle.fill", title: "放电 MOS",
+                               value: dischargeOn ? "开" : "关",
+                               valueColor: dischargeOn ? Theme.green : offTint)
+                    StatusTile(icon: "arrow.up.circle.fill", title: "充电 MOS",
+                               value: chargeOn ? "开" : "关",
+                               valueColor: chargeOn ? Theme.green : offTint)
+                    StatusTile(icon: "arrow.left.arrow.right", title: "均衡",
+                               value: balancing ? "均衡中" : "关闭",
+                               valueColor: balancing ? Theme.orange : offTint)
                 }
             }
         }
@@ -518,12 +532,25 @@ struct BMSDetailView: View {
                     if connected { statusCard }
 
                     AppleCard(padding: 14) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            diagRow("连接状态", connected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "未连接")
-                            diagRow("协议品牌", store.brand.title)
-                            diagRow("通道状态", store.channelStatus)
-                            diagRow("轮询间隔", String(format: "%.1f 秒", store.pollInterval))
-                            diagRow("是否轮询", store.isPolling ? "进行中" : "已暂停")
+                        VStack(alignment: .leading, spacing: 8) {
+                            ConnectionBannerTile(
+                                connected: connected,
+                                deviceName: ble.connectedDevice?.displayName ?? ""
+                            )
+                            LazyVGrid(
+                                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                                spacing: 8
+                            ) {
+                                StatusTile(icon: "puzzlepiece.fill", title: "协议品牌", value: store.brand.title)
+                                StatusTile(icon: "dot.radiowaves.left.and.right", title: "通道状态",
+                                           value: store.channelStatus,
+                                           valueColor: store.channelStatus.contains("正常") || store.channelStatus.contains("可用") ? Theme.green : Theme.orange)
+                                StatusTile(icon: "timer", title: "轮询间隔",
+                                           value: String(format: "%.1f 秒", store.pollInterval))
+                                StatusTile(icon: "arrow.clockwise.circle.fill", title: "轮询",
+                                           value: store.isPolling ? "进行中" : "已暂停",
+                                           valueColor: store.isPolling ? Theme.green : Theme.secondary)
+                            }
                         }
                     }
 
@@ -587,20 +614,6 @@ struct BMSDetailView: View {
                 }
             }
             .animation(.easeOut(duration: 0.2), value: copyToast)
-        }
-    }
-
-    private func diagRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(Theme.footnote)
-                .foregroundStyle(Theme.secondary)
-            Spacer()
-            Text(value)
-                .font(Theme.footnote.weight(.medium))
-                .foregroundStyle(Theme.label)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
         }
     }
 

@@ -50,6 +50,62 @@ struct CircleIconBadge: View {
     }
 }
 
+/// 状态磁贴（诊断弹窗「状态信息」网格用）：图标+标题一行，数值带状态色
+struct StatusTile: View {
+    let icon: String
+    let title: String
+    let value: String
+    var valueColor: Color = Theme.label
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(valueColor.opacity(0.85))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+            }
+            Text(value)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(valueColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(11)
+        .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// 连接状态横幅（诊断弹窗顶部）：圆形图标底座 + 设备名，占满整行
+struct ConnectionBannerTile: View {
+    let connected: Bool
+    let deviceName: String
+
+    var body: some View {
+        let tint: Color = connected ? Theme.green : Theme.secondary
+        return HStack(spacing: 10) {
+            CircleIconBadge(icon: connected ? "antenna.rtl.fill" : "antenna.rtl.slash", color: tint, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(connected ? "已连接" : "未连接")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(connected ? tint : Theme.secondary)
+                Text(deviceName.isEmpty ? "--" : deviceName)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(11)
+        .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
 /// 带图标的指标卡（对齐 Flutter 版 BmsPanel 的 DeviceMetricCard）：
 /// 标题行 = 15pt 图标 + 12pt 标题；数值 19pt 加粗，单位同色小字。
 struct MetricCard: View {
