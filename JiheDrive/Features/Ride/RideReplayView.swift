@@ -169,7 +169,6 @@ struct RideReplayView: View {
             guard playing else { return }
             if progress >= 1 { progress = 0 }
             var last = Date()
-            var lastWrite = Date()
             while playing && !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 16_000_000)
                 if Task.isCancelled { break }
@@ -182,11 +181,8 @@ struct RideReplayView: View {
                     progress = 0
                     break
                 }
-                // 60fps 写 @State 会整页刷 body（地图/时间轴/曲线全部重 diff），
-                // 这是回放发涩的主因。地图内部已按显示帧率平滑追赶目标，
-                // 10Hz 驱动 UI 足够，肉眼无差
-                guard now.timeIntervalSince(lastWrite) >= 0.1 else { continue }
-                lastWrite = now
+                // 必须保持 60Hz 写入：ReplayMap 的速度预测器按目标高频更新设计，
+                // 低频目标会让预测速度清零 → 车模阶梯式抖动（188 实测翻车）
                 progress = next
             }
         }

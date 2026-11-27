@@ -741,7 +741,6 @@ final class ReplayMapGLBView: WKWebView {
     private let schemeHandler: ModelSchemeHandler
     private var loadedFile: URL?
     private var lastYaw = Double.nan
-    private var lastYawSent = TimeInterval(0)
 
     static func make() -> ReplayMapGLBView {
         let handler = ModelSchemeHandler.shared
@@ -782,11 +781,9 @@ final class ReplayMapGLBView: WKWebView {
     }
 
     func setYaw(_ degrees: Double) {
-        // WKWebView 桥是最贵的进程间调用：转向 >2° 才发，且限 20Hz
-        let now = CACurrentMediaTime()
-        guard abs(degrees - lastYaw) > 2 || lastYaw.isNaN, now - lastYawSent > 0.05 else { return }
+        // WKWebView 桥很贵：转向变化 >2° 才发（不设频率上限——限速会让转弯时车模转向一格一格的）
+        guard abs(degrees - lastYaw) > 2 || lastYaw.isNaN else { return }
         lastYaw = degrees
-        lastYawSent = now
         evaluateJavaScript("window.jhSetYaw && window.jhSetYaw(\(degrees))", completionHandler: nil)
     }
 
