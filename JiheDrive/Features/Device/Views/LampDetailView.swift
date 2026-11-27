@@ -23,6 +23,7 @@ struct LampDetailView: View {
     @State private var rgbOn = false
     @State private var snapshotHex = "FFFFFF"
     @State private var copyToast = false
+    @State private var toast: String?
     /// 发送节流：拖动色轮/滑条时合并下发，避免命令积压
     @State private var colorSendTask: Task<Void, Never>?
     @State private var levelSendTask: Task<Void, Never>?
@@ -109,6 +110,23 @@ struct LampDetailView: View {
         .onChange(of: store.synced) { _, _ in syncFromSnapshot() }
         .onChange(of: store.profile) { _, _ in syncFromSnapshot() }
         .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
+        .overlay(alignment: .bottom) {
+            if let toast {
+                ToastView(text: toast)
+                    .padding(.bottom, 28)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(Motion.quick, value: toast)
+    }
+
+    /// 模式下发等操作的轻提示
+    private func showToast(_ text: String) {
+        withAnimation(Motion.quick) { toast = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            withAnimation(Motion.quick) { toast = nil }
+        }
     }
 
     // MARK: - Header / 产品卡
