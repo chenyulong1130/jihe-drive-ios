@@ -82,6 +82,9 @@ final class CPMirrorController: ObservableObject {
     /// 用户选择的仪表车型档案 ID（"auto" = 自动适配）；「我的/投屏页」可改，持久化。
     @Published private(set) var zeehoModelID: String =
         UserDefaults.standard.string(forKey: "mirror.zeeho.model") ?? "auto"
+    /// CarPlay 主屏「车辆按钮」被点按（requestUI）：每次点按生成新 UUID，
+    /// 页面层 onChange(of:) 响应后打开车辆信息页。
+    @Published private(set) var carUIRequestID: UUID?
 
     /// 极核仪表车型选项（与 ZeehoMirrorLink.DisplayProfile 对齐）
     static let zeehoModels: [(id: String, name: String)] = [
@@ -110,6 +113,27 @@ final class CPMirrorController: ObservableObject {
         case "zeehoSEPlus": return .zeehoSEPlus
         default: return nil
         }
+    }
+
+    /// 生成 CarPlay 主屏车辆按钮图标：品牌蓝圆底 + 白色车形，
+    /// 正方形 PNG（128px，协议上限 192px），/info 以 prerendered 形式下发。
+    static func vehicleButtonIconPNG(size: CGFloat = 128) -> Data? {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
+        let image = renderer.image { context in
+            let rect = CGRect(x: 0, y: 0, width: size, height: size)
+            UIColor.systemBlue.setFill()
+            context.cgContext.fillEllipse(in: rect.insetBy(dx: 3, dy: 3))
+            let config = UIImage.SymbolConfiguration(pointSize: size * 0.42, weight: .semibold)
+            guard let glyph = UIImage(systemName: "car.fill",
+                                      withConfiguration: config)?
+                .withTintColor(.white, renderingMode: .alwaysOriginal) else { return }
+            let glyphSize = glyph.size
+            glyph.draw(in: CGRect(
+                x: (size - glyphSize.width) / 2,
+                y: (size - glyphSize.height) / 2,
+                width: glyphSize.width, height: glyphSize.height))
+        }
+        return image.pngData()
     }
 
     func clearLogs() {
@@ -178,6 +202,10 @@ final class CPMirrorController: ObservableObject {
         var configuration = CPInfo.Configuration.default(deviceID: CPDeviceID.persistent())
         configuration.name = "JiheDrive"
         configuration.address = localIP
+        // CarPlay 主屏车辆按钮：点按后 iPhone 发 requestUI，App 弹出车辆信息页
+        if configuration.oemIconPNG == nil {
+            configuration.oemIconPNG = Self.vehicleButtonIconPNG()
+        }
         currentConfiguration = configuration
         currentIdentity = identity
         setPhase(.starting)
@@ -189,10 +217,14 @@ final class CPMirrorController: ObservableObject {
         // 2) CarPlay RTSP 接收端
         let receiver = CPReceiver()
         receiver.onLog = { [weak self] in self?.appendLog($0) }
+        // 全量帧：转码器（极核仪表输出）依赖连续解码流，不做任何丢弃
         receiver.onVideo = { [weak self] data, codec in
+            guard let self, codec == .h264 else { return }
+            self.transcoder.appendAnnexB(data)
+        }
+        // 本机预览帧：受接收端背压控制（积压时跳到关键帧），直接吃原始访问单元
+        receiver.onLocalVideo = { [weak self] data, codec in
             guard let self else { return }
-            self.videoBox.store(data)
-            // 预览直接吃原始访问单元；转码器只服务于后续极核输出。
             self.frameHub.publish(.frame(data, codec))
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.localVideoReceived else { return }
@@ -202,8 +234,10 @@ final class CPMirrorController: ObservableObject {
                 self.appendLog("已收到 CarPlay 视频，本地预览与触控可用")
                 self.setPhase(.localStreaming)
             }
-            guard codec == .h264 else { return }
-            self.transcoder.appendAnnexB(data)
+        }
+        // CarPlay 主屏「车辆按钮」点按 → 打开 App 内车辆信息页
+        receiver.onCarUIRequested = { [weak self] in
+            DispatchQueue.main.async { [weak self] in self?.carUIRequestID = UUID() }
         }
         receiver.onControlConnected = { [weak self] in
             guard let self, self.startToken == token else { return }

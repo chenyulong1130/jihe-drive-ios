@@ -22,6 +22,7 @@ struct MirrorView: View {
     @State private var startupHintTask: Task<Void, Never>?
     @State private var exitButtonVisible = true
     @State private var exitFadeTask: Task<Void, Never>?
+    @State private var showVehicleInfo = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -61,11 +62,18 @@ struct MirrorView: View {
         .onChange(of: controller.phase) { _, phase in
             handlePhase(phase)
         }
+        // CarPlay 主屏「车辆按钮」点按（requestUI）：退全屏并弹车辆信息页
+        .onChange(of: controller.carUIRequestID) { _, id in
+            guard id != nil else { return }
+            showFullscreen = false
+            showVehicleInfo = true
+        }
         .sheet(isPresented: $showExport) {
             if let exportURL {
                 ActivitySheet(url: exportURL)
             }
         }
+        .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
         .sheet(isPresented: $showPreflight) {
             preflightSheet
         }
@@ -140,6 +148,154 @@ struct MirrorView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("完成") { showSettingsSheet = false } }
             }
+        }
+    }
+
+    // MARK: - 车辆信息页（CarPlay 主屏车辆按钮点按后弹出）
+
+    @State private var refreshingInfo = false
+
+    private var vehicleInfoSheet: some View {
+        SheetShell(
+            title: "车辆信息",
+            subtitle: "在 CarPlay 主屏点按车辆按钮打开",
+            onClose: { showVehicleInfo = false },
+            trailing: {
+                Button {
+                    refreshInfo()
+                } label: {
+                    Group {
+                        if refreshingInfo {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                    }
+                    .foregroundStyle(Theme.brand)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.surfaceAlt, in: Circle())
+                }
+                .disabled(refreshingInfo)
+                .accessibilityLabel("刷新车辆数据")
+            }
+        ) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let vehicle = model.selectedVehicle {
+                        AppleCard(padding: 16) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "car.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(Theme.brand)
+                                        .frame(width: 28)
+                                    Text(vehicle.name)
+                                        .font(Theme.headline)
+                                        .foregroundStyle(Theme.label)
+                                    Spacer(minLength: 0)
+                                    StatusPill(text: vehicle.isOnline ? "在线" : "离线",
+                                               color: vehicle.isOnline ? Theme.green : Theme.secondary)
+                                }
+                                Divider()
+                                vehicleInfoRow("battery.100percent", "电量",
+                                               "\(vehicle.soc)% · 续航 \(vehicle.rangeKm) km")
+                                vehicleInfoRow("bolt.fill", "充电状态",
+                                               vehicle.isCharging ? "充电中" : "未充电")
+                                vehicleInfoRow("lock.fill", "锁车状态",
+                                               vehicle.isLocked ? "已锁车" : "已解锁")
+                                if let tire = model.tire {
+                                    if let front = tire.frontBar, let rear = tire.rearBar {
+                                        vehicleInfoRow("gauge.high", "胎压",
+                                                       String(format: "前 %.1f bar · 后 %.1f bar", front, rear))
+                                    }
+                                    if let front = tire.frontTemp, let rear = tire.rearTemp {
+                                        vehicleInfoRow("thermometer.medium", "胎温",
+                                                       String(format: "前 %.0f℃ · 后 %.0f℃", front, rear))
+                                    }
+                                }
+                                if let battery = model.liveBatteryOfSelected {
+                                    vehicleInfoRow("bolt.horizontal.fill", "电池电压",
+                                                   String(format: "%.1f V", battery.voltage))
+                                    if let power = battery.power, power > 0 {
+                                        vehicleInfoRow("waveform.path.ecg", "实时功率",
+                                                       String(format: "%.0f W", power))
+                                    }
+                                    if let current = battery.current, current > 0 {
+                                        vehicleInfoRow("arrow.up.arrow.down", "实时电流",
+                                                       String(format: "%.1f A", current))
+                                    }
+                                    vehicleInfoRow("thermometer.medium", "电池温度",
+                                                   String(format: "%.1f ℃", battery.temperature))
+                                }
+                                if let updated = model.lastUpdatedAt {
+                                    vehicleInfoRow("clock.arrow.circlepath", "数据更新于",
+                                                   DateFormatter.localizedString(from: updated,
+                                                                                dateStyle: .none, timeStyle: .short))
+                                }
+                            }
+                        }
+                    } else {
+                        AppleCard(padding: 16) {
+                            Text("暂无车辆数据（未登录或列表未加载）")
+                                .font(Theme.footnote)
+                                .foregroundStyle(Theme.secondary)
+                        }
+                    }
+
+                    AppleCard(padding: 16) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "carplay")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Theme.brand)
+                                    .frame(width: 28)
+                                Text("CarPlay 状态")
+                                    .font(Theme.headline)
+                                    .foregroundStyle(Theme.label)
+                                Spacer(minLength: 0)
+                            }
+                            Divider()
+                            vehicleInfoRow("dot.radiowaves.left.and.right", "连接",
+                                           controller.phase.label)
+                            vehicleInfoRow("gauge.with.needle", "极核仪表投屏",
+                                           controller.zeehoSpecText)
+                        }
+                    }
+                }
+                .padding(.horizontal, Theme.page)
+                .padding(.top, 16)
+                .padding(.bottom, 40)
+            }
+            .background(Theme.groupedBackground)
+        }
+    }
+
+    /// 车辆信息页刷新：轻量轮询（电池+详情+胎压），不刷车辆列表
+    private func refreshInfo() {
+        guard !refreshingInfo else { return }
+        refreshingInfo = true
+        Task {
+            await model.refreshQuiet()
+            refreshingInfo = false
+        }
+    }
+
+    private func vehicleInfoRow(_ icon: String, _ title: String, _ value: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 24)
+            Text(title)
+                .font(Theme.footnote)
+                .foregroundStyle(Theme.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(Theme.footnote.weight(.semibold))
+                .foregroundStyle(Theme.label)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
         }
     }
 

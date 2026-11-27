@@ -87,6 +87,12 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     /// 当前扫描允许的设备类型；nil = 主推类型（保护板 + 石栏）
     private var scanKinds: Set<DeviceKind> = Set(DeviceKind.primaryKinds)
 
+    /// 已连接灯具的传输通道：优先扫描时识别结果，断档时按广播名重判
+    private func lampTransport() -> LampTransport? {
+        if let transport = connectedDevice?.lampTransport { return transport }
+        return LampTransport.detect(name: connectedDevice?.name ?? "")
+    }
+
     private func activeWriteCharacteristic() -> CBCharacteristic? {
         let preferred: String
         switch connectedDevice?.kind {
@@ -98,6 +104,15 @@ final class DeviceBLEManager: NSObject, ObservableObject {
                 preferred = bmsChannel.writeID
             }
         case .shilanLight: preferred = "FFF2"
+        case .charger: preferred = "FFE1"
+        case .dianjingMeter: preferred = "FF01"
+        case .lamp:
+            // 灯具按传输通道选写特征；2760 是非标长 UUID，按键查不到时按后缀兜底
+            switch lampTransport() {
+            case .gattFFF0: preferred = "FFF2"
+            case .gatt2760: preferred = "00002760-08C2-11E1-9073-0E8AC72E0001"
+            default: preferred = "FFE1"
+            }
         case .none: preferred = ""
         }
         if let exact = characteristics[preferred] { return exact }
@@ -153,6 +168,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
             "name": device.name,
             "kind": device.kind.rawValue,
             "brand": device.bmsBrand?.rawValue ?? "",
+            "lampTransport": device.lampTransport?.rawValue ?? "",
         ]
         UserDefaults.standard.set(archive, forKey: Self.archiveKey)
     }
@@ -178,7 +194,9 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         autoConnectAttempted = true
         let name = archive["name"] ?? ""
         let brand = archive["brand"].flatMap { BMSBrand(rawValue: $0) }
-        let device = BLEDevice(id: id, name: name, rssi: 0, kind: kind, bmsBrand: brand)
+        let lampTransport = archive["lampTransport"].flatMap { LampTransport(rawValue: $0) }
+            ?? (kind == .lamp ? LampTransport.detect(name: name) : nil)
+        let device = BLEDevice(id: id, name: name, rssi: 0, kind: kind, bmsBrand: brand, lampTransport: lampTransport)
         log("自动连接上次设备：\(device.displayName)")
         Task { [weak self] in
             guard let self else { return }
@@ -343,12 +361,21 @@ final class DeviceBLEManager: NSObject, ObservableObject {
             return
         }
         let preferredNotify: String
-        if kind == .bms {
+        switch kind {
+        case .bms:
             preferredNotify = (connectedDevice?.bmsBrand == .yanyang)
                 ? BMSBrand.yanyang.notifyID
                 : bmsChannel.notifyID
-        } else {
-            preferredNotify = "FFF1"
+        case .shilanLight: preferredNotify = "FFF1"
+        case .charger: preferredNotify = "FFE1"
+        case .dianjingMeter: preferredNotify = "FF02"
+        case .lamp:
+            switch lampTransport() {
+            case .gattFFF0: preferredNotify = "FFF1"
+            case .compact: preferredNotify = "FFE1"
+            case .gatt2760: preferredNotify = "00002760-08C2-11E1-9073-0E8AC72E0002"
+            default: preferredNotify = "FFE2"
+            }
         }
         guard let notify = characteristics[preferredNotify]
                 ?? characteristics.values.first(where: { $0.properties.contains(.notify) }) else {
@@ -520,7 +547,8 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
             name: name,
             rssi: RSSI.intValue,
             kind: kind,
-            bmsBrand: kind == .bms ? BMSBrand.detect(name: name) : nil
+            bmsBrand: kind == .bms ? BMSBrand.detect(name: name) : nil,
+            lampTransport: kind == .lamp ? LampTransport.detect(name: name) : nil
         )
         if let index = discovered.firstIndex(where: { $0.id == device.id }) {
             var old = discovered[index]

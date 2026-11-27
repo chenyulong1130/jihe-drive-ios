@@ -10,6 +10,9 @@ struct DeviceTabView: View {
     @StateObject private var session = DeviceSession.shared
     @StateObject private var bmsStore = BMSStore()
     @StateObject private var headlightStore = MotorStore()
+    @StateObject private var chargerStore = ChargerStore()
+    @StateObject private var dianjingStore = DianjingStore()
+    @StateObject private var lampStore = LampStore()
 
     @State private var showPowerPassword = false
     @State private var showScan = false
@@ -24,7 +27,7 @@ struct DeviceTabView: View {
                 VStack(spacing: 12) {
                     LargeTitle(
                         "设备",
-                        subtitle: ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "保护板与大灯调节设备"
+                        subtitle: ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "保护板 · 大灯 · 灯具 · 充电机 · 仪表"
                     ) {
                         HStack(spacing: 8) {
                             circleButton(icon: "magnifyingglass", label: "扫描设备") {
@@ -106,17 +109,32 @@ struct DeviceTabView: View {
         guard ble.isConnected, let kind = ble.connectedDevice?.kind else {
             bmsStore.stopPolling()
             headlightStore.deactivate()
+            chargerStore.deactivate()
+            dianjingStore.deactivate()
+            lampStore.deactivate()
             return
         }
+        // 每种设备同一时刻只保留一个 Store 在跑，避免通知回调互相竞争
+        bmsStore.stopPolling()
+        headlightStore.deactivate()
+        chargerStore.deactivate()
+        dianjingStore.deactivate()
+        lampStore.deactivate()
         switch kind {
         case .bms:
-            headlightStore.deactivate()
             bmsStore.attach(ble)
             bmsStore.startPolling()
         case .shilanLight:
-            bmsStore.stopPolling()
             headlightStore.attach(ble, handlerKey: "headlight")
             if !headlightStore.paramsLoaded { headlightStore.loadParams() }
+        case .charger:
+            chargerStore.attach(ble)
+            chargerStore.startPolling()
+        case .dianjingMeter:
+            dianjingStore.attach(ble)
+            dianjingStore.startPolling()
+        case .lamp:
+            lampStore.attach(ble)
         }
     }
 
@@ -219,6 +237,30 @@ struct DeviceTabView: View {
                     summaryTile(value: "\(item.percent)", unit: "%", label: item.name, color: Theme.teal)
                         .onTapGesture { triggerHeadlightMemory(item.percent) }
                 }
+            })
+        case .charger:
+            // 连接即轮询实时帧；未解析出结构化字段时显示通道状态
+            let rt = chargerStore.realtime
+            return AnyView(HStack(spacing: 8) {
+                summaryTile(value: rt?.parsed == true ? String(format: "%.1f", rt?.voltage ?? 0) : "--", unit: "V", label: "电池电压", color: Theme.green)
+                summaryTile(value: rt?.parsed == true ? String(format: "%.1f", rt?.chargerCurrent ?? 0) : "--", unit: "A", label: "输出电流", color: Theme.brand)
+                summaryTile(value: rt?.parsed == true ? "\(abs(rt?.power ?? 0))" : "--", unit: "W", label: "功率", color: Theme.orange)
+                summaryTile(value: rt?.parsed == true ? "运行" : "等待", unit: "", label: "实时帧", color: rt?.parsed == true ? Theme.green : Theme.secondary)
+            })
+        case .dianjingMeter:
+            let rt = dianjingStore.realtime
+            return AnyView(HStack(spacing: 8) {
+                summaryTile(value: "\(rt?.soc ?? 0)", unit: "%", label: "电量", color: Theme.green)
+                summaryTile(value: fmt1(rt?.voltage), unit: "V", label: "电压", color: Theme.brand)
+                summaryTile(value: fmt1(rt?.totalMileage), unit: "km", label: "总里程", color: Color(hex: 0x0EA5E9))
+                summaryTile(value: fmt1(rt?.enduranceMileage), unit: "km", label: "续航", color: Theme.orange)
+            })
+        case .lamp:
+            // 灯具：显示调试类型与同步状态，点击卡片进详情调节
+            return AnyView(HStack(spacing: 8) {
+                summaryTile(value: lampStore.profile.title, unit: "", label: "调试类型", color: Theme.brand)
+                summaryTile(value: lampStore.synced ? "已同步" : "未读取", unit: "", label: "参数快照", color: lampStore.synced ? Theme.green : Theme.orange)
+                summaryTile(value: lampStore.transport?.title ?? "--", unit: "", label: "通道", color: Theme.secondary)
             })
         }
     }
@@ -328,6 +370,9 @@ struct DeviceTabView: View {
         switch kind {
         case .bms: return .green
         case .shilanLight: return .teal
+        case .charger: return .orange
+        case .dianjingMeter: return .indigo
+        case .lamp: return Color(hex: 0xF59E0B)
         }
     }
 
@@ -336,6 +381,9 @@ struct DeviceTabView: View {
         switch kind {
         case .bms: BMSDetailView(store: bmsStore)
         case .shilanLight: HeadlightDetailView(store: headlightStore)
+        case .charger: ChargerDetailView(store: chargerStore)
+        case .dianjingMeter: DianjingDetailView(store: dianjingStore)
+        case .lamp: LampDetailView(store: lampStore)
         }
     }
 }

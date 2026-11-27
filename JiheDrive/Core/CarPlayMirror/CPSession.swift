@@ -26,10 +26,21 @@ final class CPReceiver {
     private var nightMode: Bool?
 
     var onVideo: ((Data, CPVideoCodec) -> Void)?
+    /// 本机预览专用回调：与 onVideo 同帧，但受背压控制——
+    /// 主线程积压时跳到下一个关键帧，避免预览整段冻结（转码/仪表链路不受影响）。
+    var onLocalVideo: ((Data, CPVideoCodec) -> Void)?
     var onLog: ((String) -> Void)?
     var onListening: ((UInt16) -> Void)?
     var onControlConnected: (() -> Void)?
+    /// CarPlay 主屏「车辆按钮」被点按（iPhone 发来 requestUI）。
+    var onCarUIRequested: (() -> Void)?
     var onFailure: ((String) -> Void)?
+
+    // 本机预览背压：主线程在途帧计数；超过上限后丢非关键帧，
+    // 收到关键帧且积压回落到一半以下时恢复整流输出。
+    private var localInFlight = 0
+    private var localSkipping = false
+    private let maximumLocalInFlight = 12
 
     private final class SessionState {
         var parser = CPRTSPParser()
@@ -156,6 +167,8 @@ final class CPReceiver {
         keyframeWantedSince = nil
         keyframeLastSent = nil
         keyframeAttempts = 0
+        localInFlight = 0
+        localSkipping = false
     }
 
     /// port 为 nil 时使用系统分配的临时端口：7000 被占用时自动回退，
@@ -303,8 +316,27 @@ final class CPReceiver {
                 media.onLog = { [weak self] in self?.log($0) }
                 media.onVideo = { [weak self] data, codec in
                     guard let self else { return }
-                    if CPAnnexB.containsRandomAccess(data) { self.clearKeyframeWanting() }
+                    let keyframe = CPAnnexB.containsRandomAccess(data)
+                    if keyframe { self.clearKeyframeWanting() }
+                    // 全量帧：转码器 / 极核仪表链路依赖连续解码，不能跳帧
                     self.onVideo?(data, codec)
+                    // 本机预览走背压：积压时丢弃到下一个关键帧，防止越拖越卡
+                    if self.localSkipping {
+                        guard keyframe, self.localInFlight < self.maximumLocalInFlight / 2 else { return }
+                        self.localSkipping = false
+                    } else if self.localInFlight >= self.maximumLocalInFlight, !keyframe {
+                        self.localSkipping = true
+                        self.requestKeyFrameOnQueue(reason: "本机预览积压")
+                        return
+                    }
+                    self.localInFlight += 1
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onLocalVideo?(data, codec)
+                        self?.queue.async { [weak self] in
+                            guard let self else { return }
+                            self.localInFlight = max(0, self.localInFlight - 1)
+                        }
+                    }
                 }
                 if let nightMode { media.setNightMode(nightMode) }
                 state.media = media
@@ -342,8 +374,17 @@ final class CPReceiver {
             return CPRTSPResponse()
         case ("POST", "/command"):
             guard state.cipher != nil else { throw CPError.rejected("验证完成前收到 command") }
-            if let command = try? PropertyListSerialization.propertyList(from: request.body, format: nil) {
-                log("CarPlay 命令：\(command)")
+            if let command = try? PropertyListSerialization.propertyList(from: request.body, format: nil) as? [String: Any] {
+                let type = command["type"] as? String ?? "未知"
+                let fields = command.keys.sorted().joined(separator: ", ")
+                log("CarPlay 命令：\(type)；字段：\(fields)")
+                // 车辆按钮点按：iPhone 发 requestUI（videoplayback 是停驻播放器，忽略）
+                if type == "requestUI" {
+                    let url = (command["params"] as? [String: Any])?["url"] as? String
+                    if url == nil || !(url?.hasPrefix("videoplayback") ?? false) {
+                        DispatchQueue.main.async { [weak self] in self?.onCarUIRequested?() }
+                    }
+                }
             }
             return CPRTSPResponse()
         case ("TEARDOWN", _):

@@ -6,6 +6,12 @@ import CoreBluetooth
 enum DeviceKind: String, CaseIterable, Identifiable {
     case bms
     case shilanLight
+    /// 蚂蚁充电机（新协议引擎帧，历史数据 FUNC=86）
+    case charger
+    /// 点睛仪表（VTB_EF_ 广播前缀，AB/BA 寄存器协议）
+    case dianjingMeter
+    /// 速牛灯具（5A A5 TLV 帧，按广播名分 5 种传输通道）
+    case lamp
 
     var id: String { rawValue }
 
@@ -13,6 +19,9 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "保护板"
         case .shilanLight: return "石栏大灯"
+        case .charger: return "充电机"
+        case .dianjingMeter: return "仪表"
+        case .lamp: return "灯具"
         }
     }
 
@@ -20,6 +29,9 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "保护板"
         case .shilanLight: return "石栏"
+        case .charger: return "充电机"
+        case .dianjingMeter: return "仪表"
+        case .lamp: return "灯具"
         }
     }
 
@@ -27,6 +39,9 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "蚂蚁 / 彦阳 · 电压 / 电流 / 单体 / 保护"
         case .shilanLight: return "石栏协议 · NB- / SL- 大灯高低调节"
+        case .charger: return "蚂蚁充电机 · 充电状态 / 历史日志 / 帧调试"
+        case .dianjingMeter: return "点睛仪表 · VTB_EF_ · 电压 / 里程 / 零百测速"
+        case .lamp: return "速牛灯具 · 亮度 / 色温 / 角度 / RGB 调试"
         }
     }
 
@@ -34,16 +49,19 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         switch self {
         case .bms: return "battery.100.bolt"
         case .shilanLight: return "headlight.high.beam"
+        case .charger: return "powerplug.fill"
+        case .dianjingMeter: return "speedometer"
+        case .lamp: return "lightbulb.fill"
         }
     }
 
-    /// 设备页主推：保护板 + 石栏
-    static let primaryKinds: [DeviceKind] = [.bms, .shilanLight]
+    /// 设备页主推：保护板 + 石栏 + 充电机 + 仪表 + 灯具
+    static let primaryKinds: [DeviceKind] = [.bms, .shilanLight, .charger, .dianjingMeter, .lamp]
 
-    /// 石栏沿用小程序的 8 位开机密码校验，BMS 不需要
+    /// 石栏沿用小程序的 8 位开机密码校验，其余设备不需要
     var requiresPowerAuth: Bool {
         switch self {
-        case .bms: return false
+        case .bms, .charger, .dianjingMeter, .lamp: return false
         case .shilanLight: return true
         }
     }
@@ -54,8 +72,15 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         let upper = trimmed.uppercased()
         // 石栏：NB- / SL-
         if upper.contains("NB-") || upper.contains("SL-") { return .shilanLight }
-        // 保护板：蚂蚁 ANT / 彦阳 YY（先接这两家）
+        // 点睛仪表：VTB_EF_ 广播前缀（小程序 utils/product.js）
+        if upper.hasPrefix("VTB_EF_") { return .dianjingMeter }
+        // 充电机：广播名带 CHARGER / 充电 字样（须在 BMS 之前判，避免 ANT 前缀抢占）
+        if upper.contains("CHARGER") || trimmed.contains("充电") { return .charger }
+        // 保护板：蚂蚁 ANT / 彦阳 YY
         if BMSBrand.detect(name: trimmed) != nil { return .bms }
+        // 灯具：调试工具的广播名分类规则。识别规则较宽（如 13 位名称→紧凑协议），
+        // 为避免把普通外设当灯具，带空格的常见消费设备名不参与灯具自动归类。
+        if !trimmed.contains(" "), LampTransport.detect(name: trimmed) != nil { return .lamp }
         return nil
     }
 }
@@ -71,6 +96,8 @@ struct BLEDevice: Identifiable, Hashable {
     var kind: DeviceKind
     /// 保护板协议品牌；非 BMS 为 nil
     var bmsBrand: BMSBrand? = nil
+    /// 灯具传输通道；非灯具为 nil
+    var lampTransport: LampTransport? = nil
 
     var displayName: String { name.isEmpty ? "未命名设备" : name }
 }

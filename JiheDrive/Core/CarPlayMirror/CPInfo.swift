@@ -38,6 +38,12 @@ enum CPInfo {
         var port: UInt16 = 7000
         var widthPhysicalMM: Int = defaultWidthPhysicalMM
         var rightHandDrive: Bool = false
+        /// CarPlay 主屏「车辆按钮」图标：方形 PNG（边长 ≤192px）。
+        /// 非空时 /info 带 oemIconVisible/oemIconLabel/oemIcons，
+        /// iPhone 会在 CarPlay 主屏渲染该按钮，点按时发 requestUI 命令。
+        var oemIconPNG: Data?
+        /// 车辆按钮下方显示的文字。
+        var oemIconLabel: String = "车辆信息"
 
         static func `default`(deviceID: String) -> Configuration {
             // 与极核 6.2 寸仪表一致的分辨率：CarPlay 画面可直接透传投屏
@@ -97,7 +103,22 @@ enum CPInfo {
             "displays": [display],
             "hidDevices": hidDevices,
         ]
+        if let icon = config.oemIconPNG, let size = vehicleButtonSize(in: icon) {
+            info["oemIconVisible"] = true
+            info["oemIconLabel"] = config.oemIconLabel
+            info["oemIcons"] = [["imageData": icon, "widthPixels": size,
+                                 "heightPixels": size, "prerendered": true]]
+        }
         return info
+    }
+
+    /// 从 PNG IHDR 读边长；只接受边长 1–192 的正方形，否则视为无效图标。
+    static func vehicleButtonSize(in png: Data) -> Int? {
+        let bytes = [UInt8](png.prefix(24))
+        guard bytes.count == 24, bytes[0] == 0x89, bytes[1] == 0x50 else { return nil }
+        let width = bytes[16..<20].reduce(0) { $0 << 8 | Int($1) }
+        let height = bytes[20..<24].reduce(0) { $0 << 8 | Int($1) }
+        return width == height && (1...192).contains(width) ? width : nil
     }
 
     private static func hidDevice(_ uuid: String, name: String, descriptor: Data) -> [String: Any] {
