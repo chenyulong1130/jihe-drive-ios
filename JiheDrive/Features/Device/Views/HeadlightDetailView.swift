@@ -303,105 +303,95 @@ struct HeadlightDetailView: View {
     /// 记忆位置区：替代固定快捷档位，内容来自用户保存（本地持久化）
     private var memorySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("记忆位置")
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-                Spacer()
-                Button {
-                    namingPercent = Int(displayPercent.rounded())
-                    memoryName = ""
-                    showNameSheet = true
-                } label: {
-                    Label("保存当前 \(Int(displayPercent.rounded()))%", systemImage: "plus.circle")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
-                }
-                .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
-                .disabled(!store.paramsLoaded)
-            }
+            memoryHeaderRow
+            memoryList
+        }
+    }
 
-            if memories.isEmpty {
-                Text("还没有记忆。调好高度后点右上角「保存当前」，命名保存后列表页可一键直达。")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(memories) { item in
-                            Button {
-                                store.moveTo(percent: Double(item.percent))
-                            } label: {
-                                VStack(spacing: 2) {
-                                    Text(item.name)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .lineLimit(1)
-                                    Text("\(item.percent)%")
-                                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(Theme.secondary)
-                                }
-                                .foregroundStyle(item.percent == current ? accent : Theme.label)
-                                .frame(minWidth: 72, height: 46)
-                                .padding(.horizontal, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(item.percent == current ? accent.opacity(0.14) : Theme.surfaceAlt)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(item.percent == current ? accent.opacity(0.55) : .clear, lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
-                            .disabled(!store.paramsLoaded || store.busy)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    memories = HeadlightMemory.remove(item)
-                                } label: {
-                                    Label("删除「\(item.name)」", systemImage: "trash")
-                                }
-                            }
-                        }
-                    }
+    private var memoryHeaderRow: some View {
+        HStack {
+            Text("记忆位置")
+                .font(Theme.footnote)
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+            saveCurrentButton
+        }
+    }
+
+    private var saveCurrentButton: some View {
+        Button {
+            namingPercent = Int(displayPercent.rounded())
+            memoryName = ""
+            showNameSheet = true
+        } label: {
+            Label("保存当前 \(Int(displayPercent.rounded()))%", systemImage: "plus.circle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+        }
+        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+        .disabled(!store.paramsLoaded)
+    }
+
+    @ViewBuilder
+    private var memoryList: some View {
+        if memories.isEmpty {
+            Text("还没有记忆。调好高度后点右上角「保存当前」，命名保存后列表页可一键直达。")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            memoryChips
+        }
+    }
+
+    private var memoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(memories) { item in
+                    memoryChip(item)
                 }
             }
         }
     }
 
-    /// 记忆命名弹窗：输入名字（留空自动编号），保存后列表页可一键直达
-    private var nameMemorySheet: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("将当前高度 \(namingPercent)% 保存为记忆")
-                    .font(Theme.headline)
-                    .foregroundStyle(Theme.label)
-                TextField("记忆名称，如：跑山 / 代驾 / 市区", text: $memoryName)
-                    .textFieldStyle(.roundedBorder)
-                Button {
-                    memories = HeadlightMemory.add(name: memoryName, percent: namingPercent)
-                    showNameSheet = false
-                    memorySavedFeedback()
-                } label: {
-                    Text("保存记忆")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
-                }
-                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
-                Spacer()
-            }
-            .padding(20)
-            .background(Theme.groupedBackground)
-            .navigationTitle("保存记忆")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("取消") { showNameSheet = false } }
+    private func memoryChip(_ item: HeadlightMemoryItem) -> some View {
+        let selected = item.percent == current
+        return Button {
+            store.moveTo(percent: Double(item.percent))
+        } label: {
+            memoryChipLabel(item, selected: selected)
+        }
+        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+        .disabled(!store.paramsLoaded || store.busy)
+        .contextMenu {
+            Button(role: .destructive) {
+                memories = HeadlightMemory.remove(item)
+            } label: {
+                Label("删除「\(item.name)」", systemImage: "trash")
             }
         }
-        .presentationDetents([.medium])
+    }
+
+    private func memoryChipLabel(_ item: HeadlightMemoryItem, selected: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(item.name)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+            Text("\(item.percent)%")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.secondary)
+        }
+        .foregroundStyle(selected ? accent : Theme.label)
+        .frame(minWidth: 72, height: 46)
+        .padding(.horizontal, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? accent.opacity(0.14) : Theme.surfaceAlt)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? accent.opacity(0.55) : .clear, lineWidth: 1)
+        )
     }
 
     private func memorySavedFeedback() {
