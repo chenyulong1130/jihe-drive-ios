@@ -67,14 +67,18 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
         context.coordinator.hub = hub
+        // 解析/建缓冲移出主线程：AnnexB 解析 + CMBlockBuffer 拷贝每帧都要做，
+        // 全在主线程跑会让滑动/动画发涩；层操作统一走专用串行队列
         context.coordinator.token = hub.subscribe { [weak view] event in
             guard let view else { return }
-            switch event {
-            case .frame(let data, let codec):
-                do { try view.enqueue(accessUnit: data, codec: codec) }
-                catch { view.onDecodeError?(error.localizedDescription) }
-            case .reset:
-                view.reset()
+            context.coordinator.decodeQueue.async {
+                switch event {
+                case .frame(let data, let codec):
+                    do { try view.enqueue(accessUnit: data, codec: codec) }
+                    catch { view.onDecodeError?(error.localizedDescription) }
+                case .reset:
+                    view.reset()
+                }
             }
         }
         return view
@@ -96,6 +100,8 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
     final class Coordinator {
         var hub: CPVideoFrameHub?
         var token: UUID?
+        /// 帧解析/解码队列（与层交互全部在此队列，主线程只管触摸）
+        let decodeQueue = DispatchQueue(label: "cp.preview.decode")
     }
 }
 
@@ -177,7 +183,7 @@ final class CPDisplaySurface: UIView {
     }
 
     @objc private func decodeFailed(_ note: Notification) {
-        DispatchQueue.main.async { [weak self] in
+        decodeQueue.async { [weak self] in
             guard let self, self.format != nil, self.needsRecovery,
                   ProcessInfo.processInfo.systemUptime - self.lastRecovery >= 0.5 else { return }
             self.recover(reason: "本机显示层解码失败")
@@ -185,7 +191,7 @@ final class CPDisplaySurface: UIView {
     }
 
     @objc private func recoveryFlagChanged() {
-        DispatchQueue.main.async { [weak self] in
+        decodeQueue.async { [weak self] in
             guard let self, self.format != nil, self.displayLayer.requiresFlushToResumeDecoding,
                   ProcessInfo.processInfo.systemUptime - self.lastRecovery >= 0.5 else { return }
             self.recover(reason: "系统要求刷新视频解码")
@@ -338,7 +344,7 @@ final class CPDisplaySurface: UIView {
         pendingBytes += bytes.count
         if !requesting {
             requesting = true
-            displayLayer.requestMediaDataWhenReady(on: .main) { [weak self] in self?.drain() }
+            displayLayer.requestMediaDataWhenReady(on: decodeQueue) { [weak self] in self?.drain() }
         }
     }
 
@@ -354,7 +360,18 @@ final class CPDisplaySurface: UIView {
         }
     }
 
-    // MARK: - 触摸 → CarPlay 坐标
+    // MARK: - 触摸 → CarPlay 坐标（合并上报）
+
+    private struct TouchState {
+        var x: Double
+        var y: Double
+        var down: Bool
+    }
+
+    /// 全量触控状态：移动按 60Hz 合并，按下/抬起立即上报，
+    /// 避免 move 事件逐条 RTSP 命令洪泛拖慢车机 HID 处理
+    private var contacts: [Int: TouchState] = [:]
+    private var touchTimer: Timer?
 
     private func videoRect() -> CGRect {
         let boundsSize = bounds.size
@@ -378,18 +395,67 @@ final class CPDisplaySurface: UIView {
         return (min(max(x, 0), 1), min(max(y, 0), 1))
     }
 
-    private func report(_ touches: Set<UITouch>, down: Bool) {
-        var points: [(id: Int, x: Double, y: Double, down: Bool)] = []
+    private func touchKey(_ touch: UITouch) -> Int { (touch as NSObject).hash }
+
+    private func update(_ touches: Set<UITouch>) {
         for touch in touches {
             guard let normalized = normalizedPoint(touch) else { continue }
-            points.append((id: (touch as NSObject).hash, x: normalized.x, y: normalized.y, down: down))
+            contacts[touchKey(touch)] = TouchState(x: normalized.x, y: normalized.y, down: true)
         }
-        guard !points.isEmpty else { return }
-        onTouches?(points)
+        startTouchTimerIfNeeded()
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { report(touches, down: true) }
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) { report(touches, down: true) }
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { report(touches, down: false) }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { report(touches, down: false) }
+    private func lift(_ touches: Set<UITouch>) {
+        for touch in touches {
+            let key = touchKey(touch)
+            guard let state = contacts[key] else { continue }
+            if let normalized = normalizedPoint(touch) {
+                state.x = normalized.x
+                state.y = normalized.y
+                contacts[key] = state
+            }
+            contacts[key]?.down = false
+        }
+        flushContacts()
+    }
+
+    private func flushContacts() {
+        guard !contacts.isEmpty else { return }
+        let list = contacts.map { entry in
+            (id: entry.key, x: entry.value.x, y: entry.value.y, down: entry.value.down)
+        }
+        onTouches?(list)
+        // 抬起的槽上报后移除；没有活动触点就停掉定时器
+        contacts = contacts.filter { $0.value.down }
+        if contacts.isEmpty {
+            touchTimer?.invalidate()
+            touchTimer = nil
+        }
+    }
+
+    private func startTouchTimerIfNeeded() {
+        guard touchTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.flushContacts()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        touchTimer = timer
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        update(touches)
+        flushContacts()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        update(touches)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        lift(touches)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        lift(touches)
+    }
 }

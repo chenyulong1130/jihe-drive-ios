@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// 点睛仪表详情页：对齐保护板页的卡片流 ——
-/// 设备名 + SOC 环英雄区（电池规格/单次电耗）+ 实时指标网格
-/// + 零百测速卡（启停/记录）+ 里程控制 + 诊断弹窗。
+/// 点睛仪表详情页（对齐 Flutter 仪表环 + 点睛小程序信息结构）：
+/// 270° 渐变仪表环英雄区（电量进度 + 0/50/100 刻度，中心 SOC + 电压）
+/// + 里程大字卡（续航/总里程/单次电耗）+ 零百测速（启停/记录）
+/// + 里程控制 + 诊断/设置。寄存器 193 实时参数 500ms 轮询。
 struct DianjingDetailView: View {
     @EnvironmentObject private var ble: DeviceBLEManager
     @ObservedObject var store: DianjingStore
@@ -14,14 +15,17 @@ struct DianjingDetailView: View {
     private var rt: DianjingDebugParams? { store.realtime }
     private var connected: Bool { ble.isConnected }
 
+    static let gaugeStart = Angle(degrees: 135)
+    static let gaugeSweep = Angle(degrees: 270)
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 8) {
                 headerRow
-                heroCard
-                metricsGrid
-                speedTestCard
+                gaugeHeroCard
                 mileageCard
+                speedTestCard
+                mileageControlCard
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
@@ -80,75 +84,79 @@ struct DianjingDetailView: View {
         }
     }
 
-    // MARK: - Hero（大电池电量条 + 电压/容量/规格，区别于保护板的 SOC 环）
+    // MARK: - 仪表环英雄区（对齐 Flutter SpeedGauge：270° 渐变弧 + 端点光点 + 刻度）
 
-    private var heroCard: some View {
-        let soc = connected ? (rt?.soc ?? 0) : 0
-        let socColor: Color = soc > 50 ? Theme.green : (soc > 20 ? Theme.orange : Theme.red)
+    private var gaugeHeroCard: some View {
+        let soc = connected ? Double(rt?.soc ?? 0) : 0
+        let progress = min(1, max(0, soc / 100))
+        let tipAngle = Self.gaugeStart + Angle(degrees: Self.gaugeSweep.degrees * progress)
 
         return AppleCard(padding: 16) {
             VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Theme.separator, lineWidth: 2)
-                        // 电量填充（未连接时不显示误导性的 0）
-                        GeometryReader { geo in
-                            HStack {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(socColor.opacity(0.85))
-                                    .frame(width: connected ? max(14, geo.size.width * CGFloat(soc) / 100) : 0)
-                                    .animation(.easeInOut(duration: 0.45), value: soc)
-                                Spacer(minLength: 0)
+                ZStack {
+                    // 底弧
+                    GaugeArc(progress: 1)
+                        .stroke(Theme.surfaceAlt, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                    // 渐变进度弧
+                    GaugeArc(progress: progress)
+                        .stroke(
+                            AngularGradient(
+                                colors: [Color(hex: 0x17B3A6), Color(hex: 0x2D7BF6), Color(hex: 0x5856D6)],
+                                center: .center,
+                                startAngle: Self.gaugeStart,
+                                endAngle: Angle(degrees: Self.gaugeStart.degrees + Self.gaugeSweep.degrees)
+                            ),
+                            style: StrokeStyle(lineWidth: 18, lineCap: .round)
+                        )
+                        .animation(.easeOut(duration: 0.4), value: soc)
+                    // 端点光点（弧半径 = 236/2 - 9 = 109）
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 11, height: 11)
+                        .shadow(color: Color(hex: 0x2D7BF6).opacity(0.5), radius: 7)
+                        .position(
+                            x: 118 + cos(tipAngle.radians) * 109,
+                            y: 118 + sin(tipAngle.radians) * 109
+                        )
+                        .animation(.easeOut(duration: 0.4), value: soc)
+
+                    // 刻度 0 / 50 / 100
+                    gaugeTick(0, value: 0)
+                    gaugeTick(0.5, value: 50)
+                    gaugeTick(1, value: 100)
+
+                    VStack(spacing: 6) {
+                        if connected {
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text("\(Int(soc))")
+                                    .font(.system(size: 62, weight: .light, design: .rounded))
+                                    .foregroundStyle(Theme.label)
+                                    .monospacedDigit()
+                                Text("%")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundStyle(Theme.secondary)
                             }
-                            .padding(4)
+                        } else {
+                            Text("--")
+                                .font(.system(size: 54, weight: .light, design: .rounded))
+                                .foregroundStyle(Theme.label)
                         }
-                        HStack {
-                            Spacer()
-                            if connected {
-                                HStack(alignment: .firstTextBaseline, spacing: 1) {
-                                    Text("\(soc)")
-                                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                                        .foregroundStyle(Theme.label)
-                                    Text("%")
-                                        .font(.system(size: 15, weight: .bold))
-                                        .foregroundStyle(Theme.secondary)
-                                }
-                                .padding(.trailing, 14)
-                            } else {
-                                Text("--")
-                                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                                    .foregroundStyle(Theme.tertiary)
-                                    .padding(.trailing, 14)
-                            }
+                        Text("电量")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.secondary)
+                        if connected {
+                            Text(String(format: "%.1f V", rt?.voltage ?? 0))
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Theme.brand)
                         }
                     }
-                    .frame(height: 58)
-                    // 电池正极凸头
-                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-                        .fill(Theme.separator)
-                        .frame(width: 7, height: 22)
                 }
-                .frame(height: 58)
-                .padding(.top, 6)
-                .padding(.bottom, 6)
-
-                Text(connected ? "电池电量" : "未连接")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.secondary)
-                    .padding(.bottom, 14)
+                .frame(width: 236, height: 236)
+                .padding(.vertical, 14)
 
                 Divider().opacity(0.6)
 
                 HStack(spacing: 0) {
-                    infoCell(
-                        "电压",
-                        connected ? String(format: "%.1f", rt?.voltage ?? 0) : "--",
-                        connected ? "V" : nil
-                    )
-                    Rectangle()
-                        .fill(Theme.separator.opacity(0.5))
-                        .frame(width: 1, height: 34)
                     infoCell(
                         "剩余容量",
                         connected ? String(format: "%.1f", rt?.remainingCapacity ?? 0) : "--",
@@ -162,6 +170,14 @@ struct DianjingDetailView: View {
                         connected && store.batterySeries > 0 ? "\(store.batterySeries) 串" : "--",
                         connected && store.batterySeries > 0 ? String(format: "满电 %.1fV", store.batteryFullVoltage) : nil
                     )
+                    Rectangle()
+                        .fill(Theme.separator.opacity(0.5))
+                        .frame(width: 1, height: 34)
+                    infoCell(
+                        "信号",
+                        connected && store.rssi != 0 ? "\(store.rssi)" : "--",
+                        connected && store.rssi != 0 ? "dBm" : nil
+                    )
                 }
                 .padding(.vertical, 14)
                 .padding(.horizontal, 2)
@@ -169,7 +185,20 @@ struct DianjingDetailView: View {
         }
     }
 
-    private func infoCell(_ label: String, _ value: String, _ note: String?) -> some View {
+    /// 刻度数字：0 在左下（135°）、50 在正上方、100 在右下（45°）
+    private func gaugeTick(_ progress: Double, value: Int) -> some View {
+        let angle = Self.gaugeStart + Angle(degrees: Self.gaugeSweep.degrees * progress)
+        let radius: CGFloat = 100
+        return Text("\(value)")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.tertiary)
+            .position(
+                x: 118 + cos(angle.radians) * radius,
+                y: 118 + sin(angle.radians) * radius
+            )
+    }
+
+    private func infoCell(_ label: String, _ value: String, _ unit: String?) -> some View {
         VStack(spacing: 4) {
             Text(label)
                 .font(.system(size: 12))
@@ -180,9 +209,9 @@ struct DianjingDetailView: View {
                     .foregroundStyle(Theme.label)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                if let note {
-                    Text(note)
-                        .font(.system(size: 11))
+                if let unit {
+                    Text(unit)
+                        .font(.system(size: 12))
                         .foregroundStyle(Theme.tertiary)
                 }
             }
@@ -190,30 +219,68 @@ struct DianjingDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 实时指标网格
+    // MARK: - 里程大字卡
 
-    private var metricsGrid: some View {
-        let r = rt
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-            MetricCard(icon: "bolt.fill", iconColor: Theme.brand, title: "电压",
-                       value: connected ? String(format: "%.1f", r?.voltage ?? 0) : "--",
-                       unit: "V", valueColor: Theme.brand)
-            MetricCard(icon: "battery.25", iconColor: Theme.green, title: "剩余容量",
-                       value: connected ? String(format: "%.1f", r?.remainingCapacity ?? 0) : "--",
-                       unit: "Ah", valueColor: Theme.green)
-            MetricCard(icon: "road.lanes", iconColor: Color(hex: 0x0EA5E9), title: "总里程",
-                       value: connected ? String(format: "%.1f", r?.totalMileage ?? 0) : "--",
-                       unit: "km", valueColor: Color(hex: 0x0EA5E9))
-            MetricCard(icon: "point.topleft.down.curvedto.point.bottomright.up", iconColor: Theme.orange, title: "续航里程",
-                       value: connected ? String(format: "%.1f", r?.enduranceMileage ?? 0) : "--",
-                       unit: "km", valueColor: Theme.orange)
-            MetricCard(icon: "dot.radiowaves.left.and.right", iconColor: Theme.teal, title: "信号",
-                       value: connected && store.rssi != 0 ? "\(store.rssi)" : "--",
-                       unit: "dBm", valueColor: Theme.teal)
-            MetricCard(icon: "cpu", iconColor: Theme.secondary, title: "固件",
-                       value: store.versionMain.isEmpty ? "--" : store.versionMain,
-                       unit: "", valueColor: Theme.secondary)
+    private var mileageCard: some View {
+        AppleCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("行驶里程")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Theme.label)
+                    Spacer()
+                    if connected {
+                        Text("实时刷新 · 0.5s")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                }
+
+                // 续航里程主数字（对齐 Flutter 大字英雄区）
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("续航里程")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(connected ? String(format: "%.1f", rt?.enduranceMileage ?? 0) : "--")
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.brand)
+                            .monospacedDigit()
+                        Text("km")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                }
+
+                Divider().opacity(0.6)
+
+                HStack(spacing: 0) {
+                    mileageCell("总里程", connected ? String(format: "%.1f", rt?.totalMileage ?? 0) : "--", "km")
+                    Rectangle()
+                        .fill(Theme.separator.opacity(0.5))
+                        .frame(width: 1, height: 34)
+                    mileageCell("单次电耗", connected ? String(format: "%.2f", rt?.singleEnergy ?? 0) : "--", "kWh")
+                }
+            }
         }
+    }
+
+    private func mileageCell(_ label: String, _ value: String, _ unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                Text(unit)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - 零百测速
@@ -292,7 +359,7 @@ struct DianjingDetailView: View {
 
     // MARK: - 里程控制
 
-    private var mileageCard: some View {
+    private var mileageControlCard: some View {
         AppleCard(padding: 12) {
             HStack(spacing: 10) {
                 CircleIconBadge(icon: "road.lanes.circle.fill", color: Theme.orange, size: 34)
@@ -429,3 +496,31 @@ struct DianjingDetailView: View {
         }
     }
 }
+
+// MARK: - 仪表环形状
+
+/// 270° 圆弧（135° 起笔 → 45° 收笔），progress 控制扫过比例
+struct GaugeArc: Shape {
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2 - 9
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: DianjingDetailView.gaugeStart,
+            endAngle: DianjingDetailView.gaugeStart
+                + Angle(degrees: DianjingDetailView.gaugeSweep.degrees * progress),
+            clockwise: false
+        )
+        return path
+    }
+}
+
