@@ -382,7 +382,8 @@ struct HeadlightDetailView: View {
                 .foregroundStyle(Theme.secondary)
         }
         .foregroundStyle(selected ? accent : Theme.label)
-        .frame(minWidth: 72, height: 46)
+        .frame(minWidth: 72)
+                .frame(height: 46)
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -392,6 +393,41 @@ struct HeadlightDetailView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(selected ? accent.opacity(0.55) : .clear, lineWidth: 1)
         )
+    }
+
+    /// 记忆命名弹窗：输入名字（留空自动编号），保存后列表页可一键直达
+    private var nameMemorySheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("将当前高度 \(namingPercent)% 保存为记忆")
+                    .font(Theme.headline)
+                    .foregroundStyle(Theme.label)
+                TextField("记忆名称，如：跑山 / 代驾 / 市区", text: $memoryName)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    memories = HeadlightMemory.add(name: memoryName, percent: namingPercent)
+                    showNameSheet = false
+                    memorySavedFeedback()
+                } label: {
+                    Text("保存记忆")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+                }
+                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+                Spacer()
+            }
+            .padding(20)
+            .background(Theme.groupedBackground)
+            .navigationTitle("保存记忆")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("取消") { showNameSheet = false } }
+            }
+        }
+        .presentationDetents([.medium])
     }
 
     private func memorySavedFeedback() {
