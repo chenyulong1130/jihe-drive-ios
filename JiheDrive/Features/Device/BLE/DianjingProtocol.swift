@@ -199,7 +199,7 @@ extension DianjingProtocol {
     }
 
     static func u32(_ bytes: [UInt8], _ offset: Int) -> UInt32 {
-        u16(bytes, offset) | (UInt16(bytes[offset + 2]) | (UInt16(bytes[offset + 3]) << 8)) << 16
+        UInt32(u16(bytes, offset)) | (UInt32(u16(bytes, offset + 2)) << 16)
     }
 
     static func i32(_ bytes: [UInt8], _ offset: Int) -> Int32 {

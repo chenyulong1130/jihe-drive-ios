@@ -144,9 +144,9 @@ final class ChargerStore: ObservableObject {
     /// 自定义帧：FUNC / 寄存器 / 数据（寄存器小端由协议层统一处理）
     func sendCustomCommand() async {
         guard let ble, ble.isConnected else { return }
+        let data = Self.bytes(from: customDataHex)
         guard let funcCode = UInt8(customFuncHex.filter { !$0.isWhitespace }, radix: 16),
-              let register = UInt16(customRegisterHex.filter { !$0.isWhitespace }, radix: 16),
-              let data = Self.bytes(from: customDataHex) else {
+              let register = UInt16(customRegisterHex.filter { !$0.isWhitespace }, radix: 16) else {
             appendLog("十六进制格式不正确")
             return
         }

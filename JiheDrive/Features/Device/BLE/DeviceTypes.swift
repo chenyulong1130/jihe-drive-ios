@@ -89,6 +89,10 @@ extension Data {
     var hexString: String { map { String(format: "%02X", $0) }.joined() }
 }
 
+extension Array where Element == UInt8 {
+    var hexString: String { map { String(format: "%02X", $0) }.joined() }
+}
+
 struct BLEDevice: Identifiable, Hashable {
     let id: UUID
     var name: String

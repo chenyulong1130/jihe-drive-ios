@@ -162,9 +162,9 @@ final class DianjingStore: ObservableObject {
     /// 调试面板自定义帧：任意 target/code/数据
     func sendCustomCommand() async {
         guard let ble, ble.isConnected else { return }
-        guard let target = UInt8(customTargetHex, radix: 16),
-              let code = UInt8(customCodeHex, radix: 16),
-              let data = Self.bytes(from: customDataHex) else {
+        let data = Self.bytes(from: customDataHex)
+        guard let target = UInt8(customTargetHex.filter { !$0.isWhitespace }, radix: 16),
+              let code = UInt8(customCodeHex.filter { !$0.isWhitespace }, radix: 16) else {
             appendLog("十六进制格式不正确")
             return
         }

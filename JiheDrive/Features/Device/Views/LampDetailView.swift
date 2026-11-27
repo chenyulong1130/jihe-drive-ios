@@ -39,9 +39,9 @@ struct LampDetailView: View {
                 switch store.profile {
                 case .angle: angleSection
                 case .m5: m5Section
-                case .ae7: ae7Section
+                case .ae7: rgbControlSection
                 case .fx: fxSection
-                case .rgb: rgbSection
+                case .rgb: rgbControlSection
                 }
             }
             .padding(.horizontal, 14)
@@ -271,7 +271,7 @@ struct LampDetailView: View {
         }
     }
 
-    // MARK: - AE7
+    // MARK: - AE7（与通用 RGB 控件共用一套：开关 / 亮度 / 颜色）
 
     private var ae7Section: some View {
         rgbControlSection
