@@ -1,8 +1,8 @@
 import SwiftUI
 import WebKit
 
-/// CarPlay 页：按真实失败日志做成「先就绪再启动」引导。
-/// 日志常见卡点：①本地网络 NoAuth ②未填 Wi-Fi 预设 ③0x4301 后回连不到 7000。
+/// CarPlay 页：CarWithin 式单页流程——预览即操作面（点按/滑动直接控制），
+/// 启动立即进进度（自检是第 0 步），Wi-Fi 与输出设置内联成卡片，无流程弹窗。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
@@ -10,14 +10,14 @@ struct MirrorView: View {
 
     @State private var checks: [CPMirrorDiagnostics.CheckResult] = []
     @State private var runningChecks = false
+    /// 自检硬性失败的合并原因（内联展示，不再弹窗）
+    @State private var checkFailure: String?
     @State private var showExport = false
     @State private var exportURL: URL?
     @State private var showFullscreen = false
     @State private var wifiSaveTask: Task<Void, Never>?
     @State private var wifiSaved = false
-    @State private var showPreflight = false
     @State private var showLogs = false
-    @State private var showSettingsSheet = false
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
     @State private var exitButtonVisible = true
@@ -30,24 +30,20 @@ struct MirrorView: View {
                 LargeTitle(
                     "CarPlay",
                     subtitle: controller.hasVideo
-                        ? "画面已就绪，可触控操作"
-                        : "先完成本机唤起，再投屏到仪表"
+                        ? "画面已就绪 · 点按/滑动画面直接操作"
+                        : "启动后画面在上方，直接触控操作"
                 ) {
-                    HStack(spacing: 8) {
-                        circleIcon("gearshape", label: "投屏设置") { showSettingsSheet = true }
-                        circleIcon("doc.text.magnifyingglass", label: "运行日志") { showLogs = true }
-                    }
+                    circleIcon("doc.text.magnifyingglass", label: "运行日志") { showLogs = true }
                 }
                 .staggerIn(0)
 
-                if controller.hasVideo {
-                    videoSection.staggerIn(1)
-                }
+                previewSection.staggerIn(1)
 
-                launchCard.staggerIn(controller.hasVideo ? 2 : 1)
+                launchCard.staggerIn(2)
 
-                zeehoSummaryRow.staggerIn(controller.hasVideo ? 3 : 2)
-                preflightRow.staggerIn(controller.hasVideo ? 4 : 3)
+                wifiSetupCard.staggerIn(3)
+
+                outputSettingsCard.staggerIn(4)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -56,7 +52,6 @@ struct MirrorView: View {
         .background(Theme.groupedBackground)
         .onAppear {
             // 只做本地检查；蓝牙/定位/本地网络权限一律延迟到真正需要时
-            // （启动 CarPlay 时）再请求，避免一进页面连环弹权限
             store.recheckIdentity()
         }
         .onChange(of: controller.phase) { _, phase in
@@ -74,49 +69,82 @@ struct MirrorView: View {
             }
         }
         .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
-        .sheet(isPresented: $showPreflight) {
-            preflightSheet
-        }
-        .sheet(isPresented: $showSettingsSheet) { settingsSheet }
         .sheet(isPresented: $showLogs) { logsSheet }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
         }
     }
 
-    // MARK: - 就绪清单（对照日志卡点）
+    // MARK: - 预览区（第一交互面）
 
-    private var lanCheck: CPMirrorDiagnostics.CheckResult? {
-        checks.first { $0.name == "本地网络" }
-    }
-    private var wifiPresetOK: Bool {
-        !store.resolvedSSID.isEmpty && (
-            store.wifiPassword.isEmpty || (8...63).contains(store.wifiPassword.utf8.count)
-        )
-    }
-    private var localIPOK: Bool { CPMirrorDiagnostics.localIPv4() != nil }
-    private var lanOK: Bool { lanCheck?.passed != false || (lanCheck == nil && localIPOK) }
+    /// 出画前是同尺寸占位框，出画后画面直接可点/可滑（同手机小窗）；
+    /// 全屏与画中画收进画面右上角浮层，不再单独占一行按钮。
+    @ViewBuilder
+    private var previewSection: some View {
+        if controller.hasVideo {
+            ZStack(alignment: .topTrailing) {
+                CPPreviewView(controller: controller)
+                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture { showFullscreen = true }
 
-    private func checklistRow(done: Bool, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(done ? Theme.green : Theme.tertiary)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(Theme.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.label)
-                Text(detail)
-                    .font(Theme.caption)
-                    .foregroundStyle(done ? Theme.secondary : Theme.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    StatusPill(text: "LIVE", color: Theme.green, pulsing: true)
+                    previewOverlayIcon("pip.enter", label: "画中画") {
+                        _ = controller.startPictureInPicture()
+                    }
+                    previewOverlayIcon("arrow.up.left.and.arrow.down.right", label: "全屏") {
+                        showFullscreen = true
+                    }
+                }
+                .padding(10)
             }
-            Spacer(minLength: 0)
+        } else {
+            // 启动前占位：与出画后的预览同比例，流程视觉不断档
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Theme.surface.opacity(0.55))
+                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Theme.tertiary.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                )
+                .overlay {
+                    VStack(spacing: 10) {
+                        Image(systemName: controller.phase.isRunning ? "iphone.gen3.radiowaves.left.and.right" : "car.fill")
+                            .font(.system(size: 30, weight: .semibold))
+                            .foregroundStyle(phaseColor.opacity(0.7))
+                        Text(controller.phase.isRunning ? "正在连接，画面就绪后显示在这里" : "启动后画面显示在这里")
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                        Text("出画后点按 / 滑动画面即可直接操作")
+                            .font(Theme.caption)
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                }
         }
     }
 
-    // MARK: - Wi-Fi 预设（图标弹窗；日志：「未配置 Wi-Fi 名称与密码」）
+    /// 预览右上角的半透明浮层小圆钮
+    private func previewOverlayIcon(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Color.black.opacity(0.5)))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+        }
+        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - Wi-Fi 预设
 
     /// 标题右侧圆形图标按钮
     private func circleIcon(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
@@ -129,26 +157,6 @@ struct MirrorView: View {
         }
         .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
         .accessibilityLabel(label)
-    }
-
-    /// 投屏设置弹窗：Wi-Fi 预设 + 极核仪表投屏
-    private var settingsSheet: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    wifiSetupCard
-                    zeehoCard
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-            }
-            .background(Theme.groupedBackground)
-            .navigationTitle("投屏设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showSettingsSheet = false } }
-            }
-        }
     }
 
     // MARK: - 车辆信息页（CarPlay 主屏车辆按钮点按后弹出）
@@ -299,36 +307,8 @@ struct MirrorView: View {
         }
     }
 
-    /// 页面常驻的投屏摘要行：点击打开设置弹窗
-    private var zeehoSummaryRow: some View {
-        AppleCard(padding: 12, onTap: { showSettingsSheet = true }) {
-            HStack(spacing: 10) {
-                Image(systemName: "gauge.with.needle")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(store.castToZeeho ? Theme.brand : Theme.secondary)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(store.castToZeeho ? "极核仪表投屏" : "极核仪表投屏（已关闭）")
-                        .font(Theme.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.label)
-                    Text(store.castToZeeho ? controller.zeehoSpecText : "出画后在此开启，或点右上角仪表图标配置")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 8)
-                if store.castToZeeho {
-                    StatusPill(text: controller.zeehoStatus,
-                               color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.tertiary)
-            }
-        }
-    }
+    // MARK: - 运行日志弹窗（完整列表 + 导出 / 清空 / 复制）
 
-    /// 运行日志弹窗：完整列表 + 导出 / 清空 / 复制
     private var logsSheet: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
@@ -383,7 +363,7 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - Wi-Fi 预设卡片（弹窗内容）
+    // MARK: - Wi-Fi 预设卡片（内联，输入后防抖自动保存）
 
     private var wifiSetupCard: some View {
         AppleCard(padding: 16) {
@@ -448,7 +428,7 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 启动本机 CarPlay
+    // MARK: - 启动卡（自检并入进度：点启动立即响应）
 
     private var launchCard: some View {
         AppleCard(padding: 18) {
@@ -475,7 +455,7 @@ struct MirrorView: View {
                             .foregroundStyle(Theme.label)
                         Text(controller.hasVideo
                              ? "本地预览与触控可用"
-                             : "先出本机画面，再考虑投仪表")
+                             : "点启动立即进进度，自检自动完成")
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
                     }
@@ -486,16 +466,28 @@ struct MirrorView: View {
                 }
 
                 if !controller.hasVideo {
-                    PhaseStepTracker(steps: Self.phaseSteps,
-                                     completed: phaseProgress.completed,
-                                     active: phaseProgress.active,
-                                     failed: phaseProgress.failed,
+                    PhaseStepTracker(steps: Self.startupSteps,
+                                     completed: startupProgress.completed,
+                                     active: startupProgress.active,
+                                     failed: startupProgress.failed,
                                      accent: phaseColor)
 
-                    Text(connectionGuide)
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let checkFailure {
+                        // 自检硬性失败：内联原因，改完条件直接再点启动
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "xmark.octagon.fill")
+                                .foregroundStyle(Theme.red)
+                            Text(checkFailure)
+                                .font(Theme.footnote)
+                                .foregroundStyle(Theme.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text(connectionGuide)
+                            .font(Theme.footnote)
+                            .foregroundStyle(Theme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 if showStartupHint {
@@ -528,12 +520,37 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 仪表投屏（本机出画后再开）
+    // MARK: - 输出设置（画面输出到哪：本机预览，可选投到极核仪表）
 
-    private var zeehoCard: some View {
+    private var outputSettingsCard: some View {
         AppleCard(padding: 16) {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("同时投放到极核仪表", isOn: $store.castToZeeho)
+                HStack(spacing: 10) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                        .frame(width: 24)
+                    Text("输出设置")
+                        .font(Theme.headline)
+                        .foregroundStyle(Theme.label)
+                    Spacer(minLength: 0)
+                    if store.castToZeeho {
+                        if controller.zeehoStatus.hasPrefix("失败") {
+                            Button {
+                                controller.retryDashboardLink()
+                            } label: {
+                                Label("重试", systemImage: "arrow.clockwise")
+                                    .font(Theme.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.brand)
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
+                        }
+                        StatusPill(text: controller.zeehoStatus,
+                                   color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
+                    }
+                }
+
+                Toggle("投到极核仪表", isOn: $store.castToZeeho)
                     .font(Theme.footnote.weight(.semibold))
                     .foregroundStyle(Theme.label)
                     .tint(Theme.brand)
@@ -543,7 +560,7 @@ struct MirrorView: View {
                     }
 
                 if !store.castToZeeho {
-                    Text("关掉时只跑本机 CarPlay。出画后再打开此项。")
+                    Text("关闭时只在本机出画面；仪表 IP、车型与裁剪在开启后显示。")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
                 }
@@ -659,9 +676,26 @@ struct MirrorView: View {
     // MARK: - 启动步骤与进度
 
     static let phaseSteps = ["配件端点", "iAP2 链路", "配件认证", "配件识别", "会话请求", "控制连接", "画面输出"]
+    /// 启动全流程：自检是第 0 步——点启动立即进进度，自检不再挡在按钮前面
+    static let startupSteps = ["自检"] + phaseSteps
 
-    /// completed = 已走完的步骤数；active = 进行中的步骤下标（-1 无）；
-    /// failed = 引导/接收端失败（进度条染红）。
+    /// 启动进度（相对 startupSteps）：自检中=第 0 步进行中；
+    /// 自检硬性失败=第 0 步染红；之后随引导阶段逐格点亮。
+    private var startupProgress: (completed: Int, active: Int, failed: Bool) {
+        if let checkFailure { return (0, -1, true) }
+        if runningChecks { return (0, 0, false) }
+        switch controller.phase {
+        case .idle, .stopped:
+            return (0, -1, false)
+        default:
+            break
+        }
+        let base = phaseProgress
+        if base.failed { return (0, -1, true) }
+        if base.completed >= Self.phaseSteps.count { return (Self.startupSteps.count, -1, false) }
+        return (base.completed + 1, base.active >= 0 ? base.active + 1 : -1, false)
+    }
+
     private var phaseProgress: (completed: Int, active: Int, failed: Bool) {
         switch controller.phase {
         case .idle, .stopped: return (0, -1, false)
@@ -686,11 +720,14 @@ struct MirrorView: View {
         if case .failed(let reason) = controller.phase {
             return reason
         }
+        if let checkFailure {
+            return "自检未通过，修正上方问题后重新点启动。"
+        }
         let ssid = store.resolvedSSID
         if !ssid.isEmpty {
-            return "将使用 Wi-Fi「\(ssid)」发起会话。先点启动唤起本机 CarPlay，画面出来后再开「投放到极核仪表」。"
+            return "将使用 Wi-Fi「\(ssid)」发起会话。先出本机画面，需要投仪表时在下方「输出设置」开启。"
         }
-        return "请先连上 Wi-Fi/仪表热点，并填写下方 Wi-Fi 名称与密码，否则 iPhone 无法回连控制端口。"
+        return "请先连上 Wi-Fi/仪表热点，并在上方填写 Wi-Fi 名称与密码，否则 iPhone 无法回连控制端口。"
     }
 
     /// 启动阶段计时：5 秒还没出画面才显示提示；出画/停止后清除
@@ -723,7 +760,7 @@ struct MirrorView: View {
             if controller.phase.isRunning {
                 controller.stop()
             } else {
-                Task { await startCarPlayAfterPreflight() }
+                startMirror()
             }
         } label: {
             HStack(spacing: 8) {
@@ -742,121 +779,36 @@ struct MirrorView: View {
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
     }
 
-    /// 启动前预检：硬性失败（身份缺失/无本机地址/无 Wi-Fi 预设）不启动，弹出自检详情。
-    private func startCarPlayAfterPreflight() async {
-        // 权限在这一步才请求：本地网络（CarPlay 会话必需）+ Wi-Fi 名称检测（定位）
-        CPLocalNetworkGate.requestAuthorizationIfNeeded()
-        await MainActor.run { store.detectSSID() }
-        // 先写入 Wi-Fi 预设，再预检——否则 StartSession 会因「未配置」直接失败
-        let saved = await MainActor.run { store.commitWiFi() }
-        if !saved {
-            await MainActor.run { showPreflight = true }
-            _ = await runChecks()
-            return
-        }
-        let results = await runChecks()
-        let hardFailures = results.filter { !$0.passed && !$0.warning }
-        guard hardFailures.isEmpty else {
-            controller.stop()
-            await MainActor.run { showPreflight = true }
-            return
-        }
-        store.commitDashboardIP()
-        store.commitCastToZeeho()
-        let localIP = CPMirrorDiagnostics.localIPv4() ?? ""
-        if localIP.isEmpty {
-            await MainActor.run { showPreflight = true }
-            return
-        }
-        controller.start(dashboardIP: store.dashboardIP, localIP: localIP,
-                         castToZeeho: store.castToZeeho)
-    }
+    /// 启动：点按钮立即进进度（自检 = 第 0 步），自检通过自动继续发起会话；
+    /// 硬性失败内联展示原因，不再弹窗打断。
+    @MainActor
+    private func startMirror() {
+        checkFailure = nil
+        Task {
+            // 权限在这一步才请求：本地网络（CarPlay 会话必需）+ Wi-Fi 名称检测（定位）
+            CPLocalNetworkGate.requestAuthorizationIfNeeded()
+            store.detectSSID()
+            // 先写入 Wi-Fi 预设，再自检——否则 StartSession 会因「未配置」直接失败
+            store.commitWiFi()
+            store.commitDashboardIP()
+            store.commitCastToZeeho()
 
-    // MARK: - 视频区（出画后才出现，CarWithin 的 inline video container）
-
-    private var videoSection: some View {
-        VStack(spacing: 12) {
-            ZStack(alignment: .topTrailing) {
-                CPPreviewView(controller: controller)
-                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .clipped()
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(0.18), radius: 18, y: 8)
-
-                StatusPill(text: "LIVE", color: Theme.green, pulsing: true)
-                    .padding(10)
+            let results = await runChecks()
+            let hardFailures = results.filter { !$0.passed && !$0.warning }
+            if !hardFailures.isEmpty {
+                checkFailure = hardFailures
+                    .map { "\($0.name)：\($0.detail)" }
+                    .joined(separator: "\n")
+                return
             }
-
-            // 操作行：全屏突出 + 画中画 + 预览窗
-            HStack(spacing: 10) {
-                actionButton("全屏", "arrow.up.left.and.arrow.down.right", prominent: true) {
-                    showFullscreen = true
-                }
-                actionButton("画中画", "pip.enter") {
-                    _ = controller.startPictureInPicture()
-                }
+            let localIP = CPMirrorDiagnostics.localIPv4() ?? ""
+            guard !localIP.isEmpty else {
+                checkFailure = "未获取到 Wi-Fi IP：请先在系统设置连接热点，再重新点启动。"
+                return
             }
-
-            // CarWithin 风格胶囊按键条
-            HStack(spacing: 8) {
-                pillButton("house.fill", "主页") { controller.pressHome() }
-                pillButton("chevron.backward", "返回") { controller.pressBack() }
-                pillButton("smallcircle.filled.circle", "选择") { controller.pressSelect() }
-                pillButton("mic.fill", "Siri") { controller.requestSiri() }
-            }
-
-            Text("点按画面即可触控 · 全屏后轻触可唤出退出")
-                .font(Theme.caption)
-                .foregroundStyle(Theme.tertiary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            controller.start(dashboardIP: store.dashboardIP, localIP: localIP,
+                             castToZeeho: store.castToZeeho)
         }
-    }
-
-    private func actionButton(_ title: String, _ icon: String,
-                              prominent: Bool = false,
-                              action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(title)
-                    .font(Theme.footnote.weight(.semibold))
-            }
-            .foregroundStyle(prominent ? Color.white : Theme.brand)
-            .frame(maxWidth: .infinity)
-            .frame(height: 40)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(prominent ? AnyShapeStyle(Theme.brand)
-                                    : AnyShapeStyle(Theme.brand.opacity(0.12)))
-            )
-        }
-        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-    }
-
-    private func pillButton(_ icon: String, _ label: String,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                Text(label)
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundStyle(Theme.brand)
-            .frame(maxWidth: .infinity)
-            .frame(height: 50)
-            .background(
-                RoundedRectangle(cornerRadius: 25, style: .continuous)
-                    .fill(Theme.brand.opacity(0.1))
-            )
-        }
-        .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
     }
 
     // MARK: - 全屏（纯黑容器 + 5 秒淡出退出按钮）
@@ -921,154 +873,7 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - 自检摘要行 + 详情弹窗
-
-    private var preflightSummaryText: String {
-        if runningChecks { return "正在自检…" }
-        if checks.isEmpty { return "尚未自检" }
-        let failed = checks.filter { !$0.passed }
-        if failed.isEmpty { return "自检全部通过（\(checks.count) 项）" }
-        let names = failed.map(\.name).joined(separator: "、")
-        return "自检 \(checks.count - failed.count)/\(checks.count)：\(names)"
-    }
-
-    private var preflightSummaryIcon: String {
-        if runningChecks || checks.isEmpty { return "circle.dotted" }
-        let failed = checks.filter { !$0.passed }
-        if failed.isEmpty { return "checkmark.circle.fill" }
-        return failed.contains { !$0.warning } ? "xmark.circle.fill" : "exclamationmark.triangle.fill"
-    }
-
-    private var preflightSummaryColor: Color {
-        if runningChecks || checks.isEmpty { return Theme.secondary }
-        let failed = checks.filter { !$0.passed }
-        if failed.isEmpty { return Theme.green }
-        return failed.contains { !$0.warning } ? Theme.red : Color(hex: 0xFF9F0A)
-    }
-
-    private var preflightRow: some View {
-        Button {
-            showPreflight = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: preflightSummaryIcon)
-                    .font(.system(size: 15))
-                    .foregroundStyle(preflightSummaryColor)
-                Text(preflightSummaryText)
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Text("详情")
-                    .font(Theme.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.brand)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.tertiary)
-            }
-            .padding(14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableStyle(scale: 0.99, brightness: 0))
-        .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Theme.surface)
-        )
-        .disabled(runningChecks)
-    }
-
-    private var preflightSheet: some View {
-        SheetShell(
-            title: "启动自检",
-            subtitle: preflightSummaryText,
-            onClose: { showPreflight = false },
-            trailing: {
-                Button {
-                    Task { await runChecks() }
-                } label: {
-                    if runningChecks {
-                        ProgressView()
-                    } else {
-                        Text("重新自检")
-                            .font(Theme.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.brand)
-                    }
-                }
-                .disabled(runningChecks)
-            }
-        ) {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    // 启动前就绪清单（与主页启动卡同一数据源）
-                    AppleCard(padding: 14) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            checklistRow(
-                                done: store.identityReady,
-                                title: "配件身份",
-                                detail: store.identityReady
-                                    ? "证书与私钥已就绪"
-                                    : (store.identityHint ?? "缺少身份三件套")
-                            )
-                            checklistRow(
-                                done: lanOK,
-                                title: "本地网络权限",
-                                detail: lanOK
-                                    ? (lanCheck?.detail ?? "TCP 监听可用")
-                                    : "日志 -65555 NoAuth：到 设置 → 极核智行 → 本地网络 打开"
-                            )
-                            checklistRow(
-                                done: wifiPresetOK && localIPOK,
-                                title: "Wi-Fi 预设 + 本机地址",
-                                detail: wifiPresetOK
-                                    ? (localIPOK
-                                       ? "SSID「\(store.resolvedSSID)」· \(CPMirrorDiagnostics.localIPv4() ?? "")"
-                                       : "已填 SSID，但还没拿到 Wi-Fi IP——请先连上热点")
-                                    : "必须填写 Wi-Fi 名称（密码开放网可留空）——否则 0x4301 发不出去"
-                            )
-                        }
-                    }
-
-                    if checks.isEmpty {
-                        Text(runningChecks ? "正在自检…" : "尚未自检")
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 60)
-                    } else {
-                        ForEach(checks) { result in
-                            preflightDetailRow(result)
-                        }
-                    }
-                }
-                .padding(.horizontal, Theme.page)
-                .padding(.top, 16)
-                .padding(.bottom, 40)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func preflightDetailRow(_ result: CPMirrorDiagnostics.CheckResult) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: result.passed ? "checkmark.circle.fill" :
-                    (result.warning ? "exclamationmark.triangle.fill" : "xmark.circle.fill"))
-                .foregroundStyle(result.passed ? Theme.green :
-                                    (result.warning ? Color(hex: 0xFF9F0A) : Theme.red))
-                .font(.system(size: 15))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(result.name)
-                    .font(Theme.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.label)
-                Text(result.detail)
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.secondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 4)
-    }
+    // MARK: - 自检（并入启动进度，结果内联展示）
 
     private func runChecks() async -> [CPMirrorDiagnostics.CheckResult] {
         await MainActor.run { runningChecks = true }

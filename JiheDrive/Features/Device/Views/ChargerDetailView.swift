@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// 蚂蚁充电机详情页：对齐保护板页的卡片流 ——
-/// 设备名 + 充电状态英雄区 + 实时指标网格 + 保护信息 + 历史日志 + 诊断（含自定义帧调试）。
-/// 说明：充电机专属寄存器表在服务端协议 JSON 下发，实时字段优先按蚂蚁 0x11
-/// 通用布局解析，不兼容时保留原始帧（诊断面板可复制，供联调补表）。
+/// 蚂蚁充电机详情页（对齐官方 App 版式）：
+/// 充电状态徽章 + 输出电压/输出电流左列 + 充电机→电池能量流（SOC 动态填充）
+/// + 电量/电池电压/实时功率条 + 提示消息（状态 + 保护位 chips）+ 温度行 + 历史日志
+/// + 诊断（含自定义帧调试）。官方的「首充模式/开机时长/设置电压电流/单次充电容量/
+/// 外壳·变压器·PFC 温度」来自服务端寄存器表，0x11 兼容解析暂无这些字段，先不展示。
 struct ChargerDetailView: View {
     @EnvironmentObject private var ble: DeviceBLEManager
     @ObservedObject var store: ChargerStore
@@ -19,8 +20,8 @@ struct ChargerDetailView: View {
             VStack(spacing: 8) {
                 headerRow
                 heroCard
-                if connected { protectionCard }
-                metricsGrid
+                statusCard
+                temperatureCard
                 historyCard
             }
             .padding(.horizontal, 14)
@@ -83,56 +84,153 @@ struct ChargerDetailView: View {
     /// 实时数据是否已解析出结构化字段
     private var hasParsedRealtime: Bool { connected && (rt?.parsed ?? false) }
 
-    // MARK: - Hero（充电状态 + 功率概览）
+    /// 是否在充电（电流绝对值大于 0.1A 视为充电中）
+    private var charging: Bool { hasParsedRealtime && abs(rt?.current ?? 0) > 0.1 }
+
+    // MARK: - Hero（充电状态 + 充电机→电池能量流）
 
     private var heroCard: some View {
-        let charging = hasParsedRealtime && abs(rt?.current ?? 0) > 0.1
-        let power = abs(rt?.power ?? 0)
-
-        return AppleCard(padding: 0) {
+        AppleCard(padding: 0) {
             VStack(spacing: 0) {
-                ZStack {
-                    Circle()
-                        .stroke(Theme.surfaceAlt, lineWidth: 12)
-                    Circle()
-                        .trim(from: 0, to: hasParsedRealtime ? CGFloat(min(1, max(0, Double(rt?.soc ?? 0) / 100))) : 0)
-                        .stroke(
-                            charging ? Theme.green : Theme.secondary,
-                            style: StrokeStyle(lineWidth: 12, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                        .animation(.easeInOut(duration: 0.45), value: rt?.soc ?? 0)
-
-                    VStack(spacing: 6) {
-                        Image(systemName: charging ? "bolt.fill" : "powerplug.fill")
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundStyle(charging ? Theme.green : Theme.secondary)
-                        Text(charging ? "充电中" : (connected ? "待机" : "未连接"))
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(Theme.label)
-                        if hasParsedRealtime, (rt?.soc ?? 0) > 0 {
-                            Text("电量 \(rt?.soc ?? 0)%")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.secondary)
-                        }
-                    }
+                // 充电状态徽章（对齐官方顶部胶囊）
+                HStack {
+                    Spacer()
+                    Label(charging ? "充电状态 · 充电中" : (connected ? "充电状态 · 待机" : "充电状态"),
+                          systemImage: charging ? "bolt.fill" : "powerplug.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(charging ? Theme.green : Theme.secondary, in: Capsule())
+                    Spacer()
                 }
-                .frame(width: 180, height: 180)
-                .padding(.top, 22)
-                .padding(.bottom, 22)
+                .padding(.top, 16)
+
+                HStack(alignment: .center, spacing: 14) {
+                    // 左列：输出电压 / 输出电流（对齐官方左列数据）
+                    VStack(alignment: .leading, spacing: 12) {
+                        heroStatRow("输出电压", "arrow.down.circle",
+                                    hasParsedRealtime ? String(format: "%.1f", rt?.chargerVoltage ?? 0) : "--",
+                                    "V", Theme.brand)
+                        heroStatRow("输出电流", "gauge",
+                                    hasParsedRealtime ? String(format: "%.1f", rt?.chargerCurrent ?? 0) : "--",
+                                    "A", Color(hex: 0x0EA5E9))
+                    }
+
+                    Spacer(minLength: 0)
+
+                    flowGraphic
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 18)
 
                 Divider().opacity(0.6)
 
                 HStack(spacing: 0) {
-                    infoCell("充电功率", hasParsedRealtime ? "\(power)" : "--", hasParsedRealtime ? "W" : nil)
+                    infoCell("电池电量",
+                             hasParsedRealtime && (rt?.soc ?? 0) > 0 ? "\(rt?.soc ?? 0)" : "--",
+                             hasParsedRealtime && (rt?.soc ?? 0) > 0 ? "%" : nil)
                     Rectangle()
                         .fill(Theme.separator.opacity(0.5))
                         .frame(width: 1, height: 34)
-                    infoCell("端口电压", hasParsedRealtime ? String(format: "%.1f", rt?.voltage ?? 0) : "--", hasParsedRealtime ? "V" : nil)
+                    infoCell("电池电压", hasParsedRealtime ? String(format: "%.1f", rt?.voltage ?? 0) : "--",
+                             hasParsedRealtime ? "V" : nil)
+                    Rectangle()
+                        .fill(Theme.separator.opacity(0.5))
+                        .frame(width: 1, height: 34)
+                    infoCell("实时功率", hasParsedRealtime ? "\(abs(rt?.power ?? 0))" : "--",
+                             hasParsedRealtime ? "W" : nil)
                 }
                 .padding(.vertical, 14)
                 .padding(.horizontal, 8)
             }
+        }
+    }
+
+    private func heroStatRow(_ label: String, _ icon: String, _ value: String,
+                             _ unit: String, _ color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(unit)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+    }
+
+    /// 充电机 → 电池能量流示意（对齐官方的设备对电池视觉）
+    private var flowGraphic: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            VStack(spacing: 5) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Theme.surfaceAlt)
+                        .frame(width: 62, height: 62)
+                    Image(systemName: "fanblades.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                }
+                Text("充电机")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+            }
+            // 能量流箭头（充电时点亮）
+            HStack(spacing: 3) {
+                ForEach(0..<3, id: \.self) { index in
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.green.opacity(charging ? (index == 1 ? 1 : 0.5) : 0.25))
+                }
+            }
+            .offset(y: -16)
+            VStack(spacing: 5) {
+                batteryGraphic
+                Text("电池")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+            }
+        }
+    }
+
+    /// 电池外壳 + 按 SOC 动态填充（正极帽在上）
+    private var batteryGraphic: some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Theme.separator.opacity(0.6))
+                .frame(width: 16, height: 5)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Theme.surfaceAlt)
+                let soc = hasParsedRealtime ? Double(rt?.soc ?? 0) : 0
+                GeometryReader { geo in
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Rectangle()
+                            .fill(charging ? Theme.green : Theme.secondary.opacity(0.6))
+                            .frame(height: max(0, geo.size.height * min(1, soc / 100)))
+                            .animation(.easeInOut(duration: 0.4), value: soc)
+                    }
+                }
+                .padding(4)
+            }
+            .frame(width: 44, height: 70)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Theme.separator.opacity(0.6), lineWidth: 1)
+            )
         }
     }
 
@@ -157,34 +255,42 @@ struct ChargerDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - 保护信息条
+    // MARK: - 提示消息（状态 chips + 保护位，对齐官方提示消息条）
 
     private var protectionEntries: [String] {
         guard let flags = store.latestProtectionFlags, flags != 0 else { return [] }
         return BMSProtocol.flagNames(flags, table: ChargerHistoryRecord.protectionFlags)
     }
 
-    @ViewBuilder
-    private var protectionCard: some View {
-        let entries = protectionEntries
-        if entries.isEmpty {
-            AppleCard(padding: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.shield.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.green)
-                    Text("无保护触发")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Theme.green)
-                    Spacer()
+    /// 状态 chips：连接 / 充电 / 数据解析（保护位单独展示）
+    private var statusChips: [(String, Color)] {
+        [
+            (connected ? "已连接" : "未连接", connected ? Theme.green : Theme.secondary),
+            (charging ? "充电中" : "待机", charging ? Theme.green : Theme.secondary),
+            (hasParsedRealtime ? "数据解析正常" : "仅原始帧", hasParsedRealtime ? Theme.brand : Theme.orange),
+        ]
+    }
+
+    private var statusCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("提示消息")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.label)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(statusChips, id: \.0) { chip in
+                        Text(chip.0)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(chip.1)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity)
+                            .background(chip.1.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    }
                 }
-            }
-        } else {
-            AppleCard(padding: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("保护信息")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Theme.label)
+
+                let entries = protectionEntries
+                if !entries.isEmpty {
                     ForEach(entries, id: \.self) { name in
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -199,34 +305,59 @@ struct ChargerDetailView: View {
                         .padding(.vertical, 9)
                         .background(Theme.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
+                } else if connected {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.green)
+                        Text("无保护触发")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Theme.green)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Theme.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
         }
     }
 
-    // MARK: - 实时指标网格
+    // MARK: - 温度（对齐官方温度行；MOS/电芯来自 0x11 兼容布局）
 
-    private var metricsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-            MetricCard(icon: "arrow.down.circle.fill", iconColor: Theme.brand, title: "输出电压",
-                       value: hasParsedRealtime ? String(format: "%.1f", rt?.chargerVoltage ?? 0) : "--",
-                       unit: "V", valueColor: Theme.brand)
-            MetricCard(icon: "gauge", iconColor: Color(hex: 0x0EA5E9), title: "输出电流",
-                       value: hasParsedRealtime ? String(format: "%.1f", rt?.chargerCurrent ?? 0) : "--",
-                       unit: "A", valueColor: Color(hex: 0x0EA5E9))
-            MetricCard(icon: "bolt.fill", iconColor: Theme.orange, title: "实时功率",
-                       value: hasParsedRealtime ? "\(abs(rt?.power ?? 0))" : "--",
-                       unit: "W", valueColor: Theme.orange)
-            MetricCard(icon: "thermometer", iconColor: Theme.orange, title: "MOS 温度",
-                       value: hasParsedRealtime ? String(format: "%.1f", Double(rt?.mosTemperature ?? 0)) : "--",
-                       unit: "℃", valueColor: Theme.orange)
-            MetricCard(icon: "thermometer", iconColor: Color(hex: 0xF59E0B), title: "电芯温度",
-                       value: hasParsedRealtime ? String(format: "%.1f", Double(rt?.cellTemperature ?? 0)) : "--",
-                       unit: "℃", valueColor: Color(hex: 0xF59E0B))
-            MetricCard(icon: "battery.100", iconColor: Theme.green, title: "电池电压",
-                       value: hasParsedRealtime ? String(format: "%.2f", rt?.voltage ?? 0) : "--",
-                       unit: "V", valueColor: Theme.green)
+    private var temperatureCard: some View {
+        AppleCard(padding: 14) {
+            HStack(spacing: 0) {
+                tempCell("MOS 温度", hasParsedRealtime ? Double(rt?.mosTemperature ?? 0) : nil)
+                Rectangle()
+                    .fill(Theme.separator.opacity(0.5))
+                    .frame(width: 1, height: 44)
+                tempCell("电芯温度", hasParsedRealtime ? Double(rt?.cellTemperature ?? 0) : nil)
+            }
         }
+    }
+
+    private func tempCell(_ label: String, _ value: Double?) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: "thermometer.medium")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.orange)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value.map { String(format: "%.1f", $0) } ?? "--")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                if value != nil {
+                    Text("℃")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.tertiary)
+                }
+            }
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 历史日志

@@ -19,11 +19,17 @@ enum ChargeLiveActivityController {
             guard let amps = liveBattery?.current, let volts = liveBattery?.voltage, volts > 0 else { return nil }
             return abs(amps) * volts
         }()
+        // 充满时间点：chargeMinutes 可用时换算，灵动岛倒计时自走
+        let chargeEndTime: Date? = {
+            guard charging, let minutes = liveBattery?.chargeMinutes, minutes > 0 else { return nil }
+            return Date().addingTimeInterval(TimeInterval(minutes) * 60)
+        }()
         let state = ChargeActivityAttributes.ContentState(
             soc: soc,
             rangeKm: range,
             charging: charging,
             etaText: eta,
+            chargeEndTime: chargeEndTime,
             vehicleName: vehicle.name,
             batteryName: batteryName,
             currentAmps: liveBattery?.current,

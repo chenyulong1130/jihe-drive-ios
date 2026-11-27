@@ -571,31 +571,6 @@ struct HeadlightDetailView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
-                    // 运行速度
-                    AppleCard(padding: 14) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("运行速度")
-                                    .font(Theme.headline)
-                                    .foregroundStyle(Theme.label)
-                                Spacer()
-                                Text("\(Int(store.speedLevel)) / 10")
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(accent)
-                            }
-                            Slider(value: $store.speedLevel, in: 0...10, step: 1)
-                                .tint(accent)
-                                .disabled(!store.paramsLoaded)
-                            Button { store.setSpeed(store.speedLevel) } label: {
-                                Text("应用速度")
-                                    .font(Theme.footnote)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-                            .disabled(!store.paramsLoaded)
-                        }
-                    }
-
                     // 车型预设
                     AppleCard(padding: 14) {
                         VStack(alignment: .leading, spacing: 10) {
@@ -632,34 +607,6 @@ struct HeadlightDetailView: View {
                                 }
                                 .padding(.vertical, 2)
                             }
-                        }
-                    }
-
-                    // 限位范围（维修密码）
-                    AppleCard(padding: 14) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("限位范围（需维修密码 0241）")
-                                .font(Theme.headline)
-                                .foregroundStyle(Theme.label)
-                            HStack {
-                                Text("下限 \(Int(store.rangeMin))%")
-                                Spacer()
-                                Text("上限 \(Int(store.rangeMax))%")
-                            }
-                            .font(Theme.caption)
-                            .foregroundStyle(Theme.tertiary)
-                            HStack(spacing: 12) {
-                                Slider(value: $store.rangeMin, in: 0...100, step: 1).tint(accent)
-                                Slider(value: $store.rangeMax, in: 0...100, step: 1).tint(accent)
-                            }
-                            Button {
-                                withServiceAuth { store.setRange() }
-                            } label: {
-                                Text("应用限位")
-                                    .font(Theme.footnote)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
                         }
                     }
 

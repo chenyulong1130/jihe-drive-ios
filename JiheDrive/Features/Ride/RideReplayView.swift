@@ -27,6 +27,13 @@ struct RideReplayView: View {
         self.tracks = [track]
         _prefer3D = State(initialValue: vehicle.model3DURL != nil)
         _replayGLB = State(initialValue: Self.cachedGLB(for: vehicle))
+        self.track = track
+        clock = ReplayClock.make(track)
+        coordinates = track.points.map { $0.mapCoordinate }
+        speeds = Self.paddedSpeeds(track)
+        wallReal = Self.realTimes(track)
+        startClockText = Self.wallText(track, clock, wallReal, 0)
+        endClockText = Self.wallText(track, clock, wallReal, 1)
     }
 
     init(vehicle: Vehicle, tracks: [RideTrack]) {
@@ -34,6 +41,14 @@ struct RideReplayView: View {
         self.tracks = tracks
         _prefer3D = State(initialValue: vehicle.model3DURL != nil)
         _replayGLB = State(initialValue: Self.cachedGLB(for: vehicle))
+        let merged = RideTrack.merged(tracks)
+        track = merged
+        clock = ReplayClock.make(merged)
+        coordinates = merged.points.map { $0.mapCoordinate }
+        speeds = Self.paddedSpeeds(merged)
+        wallReal = Self.realTimes(merged)
+        startClockText = Self.wallText(merged, clock, wallReal, 0)
+        endClockText = Self.wallText(merged, clock, wallReal, 1)
     }
 
     private static func cachedGLB(for vehicle: Vehicle) -> URL? {
@@ -41,7 +56,17 @@ struct RideReplayView: View {
         return GLBModelStore.cached(vin: vehicle.vinNo, remote: vehicle.model3DURL)
     }
 
-    private var track: RideTrack { RideTrack.merged(tracks) }
+    /// 合并后的轨迹与派生数据只算一次：回放播放时每帧刷新 body，
+    /// 放在计算属性里会每帧重复 merge 全部轨迹点 + 重算时间轴，
+    /// 长行程直接把主线程拖卡——回放页卡顿/卡死的主因
+    private let track: RideTrack
+    private let clock: (times: [TimeInterval], duration: TimeInterval)
+    private let coordinates: [CLLocationCoordinate2D]
+    private let speeds: [Double]
+    /// realTimestamps 与点位等长且含有效时间戳时缓存为 Double 数组（否则 nil）
+    private let wallReal: [Double]?
+    private let startClockText: String
+    private let endClockText: String
 
     /// 多段合并时的分段断点（points 下标），地图上段与段之间不连线。
     /// 顺序必须和 merged 内部的 startTime 升序一致。
@@ -58,11 +83,8 @@ struct RideReplayView: View {
 
     // MARK: - 数据
 
-    private var coordinates: [CLLocationCoordinate2D] {
-        track.points.map { $0.mapCoordinate }
-    }
-
-    private var speeds: [Double] {
+    /// 速度采样补齐到与轨迹点等长（短了补最后一个值）
+    private static func paddedSpeeds(_ track: RideTrack) -> [Double] {
         let n = track.points.count
         var samples = track.speedSamples
         if samples.count == n { return samples }
@@ -72,9 +94,50 @@ struct RideReplayView: View {
         return samples
     }
 
-    private var clock: (times: [TimeInterval], duration: TimeInterval) {
-        ReplayClock.make(track)
+    private static func realTimes(_ track: RideTrack) -> [Double]? {
+        guard track.realTimestamps.count == track.points.count,
+              track.realTimestamps.contains(where: { $0 > 1_000_000_000 }) else { return nil }
+        return track.realTimestamps.map(Double.init)
     }
+
+    /// 墙钟文本：与 ReplayClock.wallDate 同逻辑，但吃缓存数据，不再每帧重新 make
+    private static func wallText(
+        _ track: RideTrack,
+        _ clock: (times: [TimeInterval], duration: TimeInterval),
+        _ real: [Double]?,
+        _ ratio: Double
+    ) -> String {
+        let elapsed = clock.duration * min(max(ratio, 0), 1)
+        var epoch: TimeInterval?
+        if let real {
+            let sample = ReplayClock.sampleValue(real, times: clock.times, duration: clock.duration, progress: ratio)
+            if sample > 1_000_000_000 { epoch = sample }
+        }
+        if epoch == nil, let start = track.startedAt, start > 1_000_000_000 {
+            epoch = start + elapsed
+        }
+        if epoch == nil, let first = track.timestamps.first(where: { $0 > 1_000_000_000 }) {
+            epoch = first - (clock.times.first ?? 0) + elapsed
+        }
+        if let epoch {
+            return clockFormatter.string(from: Date(timeIntervalSince1970: epoch))
+        }
+        let total = Int(elapsed.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private static let clockFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     /// 回放墙钟时长：压缩真实行程（点与点之间的时间比例保持不变），
     /// 同时按采样点数兜底——点多的长行程按每点约 0.15 秒计算，
@@ -753,8 +816,8 @@ struct RideReplayView: View {
                     progress: $progress,
                     playing: $playing,
                     current: wallClock(progress),
-                    start: wallClock(0),
-                    end: wallClock(1),
+                    start: startClockText,
+                    end: endClockText,
                     speed: speeds.count > 1 ? currentSpeed : nil,
                     onDark: mapOnDark
                 )
@@ -813,22 +876,10 @@ struct RideReplayView: View {
         wallClock(ratio)
     }
 
+    /// 每帧调用的墙钟文本：走缓存数据 + 静态 formatter，
+    /// 之前每次新建 DateFormatter + 重新 make 时间轴，回放时主线程吃不消
     private func wallClock(_ ratio: Double) -> String {
-        if let date = ReplayClock.wallDate(track: track, progress: ratio) {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = "HH:mm:ss"
-            return formatter.string(from: date)
-        }
-        let elapsed = clock.duration * min(max(ratio, 0), 1)
-        let total = Int(elapsed.rounded())
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let seconds = total % 60
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        }
-        return String(format: "%d:%02d", minutes, seconds)
+        Self.wallText(track, clock, wallReal, ratio)
     }
 }
 

@@ -154,6 +154,8 @@ final class CPMirrorController: ObservableObject {
     private var networkRestartCount = 0
     private var receiver: CPReceiver?
     private var zeehoLink: ZeehoMirrorLink?
+    /// 仪表链路是否已启动（幂等标记：引导阶段与出画兜底都会触发启动，防双重拉起）。
+    private var dashboardActive = false
     private var feederTask: Task<Void, Never>?
     private let stateLock = NSLock()
     private var firstFrameSent = false
@@ -184,6 +186,7 @@ final class CPMirrorController: ObservableObject {
         self.castToZeeho = castToZeeho
         self.localVideoReceived = false
         self.hasVideo = false
+        self.dashboardActive = false
         self.pendingControlConnected = false
         self.transcoder.onKeyframeNeeded = { [weak self] in self?.requestKeyFrame() }
         self.zeehoStatus = castToZeeho ? "等待连接" : "未启用"
@@ -233,6 +236,9 @@ final class CPMirrorController: ObservableObject {
                 self.pip.startFeed()
                 self.appendLog("已收到 CarPlay 视频，本地预览与触控可用")
                 self.setPhase(.localStreaming)
+                // 兜底：引导已死/晚连/重连场景下 .controlConnected 可能不会再来，
+                // 出画时仪表链路还没跑就由这里拉起（startDashboardLink 幂等，不会重复启动）
+                if self.castToZeeho, self.zeehoLink != nil { self.startDashboardLink() }
             }
         }
         // CarPlay 主屏「车辆按钮」点按 → 打开 App 内车辆信息页
@@ -292,6 +298,7 @@ final class CPMirrorController: ObservableObject {
         receiver = nil
         zeehoLink?.stop()
         zeehoLink = nil
+        dashboardActive = false
         videoBox.clear()
         frameHub.publish(.reset)
         transcoder.invalidate()
@@ -346,6 +353,7 @@ final class CPMirrorController: ObservableObject {
             feederTask = nil
             zeehoLink?.stop()
             zeehoLink = nil
+            dashboardActive = false
             zeehoStatus = "未启用"
             if case .streaming = phase { setPhase(.localStreaming) }
             appendLog("已关闭极核仪表投屏，本地 CarPlay 继续运行")
@@ -488,6 +496,8 @@ final class CPMirrorController: ObservableObject {
                 self.zeehoSpecText = "\(link.negotiatedName) \(size.width)×\(size.height) · H.264"
             case .failed(let reason):
                 self.zeehoStatus = "失败：\(reason)"
+                // 失败后允许再次拉起（出画兜底 / 手动重试）
+                self.dashboardActive = false
                 self.appendLog("仪表链路失败：\(reason)（本地 CarPlay 不受影响）")
             case .closed:
                 self.zeehoStatus = "已关闭"
@@ -501,6 +511,8 @@ final class CPMirrorController: ObservableObject {
     private func startDashboardLink() {
         guard castToZeeho else { return }
         guard let link = zeehoLink else { return }
+        guard !dashboardActive else { return }
+        dashboardActive = true
         zeehoStatus = "连接中"
         appendLog("开始极核仪表投屏（\(dashboardIP)）")
         stateLock.lock()
@@ -509,11 +521,19 @@ final class CPMirrorController: ObservableObject {
         link.start(localIP: localIP, targetIP: dashboardIP)
         let task = Task.detached { [weak link, weak self] in
             var first = true
+            var sentFrames = 0
+            var decodeWait: TimeInterval = 0
             var nextFrameTime: TimeInterval = 0
             while !Task.isCancelled, let link, !link.isClosed, let self {
                 // 极核是拉帧模式：首帧未解出前不要消耗 0x72，否则仪表可能一直黑屏。
+                // 这里原先静默死等——解码卡住时投屏无声无息失败，加周期日志给信号。
                 while !Task.isCancelled, !self.transcoder.hasDecodedFrame {
                     Thread.sleep(forTimeInterval: 0.02)
+                    decodeWait += 0.02
+                    if decodeWait >= 10 {
+                        decodeWait = 0
+                        self.appendLog("已等待 CarPlay 解码首帧 10 秒仍无输出（预览有画面而转码器未解出帧时投屏不会开始，留意日志中的「解码失败」）")
+                    }
                 }
                 guard !Task.isCancelled, !link.isClosed else { break }
                 guard link.waitForFrameRequest() else {
@@ -540,6 +560,10 @@ final class CPMirrorController: ObservableObject {
                     continue
                 }
                 link.sendVideoFrame(frame, isFirstFrame: first)
+                sentFrames += 1
+                if sentFrames % 125 == 0 {
+                    self.appendLog("已向仪表持续送帧 \(sentFrames) 帧")
+                }
                 if first {
                     first = false
                     self.appendLog("已发送首帧（IDR）")
@@ -547,6 +571,19 @@ final class CPMirrorController: ObservableObject {
             }
         }
         feederTask = task
+    }
+
+    /// 仪表链路失败后的手动重试：重建链路并重新拉起（幂等标记已由失败回调清零）。
+    func retryDashboardLink() {
+        guard phase.isRunning, castToZeeho else { return }
+        appendLog("手动重试极核仪表投屏")
+        feederTask?.cancel()
+        feederTask = nil
+        dashboardActive = false
+        zeehoLink?.stop()
+        zeehoLink = nil
+        installZeehoLink()
+        startDashboardLink()
     }
 
     // MARK: - 可操作预览窗口
@@ -670,6 +707,8 @@ final class CPMirrorController: ObservableObject {
     private func appendLog(_ message: String) {
         let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         MirrorLogStore.append(message)
+        // 同步进主线程事件环：卡死报告里能看到卡死时 CarPlay 在干什么
+        MainThreadHangMonitor.note("CP \(message)")
         DispatchQueue.main.async { [weak self] in
             self?.logs.append("[\(stamp)] \(message)")
             if let logs = self?.logs, logs.count > 200 {

@@ -37,7 +37,17 @@ struct BatterySheet: View {
                         if let error = model.batteryError, hasData {
                             SoftBanner(text: error, icon: "exclamationmark.triangle", tone: Theme.orange)
                         }
-                        if let stamp = updatedText {
+                        if refreshing || model.batteryLoading {
+                            // 打开/下拉/轮询刷新中：明确标出，避免把旧数据当成实时值
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.mini)
+                                Text("正在同步云端数据…")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                        } else if let stamp = updatedText {
                             Text(stamp)
                                 .font(.system(size: 12))
                                 .foregroundStyle(Theme.tertiary)
@@ -65,7 +75,9 @@ struct BatterySheet: View {
         }
         .task {
             samples = BatterySocTrace.load(vin: vehicle.vinNo)
-            await load(manual: false)
+            // 打开即强刷一次（页面同时显示「正在同步」）：车辆页节拍可能刚被切 Tab 打断，
+            // 共享 batteries 有断粮窗口，不能把上一拍的数据当实时值直接摆上来
+            await load(manual: true)
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
                 guard !Task.isCancelled else { break }

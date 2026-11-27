@@ -74,6 +74,8 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         logs.append("\(stamp) \(text)")
         if logs.count > 80 { logs.removeFirst(logs.count - 80) }
+        // 同步进主线程事件环：卡死报告里能看到卡死时蓝牙在干什么
+        MainThreadHangMonitor.note("BLE \(text)")
     }
 
     func registerDataHandler(_ key: String, handler: @escaping (Data) -> Void) {
@@ -317,7 +319,27 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         try await connectCore(device)
     }
 
+    /// 断开当前设备（单个断开）：停重连、断 BLE、清本次会话状态；
+    /// 保留连接记忆，下次启动仍会自动回连这台设备
     func disconnect() {
+        disconnectCore(keepArchive: true)
+        log("已断开连接（保留记忆，下次启动自动回连）")
+    }
+
+    /// 清除全部蓝牙缓存并断开：断开当前设备 + 忘记连接记忆 +
+    /// 清空扫描列表/通信日志/外设缓存，下次启动不再自动回连
+    func disconnectAndClearAll() {
+        disconnectCore(keepArchive: false)
+        clearConnectionArchive()
+        cbPeripherals.removeAll()
+        discovered = []
+        logs = []
+        lastError = nil
+        autoConnectAttempted = false
+        log("已清除全部蓝牙缓存并断开")
+    }
+
+    private func disconnectCore(keepArchive: Bool) {
         autoReconnect = false
         reconnectTask?.cancel()
         reconnectTask = nil
@@ -325,6 +347,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         guard let p = peripheral else {
             connectionState = .idle
             connectedDevice = nil
+            if !keepArchive { clearConnectionArchive() }
             return
         }
         if p.state != .disconnected { central.cancelPeripheralConnection(p) }
@@ -332,9 +355,8 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         connectedDevice = nil
         characteristics = [:]
         activeNotify = nil
-        clearConnectionArchive()
+        if !keepArchive { clearConnectionArchive() }
         connectionState = .idle
-        log("已断开连接")
     }
 
     private func failConnect(_ error: Error) {

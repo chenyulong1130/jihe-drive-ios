@@ -79,6 +79,15 @@ final class BMSStore: ObservableObject {
         isPolling = false
     }
 
+    /// 清空缓存数据（实时帧/日志），不动用户设置（轮询间隔/通道）
+    func clearCache() {
+        realtime = nil
+        lastAck = ""
+        channelStatus = "尚未检测"
+        logs = []
+        realtimeTick = 0
+    }
+
     private func bootstrapYanyang() async {
         guard let ble, ble.isConnected else { return }
         do {

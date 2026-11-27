@@ -119,10 +119,11 @@ struct MainTabView: View {
         }
         .sensoryFeedback(.selection, trigger: tab)
         .onAppear(perform: applyStatusBar)
-        .onChange(of: tab) { _, _ in
+        .onChange(of: tab) { _, newTab in
             // 点底栏切页时清掉残留位移，避免和翻页动画叠在一起抖一下
             if !isDragging { dragOffset = 0 }
             applyStatusBar()
+            MainThreadHangMonitor.note("切Tab→\(newTab.title)")
         }
     }
 

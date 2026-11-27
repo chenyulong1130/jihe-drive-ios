@@ -71,6 +71,15 @@ final class ChargerStore: ObservableObject {
         isPolling = false
     }
 
+    /// 清空缓存数据（实时帧/历史记录/日志），不动轮询间隔等用户设置
+    func clearCache() {
+        realtime = nil
+        historyRecords = []
+        historyStatus = "尚未读取"
+        lastAck = ""
+        logs = []
+    }
+
     private func pollOnce() async {
         guard let ble, ble.isConnected else { return }
         do {

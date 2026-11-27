@@ -89,13 +89,15 @@ struct RideHomeView: View {
         }
         .offset(x: backDrag)
         .animation(backDragging ? nil : Motion.quick, value: backDrag)
-        .overlay(alignment: .leading) {
+        .overlay(alignment: .topLeading) {
             // 左边缘滑动返回（与系统返回手势同向）：全屏 cover 没有自带手势。
-            // 顶部留出 header + 月份选择条的高度，别把返回按钮和月份切换挡住
+            // contentShape 必须放在 padding 之前：放在后面热区会盖住顶部整块，
+            // 把月份条左箭头（x<32 且箭头中心在 x≈30）的点击整个吞掉，
+            // 表现就是「切月左箭头点了没反应」。顶部留出 header + 月份选择条的高度。
             Color.clear
                 .frame(width: 32)
-                .padding(.top, 118)
                 .contentShape(Rectangle())
+                .padding(.top, 118)
                 .gesture(edgeBackGesture)
         }
         .onAppear {

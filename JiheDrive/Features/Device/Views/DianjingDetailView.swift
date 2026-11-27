@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// 点睛仪表详情页（对齐 Flutter 仪表环 + 点睛小程序信息结构）：
-/// 270° 渐变仪表环英雄区（电量进度 + 0/50/100 刻度，中心 SOC + 电压）
-/// + 里程大字卡（续航/总里程/单次电耗）+ 零百测速（启停/记录）
-/// + 里程控制 + 诊断/设置。寄存器 193 实时参数 500ms 轮询。
+/// 表盘主题置顶（主功能：小程序 meterStyle 素材图预览，混合/电池/里程/温度/胎压分组，
+/// 点按即下发样式）+ 270° 渐变仪表环英雄区 + 里程大字卡（内联清零）
+/// + 零百测速（最新成绩大字 + 本地排行榜）+ 仪表配置 + 诊断/设置。
+/// 寄存器 193 实时参数 500ms 轮询。
 struct DianjingDetailView: View {
     @EnvironmentObject private var ble: DeviceBLEManager
     @ObservedObject var store: DianjingStore
@@ -11,6 +12,8 @@ struct DianjingDetailView: View {
     @State private var showSettings = false
     @State private var speedTestRunning = false
     @State private var copyToast = false
+    /// 本地测速记录（排行榜数据源）
+    @State private var speedTestRecords: [SpeedTestRecord] = []
 
     private var rt: DianjingDebugParams? { store.realtime }
     private var connected: Bool { ble.isConnected }
@@ -22,12 +25,11 @@ struct DianjingDetailView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 8) {
                 headerRow
+                styleCard
                 gaugeHeroCard
                 mileageCard
-                styleCard
-                configCard
                 speedTestCard
-                mileageControlCard
+                configCard
             }
             .padding(.horizontal, 14)
             .padding(.top, 8)
@@ -60,10 +62,14 @@ struct DianjingDetailView: View {
         .onAppear {
             store.attach(ble)
             store.startPolling()
+            speedTestRecords = loadRecords()
         }
         .onDisappear {
             store.stopPolling()
             store.deactivate()
+        }
+        .onChange(of: store.speedTest) { _, record in
+            if let record { recordIfNeeded(record) }
         }
         .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
         .sheet(isPresented: $showSettings) { settingsSheet }
@@ -263,6 +269,35 @@ struct DianjingDetailView: View {
                         .frame(width: 1, height: 34)
                     mileageCell("单次电耗", connected ? String(format: "%.2f", rt?.singleEnergy ?? 0) : "--", "kWh")
                 }
+
+                Divider().opacity(0.6)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.counterclockwise.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("清零单次里程")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                        Text("下发后仪表单次行驶数据归零")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await store.clearSingleTrip() }
+                    } label: {
+                        Text("清零")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Theme.orange)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Theme.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
+                    .disabled(!connected)
+                }
             }
         }
     }
@@ -285,12 +320,12 @@ struct DianjingDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - 表盘主题（对齐小程序 setting-style：五组样式，寄存器 4 写 3 字节 ASCII）
+    // MARK: - 表盘主题（圆形表盘视觉预览，对齐小程序样式选择页）
 
-    /// 样式分组与名称，真值来自点睛小程序 style.js + assets/meterStyle
+    /// 样式分组与名称，真值来自点睛小程序 setting-style/style.js
     private let styleGroups: [(name: String, styles: [(id: String, title: String)])] = [
         ("混合", [("A01", "样式1"), ("A02", "样式2"), ("A03", "样式3"), ("A04", "样式4")]),
-        ("电池", [("B01", "单体电压"), ("B02", "完整信息"), ("B03", "实时健康")]),
+        ("电池", [("B01", "单体电压信息"), ("B02", "电池完整信息"), ("B03", "电池实时健康")]),
         ("里程", [("C01", "里程信息")]),
         ("温度", [("D01", "温度信息")]),
         ("胎压", [("E01", "胎压信息")]),
@@ -316,7 +351,7 @@ struct DianjingDetailView: View {
                     }
                 }
 
-                // 分组选择
+                // 分组选择（混合 / 电池 / 里程 / 温度 / 胎压）
                 HStack(spacing: 0) {
                     ForEach(styleGroups.indices, id: \.self) { index in
                         let selected = styleGroupIndex == index
@@ -338,37 +373,38 @@ struct DianjingDetailView: View {
                 }
                 .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
-                // 该组样式格
+                // 表盘视觉预览格：小程序 meterStyle 素材图，点按即下发样式
                 let group = styleGroups[styleGroupIndex]
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 2), spacing: 14) {
                     ForEach(group.styles, id: \.id) { style in
                         let selected = store.dialStyle == style.id
                         Button {
                             Task { await store.setDialStyle(style.id) }
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(style.id)
-                                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(selected ? Theme.brand : Theme.label)
-                                    Spacer()
-                                    if selected {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(Theme.brand)
+                            VStack(spacing: 6) {
+                                meterStyleImage(style.id)
+                                    .resizable()
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(
+                                                selected ? Theme.brand : Theme.separator.opacity(0.4),
+                                                lineWidth: selected ? 2.5 : 1)
+                                    )
+                                    .overlay(alignment: .topTrailing) {
+                                        if selected {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundStyle(Theme.brand)
+                                                .background(Circle().fill(Theme.groupedBackground).padding(2))
+                                                .padding(6)
+                                        }
                                     }
-                                }
                                 Text(style.title)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Theme.secondary)
+                                    .font(.system(size: 12, weight: selected ? .bold : .semibold))
+                                    .foregroundStyle(selected ? Theme.brand : Theme.label)
                             }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .strokeBorder(selected ? Theme.brand.opacity(0.55) : Theme.separator.opacity(0.5), lineWidth: 1)
-                            )
                         }
                         .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
                         .disabled(!connected)
@@ -376,6 +412,14 @@ struct DianjingDetailView: View {
                 }
             }
         }
+    }
+
+    /// 表盘样式素材图（打包自点睛小程序 assets/meterStyle：A01…E01）
+    private func meterStyleImage(_ id: String) -> Image {
+        if let ui = UIImage(named: id) {
+            return Image(uiImage: ui)
+        }
+        return Image(systemName: "circle.dotted")
     }
 
     // MARK: - 配置（对齐小程序 setting-basic/extra：picker 下发 = 下标+1，开关 1/2）
@@ -471,17 +515,85 @@ struct DianjingDetailView: View {
         }
     }
 
-    // MARK: - 零百测速
+    // MARK: - 零百测速（最新成绩 + 本地排行榜）
+
+    /// 本地测速记录。官方排行榜走点睛服务端账号体系（/speedTest/ranking，需其 token），
+    /// 本 App 没有该账号，以本地历史按 0-100 成绩排名替代，字段与官方记录一致。
+    struct SpeedTestRecord: Codable, Identifiable, Equatable {
+        let id: UUID
+        let date: Date
+        let zeroToFifty: Double
+        let zeroToHundred: Double
+        let maxSpeed: Int
+        let maxPower: Double
+        let maxCurrent: Double
+    }
+
+    private static let recordsKey = "dianjing.speedtest.records"
+    private static let recordDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter
+    }()
+
+    private func loadRecords() -> [SpeedTestRecord] {
+        guard let data = UserDefaults.standard.data(forKey: Self.recordsKey),
+              let records = try? JSONDecoder().decode([SpeedTestRecord].self, from: data) else { return [] }
+        return records
+    }
+
+    private func saveRecords(_ records: [SpeedTestRecord]) {
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: Self.recordsKey)
+        }
+    }
+
+    /// 轮询到新测速记录时入库（与上一条完全相同则跳过，避免重复计条）
+    private func recordIfNeeded(_ record: DianjingSpeedTest) {
+        var records = loadRecords()
+        if let last = records.first,
+           last.zeroToFifty == record.zeroToFifty,
+           last.zeroToHundred == record.zeroToHundred,
+           last.maxSpeed == record.maxSpeed {
+            return
+        }
+        records.insert(SpeedTestRecord(
+            id: UUID(), date: Date(),
+            zeroToFifty: record.zeroToFifty,
+            zeroToHundred: record.zeroToHundred,
+            maxSpeed: record.maxSpeed,
+            maxPower: record.maxPower,
+            maxCurrent: record.maxCurrent
+        ), at: 0)
+        if records.count > 50 { records.removeLast(records.count - 50) }
+        saveRecords(records)
+        speedTestRecords = records
+    }
+
+    /// 排行榜：0-100 有效成绩（>0）升序
+    private var rankedRecords: [SpeedTestRecord] {
+        speedTestRecords.filter { $0.zeroToHundred > 0 }.sorted { $0.zeroToHundred < $1.zeroToHundred }
+    }
 
     private var speedTestCard: some View {
         let record = store.speedTest
         return AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("零百测速")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Theme.label)
                     Spacer()
+                    if !speedTestRecords.isEmpty {
+                        Button {
+                            speedTestRecords = []
+                            saveRecords([])
+                        } label: {
+                            Text("清空记录")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.tertiary)
+                        }
+                    }
                     Button {
                         Task {
                             speedTestRunning.toggle()
@@ -501,78 +613,112 @@ struct DianjingDetailView: View {
                 }
 
                 if connected, let record {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        speedTile("0-50 加速", String(format: "%.2f", record.zeroToFifty), "s", Theme.brand)
-                        speedTile("0-100 加速", String(format: "%.2f", record.zeroToHundred), "s", Theme.brand)
-                        speedTile("最高时速", "\(record.maxSpeed)", "km/h", Theme.red)
-                        speedTile("最大电流", String(format: "%.1f", record.maxCurrent), "A", Theme.orange)
-                        speedTile("最低电压", String(format: "%.1f", record.minVoltage), "V", Theme.teal)
-                        speedTile("静态电压", String(format: "%.1f", record.staticVoltage), "V", Theme.teal)
-                        speedTile("最大功率", String(format: "%.2f", record.maxPower), "kW", Color(hex: 0x0EA5E9))
-                        speedTile("电池容量", String(format: "%.1f", record.batteryCapacity), "Ah", Theme.green)
-                        speedTile("GPS 最高速", "\(record.gpsMaxSpeed)", "km/h", Theme.secondary)
+                    // 最新成绩大字行：0-50 / 0-100 / 最高时速
+                    HStack(spacing: 0) {
+                        speedHeroCell(String(format: "%.2f", record.zeroToFifty), "s", "0-50 加速", Theme.brand)
+                        Rectangle()
+                            .fill(Theme.separator.opacity(0.5))
+                            .frame(width: 1, height: 40)
+                        speedHeroCell(String(format: "%.2f", record.zeroToHundred), "s", "0-100 加速", Theme.brand)
+                        Rectangle()
+                            .fill(Theme.separator.opacity(0.5))
+                            .frame(width: 1, height: 40)
+                        speedHeroCell("\(record.maxSpeed)", "km/h", "最高时速", Theme.red)
                     }
+                    .padding(.vertical, 2)
                 } else {
-                    Text(connected ? "等待测速记录…" : "连接仪表后显示零百测速记录")
+                    Text(connected ? "点「开始」后骑行测试，成绩实时显示并入榜" : "连接仪表后显示零百测速记录")
                         .font(Theme.footnote)
                         .foregroundStyle(Theme.secondary)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
+
+                // 本地排行榜（按 0-100 成绩升序，前三名奖牌配色）
+                if !rankedRecords.isEmpty {
+                    Divider().opacity(0.6)
+                    Text("排行榜 · 按 0-100 成绩")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Theme.label)
+                    LazyVStack(spacing: 6) {
+                        ForEach(Array(rankedRecords.prefix(10).enumerated()), id: \.element.id) { index, item in
+                            rankRow(index: index, record: item)
+                        }
+                    }
+                    if rankedRecords.count > 10 {
+                        Text("共 \(rankedRecords.count) 条有效成绩，显示前 10")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
             }
         }
     }
 
-    private func speedTile(_ label: String, _ value: String, _ unit: String, _ color: Color) -> some View {
+    /// 测速英雄格：大数字 + 单位 + 下方标签
+    private func speedHeroCell(_ value: String, _ unit: String, _ label: String, _ color: Color) -> some View {
         VStack(spacing: 3) {
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(color)
+                    .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.tertiary)
-                }
+                    .minimumScaleFactor(0.6)
+                Text(unit)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.secondary)
             }
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func rankRow(index: Int, record: SpeedTestRecord) -> some View {
+        HStack(spacing: 10) {
+            rankBadge(index)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("0-100 \(String(format: "%.2f", record.zeroToHundred))s · 0-50 \(String(format: "%.2f", record.zeroToFifty))s")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                Text("极速 \(record.maxSpeed) km/h · \(Self.recordDateFormatter.string(from: record.date))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    // MARK: - 里程控制
-
-    private var mileageControlCard: some View {
-        AppleCard(padding: 12) {
-            HStack(spacing: 10) {
-                CircleIconBadge(icon: "road.lanes.circle.fill", color: Theme.orange, size: 34)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("单次里程")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Theme.label)
-                    Text("下发后仪表单次行驶数据归零")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.secondary)
+    /// 名次徽章：金/银/铜奖牌配色，其余灰底序号
+    private func rankBadge(_ index: Int) -> some View {
+        let medalColors: [Color] = [Color(hex: 0xFFD60A), Color(hex: 0xC0C4CC), Color(hex: 0xD08A4E)]
+        if index < 3 {
+            return AnyView(
+                ZStack {
+                    Circle().fill(medalColors[index])
+                    Text("\(index + 1)")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundStyle(index == 0 ? Color(hex: 0x6B4D00) : .white)
                 }
-                Spacer()
-                Button {
-                    Task { await store.clearSingleTrip() }
-                } label: {
-                    Label("清空单次里程", systemImage: "arrow.counterclockwise")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-                .disabled(!connected)
-            }
+                .frame(width: 26, height: 26)
+            )
         }
+        return AnyView(
+            Text("\(index + 1)")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Theme.separator.opacity(0.4)))
+        )
     }
 
-    // MARK: - 诊断弹窗（带复制）
+    // MARK: - 诊断弹窗（带复制 + 自定义帧调试）
 
     private var diagnosticsSheet: some View {
         NavigationStack {
@@ -596,6 +742,8 @@ struct DianjingDetailView: View {
                                 StatusTile(icon: "arrow.clockwise.circle.fill", title: "轮询",
                                            value: store.isPolling ? "进行中" : "已暂停",
                                            valueColor: store.isPolling ? Theme.green : Theme.secondary)
+                                StatusTile(icon: "gearshape.2", title: "固件版本",
+                                           value: store.versionMain.isEmpty ? "--" : store.versionMain)
                             }
                         }
                     }
@@ -613,6 +761,8 @@ struct DianjingDetailView: View {
                             .background(Theme.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
                     }
                     .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+
+                    customCommandCard
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -644,6 +794,52 @@ struct DianjingDetailView: View {
         copyToast = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             copyToast = false
+        }
+    }
+
+    /// 自定义帧调试：寄存器 / 命令码 / 数据（联调未知寄存器用）
+    private var customCommandCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("自定义指令")
+                    .font(Theme.headline)
+                    .foregroundStyle(Theme.label)
+                HStack(spacing: 8) {
+                    hexField("寄存器", $store.customTargetHex)
+                    hexField("命令", $store.customCodeHex)
+                    hexField("数据", $store.customDataHex)
+                }
+                Button {
+                    Task { await store.sendCustomCommand() }
+                } label: {
+                    Label("发送", systemImage: "paperplane.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .foregroundStyle(.white)
+                        .background(Theme.brand, in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
+                }
+                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+                .disabled(!connected)
+                Text("AB..BA 帧：目标寄存器 + 命令码 + 数据，校验自动计算。用于联调未知寄存器。")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func hexField(_ label: String, _ binding: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.secondary)
+            TextField("", text: binding)
+                .font(.system(size: 13, design: .monospaced))
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
+                .padding(8)
+                .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 
@@ -711,4 +907,5 @@ struct GaugeArc: Shape {
         return path
     }
 }
+
 

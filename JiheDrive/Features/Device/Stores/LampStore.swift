@@ -45,6 +45,16 @@ final class LampStore: ObservableObject {
         ble?.unregisterDataHandler("lamp")
     }
 
+    /// 清空缓存数据（参数快照/日志），不动调试类型选择
+    func clearCache() {
+        state.select(profile)
+        syncProfileToView()
+        logs = []
+        lastError = ""
+        pendingSerial = nil
+        commandBusy = false
+    }
+
     /// 切换调试类型（视图入口；didSet 里统一重置快照）
     func selectProfile(_ profile: LampState.Profile) {
         self.profile = profile
@@ -58,6 +68,25 @@ final class LampStore: ObservableObject {
         if let snapshot = state.snapshot, profile == .angle {
             angle = Int(Int8(bitPattern: snapshot[0]))
         }
+    }
+
+    /// 当前参数快照字节（专用类型已同步时有值）；
+    /// 视图按原版调试页语义取字节：恶魔眼开关 [6]、亮度 [10]、色温 [2]/[3]、颜色 [7...9]
+    var snapshotBytes: [UInt8]? {
+        guard synced else { return nil }
+        return state.snapshot
+    }
+
+    /// 角度记忆值：快照 4–8 字节（有符号角度，原版「便捷操控」预设数据源）
+    var angleMemoryValues: [Int]? {
+        guard synced, profile == .angle, let snapshot = state.snapshot, snapshot.count > 8 else { return nil }
+        return (4...8).map { Int(Int8(bitPattern: snapshot[$0])) }
+    }
+
+    /// 角度复位值：快照第 9 字节（有符号，原版「复位」预设）
+    var angleResetValue: Int? {
+        guard synced, profile == .angle, let snapshot = state.snapshot, snapshot.count > 9 else { return nil }
+        return Int(Int8(bitPattern: snapshot[9]))
     }
 
     // MARK: - 组帧下发

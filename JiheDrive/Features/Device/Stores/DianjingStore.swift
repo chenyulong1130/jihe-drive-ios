@@ -89,6 +89,20 @@ final class DianjingStore: ObservableObject {
         isPolling = false
     }
 
+    /// 清空缓存数据（实时/测速/设备信息/日志），下次连接重新补读配置
+    func clearCache() {
+        realtime = nil
+        speedTest = nil
+        batterySeries = 0
+        batteryFullVoltage = 0
+        deviceID = ""
+        versionMain = ""
+        lastAck = ""
+        logs = []
+        realtimeTick = 0
+        didBootstrap = false
+    }
+
     /// 连接后补读电池/设备信息/配置（对齐小程序 synchroData 的 connected 阶段）
     private func bootstrap() async {
         guard let ble, ble.isConnected else { return }

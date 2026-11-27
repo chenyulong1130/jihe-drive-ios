@@ -41,6 +41,16 @@ final class MotorStore: ObservableObject {
         busy = false
     }
 
+    /// 清空缓存数据（参数快照/日志），不动滑块等交互状态
+    func clearCache() {
+        params = MotorParams()
+        paramsLoaded = false
+        busy = false
+        status = "等待读取参数"
+        logs = []
+        retryCount = 0
+    }
+
     func loadParams() {
         retryCount = 0
         paramsLoaded = false

@@ -127,6 +127,13 @@ extension Color {
         )
     }
 
+    /// 「RRGGBB」十六进制字符串转色（设备快照/云端色值用）
+    init(hexString: String) {
+        var value: UInt64 = 0
+        Scanner(string: hexString).scanHexInt64(&value)
+        self.init(hex: UInt32(truncatingIfNeeded: value))
+    }
+
     func mixed(with other: Color, amount: CGFloat) -> Color {
         let a = UIColor(self)
         let b = UIColor(other)

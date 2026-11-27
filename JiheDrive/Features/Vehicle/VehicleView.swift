@@ -224,23 +224,31 @@ struct VehicleView: View {
             syncChargeIsland()
             model.markUpdated()
 
-            // 统一 60 秒节拍：电池 + 坐垫 + 详情 + 胎压 + 消息 + 骑行汇总 + 小组件。
-            // 离开车辆 Tab 或退后台不刷（scenePhase/activeMainTab 守卫）
+            // 统一节拍：车辆 Tab 前台跑全量（电池+坐垫+详情+胎压+消息+骑行汇总+小组件）。
+            // 充电期间放宽：App 前台即刷（30 秒一拍），哪怕停在别的 Tab 也保电池与灵动岛新鲜；
+            // 离开车辆 Tab 且未充电时不刷（省流量与电量）。
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                let charging = model.liveBatteryOfSelected?.isLiveCharging == true
+                try? await Task.sleep(nanoseconds: charging ? 30_000_000_000 : 60_000_000_000)
                 guard !Task.isCancelled else { break }
-                guard scenePhase == .active, activeMainTab == .vehicle else { continue }
-                if let vin = model.selectedVehicle?.vinNo {
+                guard scenePhase == .active else { continue }
+                guard activeMainTab == .vehicle || charging else { continue }
+                if activeMainTab == .vehicle {
+                    if let vin = model.selectedVehicle?.vinNo {
+                        await model.refreshSeat(vin: vin)
+                    }
+                    await model.refreshQuiet()
+                    await messages.refresh()
+                    syncChargeIsland()
+                    if let current = model.selectedVehicle?.vinNo {
+                        await loadRideSummary(vin: current)
+                        await model.loadTire(vin: current)
+                        await signin.syncWidget(model: model, ride: rideExtra)
+                    }
+                } else if let vin = model.selectedVehicle?.vinNo {
+                    // 充电中的其他 Tab：只刷电池 + 灵动岛
                     await model.loadBattery(vin: vin, quiet: true)
-                    await model.refreshSeat(vin: vin)
-                }
-                await model.refreshQuiet()
-                await messages.refresh()
-                syncChargeIsland()
-                if let current = model.selectedVehicle?.vinNo {
-                    await loadRideSummary(vin: current)
-                    await model.loadTire(vin: current)
-                    await signin.syncWidget(model: model, ride: rideExtra)
+                    syncChargeIsland()
                 }
             }
         }
@@ -249,6 +257,16 @@ struct VehicleView: View {
             restoreCachedHero(vin: vin)
             loadedModelVin = vin
             optimisticSeatOpen = false
+        }
+        .onChange(of: activeMainTab) { _, tab in
+            // 切回车辆页立即补一次电池 + 灵动岛：节拍离开期间不跑，回来不等下一整拍
+            guard tab == .vehicle, scenePhase == .active else { return }
+            Task {
+                if let vin = model.selectedVehicle?.vinNo {
+                    await model.loadBattery(vin: vin, quiet: true)
+                }
+                syncChargeIsland()
+            }
         }
         // 3D 模型地址只有详情接口带，详情回来晚了要补一次加载
         .onChange(of: model.selectedVehicle?.model3DURL) { _, url in

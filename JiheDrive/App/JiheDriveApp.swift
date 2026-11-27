@@ -3,14 +3,21 @@ import UserNotifications
 
 @main
 struct JiheDriveApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
     init() {
         ResourceCache.bootstrap()
         UNUserNotificationCenter.current().delegate = NotificationGate.shared
+        // 主线程卡死监测：卡死时自动把时长+事件环写入 Documents/hang_report.log
+        MainThreadHangMonitor.shared.start()
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                .onChange(of: scenePhase) { _, phase in
+                    MainThreadHangMonitor.note("场景→\(phase)")
+                }
         }
     }
 }

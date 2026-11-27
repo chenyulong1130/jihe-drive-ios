@@ -29,10 +29,11 @@ struct ChargeLiveActivity: Widget {
                         Text("\(context.state.soc)%")
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .monospacedDigit()
-                        Text(context.state.etaText)
+                        etaText(context.state)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.green.opacity(0.9))
                             .lineLimit(1)
+                            .monospacedDigit()
                     }
                     .padding(.trailing, 4)
                 }
@@ -88,6 +89,15 @@ struct ChargeLiveActivity: Widget {
         return w >= 1000 ? String(format: "%.2f kW", w / 1000) : String(format: "%.0f W", w)
     }
 
+    /// 充满剩余时间：有 chargeEndTime 时系统计时器自走（两次同步之间也实时走秒），
+    /// 否则回退同步时刻的静态文案
+    private func etaText(_ state: ChargeActivityAttributes.ContentState) -> Text {
+        if let end = state.chargeEndTime, end > Date() {
+            return Text("剩余 ") + Text(timerInterval: Date.now...end, countsDown: true)
+        }
+        return Text(state.etaText)
+    }
+
     private func lockBanner(_ state: ChargeActivityAttributes.ContentState) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -112,10 +122,11 @@ struct ChargeLiveActivity: Widget {
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .monospacedDigit()
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(state.etaText)
+                    etaText(state)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.78))
                         .lineLimit(1)
+                        .monospacedDigit()
                     HStack(spacing: 10) {
                         if let text = powerText(state.powerWatts) {
                             Text(text)

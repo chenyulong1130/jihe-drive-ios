@@ -17,6 +17,7 @@ struct DeviceTabView: View {
     @State private var showPowerPassword = false
     @State private var showScan = false
     @State private var showBLELogs = false
+    @State private var showClearAllConfirm = false
     @State private var scanFilter: DeviceKind?
     @State private var pendingKind: DeviceKind?
     @State private var path = NavigationPath()
@@ -37,9 +38,10 @@ struct DeviceTabView: View {
                                 showBLELogs = true
                             }
                             if ble.isConnected {
-                                // 断开当前蓝牙设备：停止扫描/轮询由各 Store 的 deactivate 兜底
-                                circleButton(icon: "xmark.circle.fill", label: "断开连接", tint: Theme.red) {
-                                    ble.disconnect()
+                                // 清除全部蓝牙缓存并断开：忘记连接记忆 + 清空
+                                // 扫描/日志/鉴权缓存，下次启动不自动回连（危险操作，先确认）
+                                circleButton(icon: "trash", label: "清除缓存并断开", tint: Theme.red) {
+                                    showClearAllConfirm = true
                                 }
                             }
                         }
@@ -87,11 +89,30 @@ struct DeviceTabView: View {
                 }
             }
             .sheet(isPresented: $showBLELogs) { bleLogSheet }
+            .confirmationDialog(
+                "清除全部蓝牙缓存并断开？",
+                isPresented: $showClearAllConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("清除缓存并断开", role: .destructive) { clearAllBleCaches() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("将断开当前设备、忘记连接记忆，并清空扫描列表、通信日志与鉴权缓存，下次启动不再自动回连。")
+            }
         }
         .environmentObject(ble)
         .environmentObject(session)
         .onChange(of: activeMainTab) { _, tab in
-            if tab != .device { ble.stopScan() }
+            if tab == .device {
+                // 回到设备页恢复扫描停止状态下的轮询/回调
+                syncListPolling()
+            } else {
+                // 离开设备页立即停扫描、停轮询、注销回调：
+                // BLE 轮询每 0.5s 就是一次 @Published 更新，页面不在屏上时
+                // 仍会反复触发本页重算，切 Tab 动画叠加重页合成时明显卡顿
+                ble.stopScan()
+                pauseStores()
+            }
         }
         .onChange(of: ble.powerState) { _, state in
             if state == .poweredOn { ble.autoConnectSavedDevice() }
@@ -113,19 +134,12 @@ struct DeviceTabView: View {
     /// 进入详情页后由详情页接管，返回列表（path 清空）时恢复。
     private func syncListPolling() {
         guard ble.isConnected, let kind = ble.connectedDevice?.kind else {
-            bmsStore.stopPolling()
-            headlightStore.deactivate()
-            chargerStore.deactivate()
-            dianjingStore.deactivate()
-            lampStore.deactivate()
+            pauseStores()
             return
         }
         // 每种设备同一时刻只保留一个 Store 在跑，避免通知回调互相竞争
-        bmsStore.stopPolling()
-        headlightStore.deactivate()
-        chargerStore.deactivate()
-        dianjingStore.deactivate()
-        lampStore.deactivate()
+        pauseStores()
+        MainThreadHangMonitor.note("设备页→恢复轮询（\(kind.shortTitle)）")
         switch kind {
         case .bms:
             bmsStore.attach(ble)
@@ -142,6 +156,30 @@ struct DeviceTabView: View {
         case .lamp:
             lampStore.attach(ble)
         }
+    }
+
+    /// 停掉全部 Store 的轮询与回调（连接状态不动）；回到设备页由 syncListPolling 恢复
+    private func pauseStores() {
+        MainThreadHangMonitor.note("设备页→停轮询/回调")
+        bmsStore.stopPolling()
+        headlightStore.deactivate()
+        chargerStore.deactivate()
+        dianjingStore.deactivate()
+        lampStore.deactivate()
+    }
+
+    /// 清除全部蓝牙缓存并断开：BLE 记忆/扫描/日志 + 各设备 Store 缓存 + 鉴权缓存
+    private func clearAllBleCaches() {
+        MainThreadHangMonitor.note("设备页→清除全部缓存并断开")
+        ble.disconnectAndClearAll()
+        bmsStore.clearCache()
+        headlightStore.clearCache()
+        chargerStore.clearCache()
+        dianjingStore.clearCache()
+        lampStore.clearCache()
+        DeviceAuth.clearVerified()
+        session.resetServiceAuth()
+        syncListPolling()
     }
 
     /// 标题右侧圆形图标按钮（扫描 / 日志 / 断开）
@@ -199,6 +237,18 @@ struct DeviceTabView: View {
                     }
 
                     Spacer(minLength: 4)
+                    if connected {
+                        // 单个断开：只断这台设备，保留连接记忆（下次启动仍自动回连）
+                        Button {
+                            ble.disconnect()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(Theme.secondary)
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                        .accessibilityLabel("断开\(kind.title)")
+                    }
                     Image(systemName: connected ? "chevron.right" : "magnifyingglass")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(connected ? Theme.tertiary : accent)

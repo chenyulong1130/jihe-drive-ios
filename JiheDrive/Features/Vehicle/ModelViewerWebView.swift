@@ -680,7 +680,7 @@ enum ModelViewerAsset {
         // 之前的“中间束+左右两束+远光锥+聚光灯”全部去掉。车头朝 -x（AE4 实测）；
         // 灯口取 L-HighBeam/L-LowBeam 包围盒中心（节点原点≠灯面中心）。
         // 画布是透明背景，AdditiveBlending 会被 alpha 合成吃掉，必须用普通混合。
-        let beamDir = new THREE.Vector3(-1, -0.45, 0); // 仰角由 jhSetBeamAngle 按高度百分比驱动（默认下压，模型就绪前兜底）
+        let beamDir = new THREE.Vector3(-1, -0.08, 0); // 车辆页默认近光：微下压（≈4.6°），大灯调节页由 jhSetBeamAngle 按高度百分比接管
         let beamGroup = null;
         let beamOrigin = null;
         const beams = { main: null };

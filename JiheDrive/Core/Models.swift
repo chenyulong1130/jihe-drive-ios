@@ -828,6 +828,7 @@ enum ReplayClock {
     }
 
     /// 折线 / 进度条共用：progress 是时间比例，不是点序号。
+    /// 只算数值不造 dummy 点位数组：回放时每帧都要调，按点数分配的临时数组会把主线程拖卡。
     static func sampleValue(
         _ values: [Double],
         times: [TimeInterval],
@@ -835,14 +836,22 @@ enum ReplayClock {
         progress: Double
     ) -> Double {
         guard !values.isEmpty else { return 0 }
-        let dummy = values.map { _ in Coordinate(latitude: 0, longitude: 0) }
-        return interpolate(
-            points: dummy,
-            speeds: values,
-            times: times,
-            duration: duration,
-            progress: progress
-        ).speed
+        guard values.count > 1 else { return values[0] }
+        let clamped = min(max(progress, 0), 1)
+        let lastTime = times.last ?? 0
+        let firstTime = times.first ?? 0
+        let index: Int
+        let fraction: Double
+        if times.count == values.count, duration > 0, lastTime > firstTime {
+            (index, fraction) = bracket(times, t: clamped * duration)
+        } else {
+            let raw = clamped * Double(values.count - 1)
+            index = min(values.count - 2, max(0, Int(raw)))
+            fraction = raw - Double(index)
+        }
+        let sa = values.indices.contains(index) ? values[index] : 0
+        let sb = values.indices.contains(index + 1) ? values[index + 1] : sa
+        return sa + (sb - sa) * fraction
     }
 
     static func interpolate(

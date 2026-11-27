@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.activeMainTab) private var activeMainTab
 
     @State private var showSigninDetail = false
+    @State private var showHangReport = false
     @StateObject private var signin = SigninStore()
     @StateObject private var profileStore = UserProfileStore()
     // 石栏开机密码（大灯/控制器入口用），存在这里详情页就不用每次问
@@ -17,28 +18,25 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
-                LargeTitle("我的")
-                    .staggerIn(0)
+            VStack(spacing: 12) {
+                LargeTitle("我的") {
+                    appearanceMenu
+                }
+                .staggerIn(0)
 
                 accountCard.staggerIn(1)
 
-                SectionHeader("签到")
                 SigninPanel(store: signin, onMore: { showSigninDetail = true })
-                    .padding(.bottom, 8)
                     .staggerIn(2)
 
-                SectionHeader("外观")
-                appearanceSection.staggerIn(3)
+                modelSection.staggerIn(3)
 
-                SectionHeader("3D 模型")
-                modelSection.staggerIn(4)
+                deviceSection.staggerIn(4)
 
-                SectionHeader("设备")
-                deviceSection.staggerIn(5)
+                diagnosticsSection.staggerIn(5)
 
                 logoutButton
-                    .padding(.top, 24)
+                    .padding(.top, 16)
                     .staggerIn(6)
             }
             .padding(.horizontal, Theme.page)
@@ -62,56 +60,33 @@ struct SettingsView: View {
             SigninDetailSheet()
                 .environmentObject(signin)
         }
+        .sheet(isPresented: $showHangReport) { hangReportSheet }
     }
 
-    // MARK: - 外观
+    // MARK: - 外观（右上角图标切换）
 
-    private var appearanceSection: some View {
-        AppleCard(padding: EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14)) {
-            HStack(spacing: 8) {
-                ForEach(AppAppearance.allCases) { mode in
-                    appearanceChip(mode)
-                }
-            }
-        }
-    }
-
-    private func appearanceChip(_ mode: AppAppearance) -> some View {
-        let selected = appearance.mode == mode
-        return Button {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { appearance.mode = mode }
-        } label: {
-            VStack(spacing: 6) {
-                Image(systemName: mode.icon)
-                    .font(.system(size: 16, weight: .semibold))
-                Text(mode.title)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(selected ? Color.white : Theme.label)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Theme.surfaceAlt)
-                    if selected {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Theme.brand, Color(hex: 0x4B5BFF)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+    /// 外观切换：右上角图标显示当前模式，点开菜单三选（跟随系统/浅色/深色）
+    private var appearanceMenu: some View {
+        Menu {
+            ForEach(AppAppearance.allCases) { mode in
+                Button {
+                    appearance.mode = mode
+                } label: {
+                    if appearance.mode == mode {
+                        Label(mode.title, systemImage: "checkmark")
+                    } else {
+                        Label(mode.title, systemImage: mode.icon)
                     }
                 }
             }
-            .contentShape(Rectangle())
+        } label: {
+            Image(systemName: appearance.mode.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+                .frame(width: 36, height: 36)
+                .background(Theme.surfaceAlt, in: Circle())
         }
-        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityLabel("外观：\(appearance.mode.title)")
     }
 
     // MARK: - 3D 模型
@@ -238,6 +213,79 @@ struct SettingsView: View {
     }
 
     // MARK: - 账号
+
+    /// 主线程卡死报告入口：App 偶发「直接卡死」时，报告里有卡死时长和卡死前的事件环，
+    /// 复制全文反馈即可定位是哪个子系统堵住了主线程
+    private var diagnosticsSection: some View {
+        AppleCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
+            Button {
+                showHangReport = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform.path.ecg.rectangle.fill")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Theme.brand)
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("主线程卡死报告")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Theme.label)
+                        Text("App 出现「直接卡死」时自动记录，点开复制全文反馈")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+        }
+    }
+
+    private var hangReportSheet: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let text = MainThreadHangMonitor.reportText() {
+                        Button {
+                            UIPasteboard.general.string = text
+                        } label: {
+                            Label("复制全部报告", systemImage: "doc.on.doc")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .padding(.bottom, 4)
+
+                        Text(text)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(Theme.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("暂无卡死记录", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Theme.green)
+                            Text("监测器常驻后台（阈值 3.5 秒）。App 再次出现「直接卡死」时，卡死发生瞬间的时长与事件环会自动写入本报告，回到这里复制全文即可反馈。")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.secondary)
+                        }
+                        .padding(.vertical, 32)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(Theme.page)
+            }
+            .background(Theme.groupedBackground)
+            .navigationTitle("卡死报告")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("完成") { showHangReport = false } }
+            }
+        }
+    }
 
     private var accountCard: some View {
         let profile = profileStore.profile

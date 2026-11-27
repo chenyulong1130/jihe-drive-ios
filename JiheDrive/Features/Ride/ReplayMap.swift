@@ -96,6 +96,8 @@ struct ReplayMap: UIViewRepresentable {
         private var cinematicEnabled = false
         private var displayHeading: CLLocationDirection = 0
         private var lastCourse: CLLocationDirection = 0
+        /// 上一帧 onTick 时刻：平滑系数按真实帧间隔算，掉帧时不再放大滞后
+        private var lastTickTime: CFTimeInterval = 0
 
         deinit {
             displayLink?.invalidate()
@@ -203,8 +205,10 @@ struct ReplayMap: UIViewRepresentable {
             let now = CACurrentMediaTime()
             if lastProgressStamp > 0 {
                 let dt = now - lastProgressStamp
-                if dt > 0.002, dt < 0.25 {
-                    progressVelocity = (progress - self.progress) / dt
+                let delta = progress - self.progress
+                // 只接受正常播放的小幅前进：循环重开/拖动的大跳不外推，避免光标猛甩一下
+                if dt > 0.002, dt < 0.25, delta >= 0, delta < 0.05 {
+                    progressVelocity = delta / dt
                 }
             } else {
                 progressVelocity = 0
@@ -230,7 +234,8 @@ struct ReplayMap: UIViewRepresentable {
             startLink()
             if !didZoomFollow {
                 didZoomFollow = true
-                lerpUntil = now + (cinematic ? 0.55 : 0.16)
+                // 比初始 setCamera 动画略长：动画没跑完就开始每帧硬设中心会打架抖动
+                lerpUntil = now + (cinematic ? 0.55 : 0.45)
                 let heading = cinematicEnabled ? displayHeading : 0
                 let camera = MKMapCamera(
                     lookingAtCenter: pose,
@@ -367,7 +372,10 @@ struct ReplayMap: UIViewRepresentable {
             let target = applyPose(progress: predicted, on: map)
             if now < lerpUntil { return }
 
-            let frame = link.duration > 0 ? link.duration : 1.0 / 60.0
+            // 平滑系数按真实帧间隔算：CADisplayLink.duration 是屏幕刷新周期，
+            // 掉帧时按它算会让相机/光标滞后放大——转弯时车模看起来歪就是这个
+            let frame = lastTickTime > 0 ? min(0.1, now - lastTickTime) : (link.duration > 0 ? link.duration : 1.0 / 60.0)
+            lastTickTime = now
             if cinematicEnabled {
                 let heading = blendHeading(to: lastCourse, k: min(1, 1 - exp(-frame / 0.18)))
                 let camera = MKMapCamera(
@@ -402,16 +410,19 @@ struct ReplayMap: UIViewRepresentable {
             CATransaction.commit()
         }
 
+        /// 用户手势是否进行中：只查浅层子视图，不递归整棵视图树。
+        /// GLB 车模路径下地图里挂着 WKWebView（层级极深），每帧全树递归很伤主线程
         private func isUserGesture(on map: MKMapView) -> Bool {
-            func active(_ view: UIView) -> Bool {
+            func active(_ view: UIView, depth: Int) -> Bool {
                 if view.gestureRecognizers?.contains(where: {
                     $0.state == .began || $0.state == .changed
                 }) == true {
                     return true
                 }
-                return view.subviews.contains(where: active)
+                guard depth > 0 else { return false }
+                return view.subviews.contains(where: { active($0, depth: depth - 1) })
             }
-            return active(map)
+            return active(map, depth: 5)
         }
 
         private final class TickProxy: NSObject {
