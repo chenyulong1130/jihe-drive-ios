@@ -726,14 +726,9 @@ struct RideHomeView: View {
 
         guard let bounds = Self.monthBounds(for: monthAnchor) else { return }
         async let daysTask = RideTrackService.monthInfo(vin: vehicle.vinNo, month: monthAnchor)
-        // 接口按天升序翻页：整月第 1 页装的是月初最旧的几天，最新行程排在最后几页，
-        // 光等翻页要上拉到底才看到今天。并行补拉最近一周，合并去重后首屏顶部就是最新骑行
+        // 整月第一页（接口按天升序，拿到的是月初最旧的几天）
         let first = await RideTrackService.tracks(
             vin: vehicle.vinNo, from: bounds.start, to: bounds.end, page: 1, pageSize: 10
-        ) ?? []
-        let recentStart = max(bounds.start, Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? bounds.start)
-        let recent = await RideTrackService.tracks(
-            vin: vehicle.vinNo, from: recentStart, to: bounds.end, page: 1, pageSize: 10
         ) ?? []
         let days = await daysTask ?? []
         if Task.isCancelled { return }
@@ -741,12 +736,22 @@ struct RideHomeView: View {
         loadedDays = days
         var merged: [RideTrack] = []
         var seen = Set<String>()
-        for track in first + recent where seen.insert(track.id).inserted {
+        for track in first where seen.insert(track.id).inserted {
             merged.append(track)
         }
-        loadedTracks = merged
+        // 最近一周改为「按天拉」：范围请求按天升序分页，第一页只会拿到最旧的一天，
+        // 导致首屏只出现一周前的记录；按天逐日拉保证最新骑行首屏可见
+        let recentStart = max(bounds.start, Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? bounds.start)
+        let recentStartKey = dotted.string(from: recentStart)
+        let recentDays = days.filter { $0.date >= recentStartKey && $0.mileage > 0 }
+        if !recentDays.isEmpty {
+            let recent = await Self.tracksForDays(vin: vehicle.vinNo, days: Array(recentDays))
+            for track in recent where seen.insert(track.id).inserted {
+                merged.append(track)
+            }
+        }
         nextPage = 2
-        noMorePages = first.isEmpty && recent.isEmpty
+        noMorePages = first.isEmpty
         groups = Self.buildGroups(days: days, tracks: merged)
 
         if merged.isEmpty, days.contains(where: { $0.mileage > 0 }) {
