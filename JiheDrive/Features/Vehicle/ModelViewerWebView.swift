@@ -40,6 +40,8 @@ struct ModelViewerWebView: UIViewRepresentable {
     var onSeatDebug: ((String) -> Void)? = nil        // 坐垫挂载诊断（真机排查"点了没反应"）
     var onSeatChange: ((Bool) -> Void)? = nil        // JS 即时回传坐垫开关状态
     var onSeatProgress: ((Double) -> Void)? = nil    // 0~1 开合进度
+    /// 完全独立实例：不进共享池（石栏大灯页专用——beam/灯光状态绝不影响车辆首页的模型实例）
+    var isolated: Bool = false
 
     func makeUIView(context: Context) -> WKWebView {
         context.coordinator.reuseKey = reuseKey
@@ -58,7 +60,7 @@ struct ModelViewerWebView: UIViewRepresentable {
         context.coordinator.desiredSeatOpen = seatOpen
         context.coordinator.desiredSeatToken = seatToken
 
-        if let pooled = ModelViewerPool.view(for: reuseKey) {
+        if !isolated, let pooled = ModelViewerPool.view(for: reuseKey) {
             pooled.removeFromSuperview()
             bind(pooled, context: context)
             if !ModelViewerPool.isStale(reuseKey),
@@ -92,7 +94,9 @@ struct ModelViewerWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         installGestures(on: view, coordinator: context.coordinator)
         context.coordinator.load(into: view, glbFile: glbFile, interactive: interactive, autoRotate: autoRotate)
-        ModelViewerPool.store(view, for: reuseKey, file: glbFile)
+        if !isolated {
+            ModelViewerPool.store(view, for: reuseKey, file: glbFile)
+        }
         return view
     }
 

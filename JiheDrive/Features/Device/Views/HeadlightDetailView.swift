@@ -21,8 +21,6 @@ struct HeadlightDetailView: View {
     @State private var copyToast = false
     /// 用户保存的记忆高度（本地持久化），替代固定快捷档位
     @State private var memories: [Int] = HeadlightMemory.load()
-    @State private var showSavePrompt = false
-    @State private var pendingSavePercent: Int = 0
 
     private var current: Int { store.params.absolutePercent }
     private var target: Int { store.params.targetPercent }
@@ -99,15 +97,6 @@ struct HeadlightDetailView: View {
         }
         .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
         .sheet(isPresented: $showSettings) { settingsSheet }
-        .alert("保存记忆位置", isPresented: $showSavePrompt) {
-            Button("保存") {
-                memories = HeadlightMemory.add(pendingSavePercent)
-                memorySavedFeedback()
-            }
-            Button("不用", role: .cancel) {}
-        } message: {
-            Text("是否把 \(pendingSavePercent)% 保存为快捷记忆？保存后可在设备列表和本页一键到达。")
-        }
     }
 
     private func loadCarModel() async {
@@ -163,7 +152,8 @@ struct HeadlightDetailView: View {
                     beamPercent: beamPercent,
                     // 车靠右、相机拉远：光束朝左侧伸展，仰角变化一目了然
                     modelOffsetX: 0.6,
-                    cameraDistance: 5.1
+                    cameraDistance: 5.1,
+                    isolated: true
                 )
             }
         } else if glbFailed {
@@ -273,15 +263,12 @@ struct HeadlightDetailView: View {
                             } else {
                                 scrubbing = false
                                 store.moveTo(percent: scrubValue)
-                                // 调好一次后询问是否存为记忆（本地持久化，列表页/下次直接点按直达）
-                                pendingSavePercent = Int(scrubValue.rounded())
-                                showSavePrompt = true
                             }
                         }
                     )
                     .tint(accent)
                     .disabled(!store.paramsLoaded || store.busy)
-                    Text("拖动时 3D 灯光实时预览，松手后大灯移动到该高度，并可存为记忆")
+                    Text("拖动时 3D 灯光实时预览；调好后点「保存当前」存为记忆，列表页可一键直达")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.tertiary)
                 }

@@ -13,8 +13,6 @@ struct MirrorView: View {
     @State private var showExport = false
     @State private var exportURL: URL?
     @State private var showFullscreen = false
-    @State private var showPreviewWindow = false
-    @State private var previewWindowFullscreen = false
     @State private var wifiSaveTask: Task<Void, Never>?
     @State private var wifiSaved = false
     @State private var showPreflight = false
@@ -45,11 +43,10 @@ struct MirrorView: View {
                     videoSection.staggerIn(1)
                 }
 
-                readinessCard.staggerIn(controller.hasVideo ? 2 : 1)
-                launchCard.staggerIn(controller.hasVideo ? 3 : 2)
+                launchCard.staggerIn(controller.hasVideo ? 2 : 1)
 
-                zeehoSummaryRow.staggerIn(controller.hasVideo ? 4 : 3)
-                preflightRow.staggerIn(controller.hasVideo ? 5 : 4)
+                zeehoSummaryRow.staggerIn(controller.hasVideo ? 3 : 2)
+                preflightRow.staggerIn(controller.hasVideo ? 4 : 3)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -57,12 +54,9 @@ struct MirrorView: View {
         }
         .background(Theme.groupedBackground)
         .onAppear {
-            store.detectSSID()
+            // 只做本地检查；蓝牙/定位/本地网络权限一律延迟到真正需要时
+            // （启动 CarPlay 时）再请求，避免一进页面连环弹权限
             store.recheckIdentity()
-            CPLocalNetworkGate.requestAuthorizationIfNeeded()
-            if checks.isEmpty {
-                Task { await runChecks() }
-            }
         }
         .onChange(of: controller.phase) { _, phase in
             handlePhase(phase)
@@ -80,12 +74,6 @@ struct MirrorView: View {
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
         }
-        .sheet(isPresented: $showPreviewWindow) {
-            previewWindowSheet
-        }
-        .fullScreenCover(isPresented: $previewWindowFullscreen) {
-            previewWindowFullscreenView
-        }
     }
 
     // MARK: - 就绪清单（对照日志卡点）
@@ -100,61 +88,6 @@ struct MirrorView: View {
     }
     private var localIPOK: Bool { CPMirrorDiagnostics.localIPv4() != nil }
     private var lanOK: Bool { lanCheck?.passed != false || (lanCheck == nil && localIPOK) }
-
-    private var readinessCard: some View {
-        AppleCard(padding: 16) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("启动前检查")
-                        .font(Theme.headline)
-                        .foregroundStyle(Theme.label)
-                    Spacer()
-                    Button {
-                        Task { await runChecks() }
-                    } label: {
-                        if runningChecks {
-                            ProgressView()
-                        } else {
-                            Text("刷新")
-                                .font(Theme.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.brand)
-                        }
-                    }
-                    .disabled(runningChecks)
-                }
-
-                checklistRow(
-                    done: store.identityReady,
-                    title: "配件身份",
-                    detail: store.identityReady
-                        ? "证书与私钥已就绪"
-                        : (store.identityHint ?? "缺少身份三件套")
-                )
-                checklistRow(
-                    done: lanOK,
-                    title: "本地网络权限",
-                    detail: lanOK
-                        ? (lanCheck?.detail ?? "TCP 监听可用")
-                        : "日志 -65555 NoAuth：到 设置 → 极核智行 → 本地网络 打开"
-                )
-                checklistRow(
-                    done: wifiPresetOK && localIPOK,
-                    title: "Wi-Fi 预设 + 本机地址",
-                    detail: wifiPresetOK
-                        ? (localIPOK
-                           ? "SSID「\(store.resolvedSSID)」· \(CPMirrorDiagnostics.localIPv4() ?? "")"
-                           : "已填 SSID，但还没拿到 Wi-Fi IP——请先连上热点")
-                        : "必须填写 Wi-Fi 名称（密码开放网可留空）——否则 0x4301 发不出去"
-                )
-
-                if !store.identityReady {
-                    Text(CPAccessoryIdentity.diagnosticSummary())
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.tertiary)
-                }
-            }
-        }
-    }
 
     private func checklistRow(done: Bool, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -663,6 +596,9 @@ struct MirrorView: View {
 
     /// 启动前预检：硬性失败（身份缺失/无本机地址/无 Wi-Fi 预设）不启动，弹出自检详情。
     private func startCarPlayAfterPreflight() async {
+        // 权限在这一步才请求：本地网络（CarPlay 会话必需）+ Wi-Fi 名称检测（定位）
+        CPLocalNetworkGate.requestAuthorizationIfNeeded()
+        await MainActor.run { store.detectSSID() }
         // 先写入 Wi-Fi 预设，再预检——否则 StartSession 会因「未配置」直接失败
         let saved = await MainActor.run { store.commitWiFi() }
         if !saved {
@@ -715,9 +651,6 @@ struct MirrorView: View {
                 }
                 actionButton("画中画", "pip.enter") {
                     _ = controller.startPictureInPicture()
-                }
-                actionButton("预览窗", "rectangle.inset.filled") {
-                    showPreviewWindow = true
                 }
             }
 
@@ -918,6 +851,35 @@ struct MirrorView: View {
         ) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 16) {
+                    // 启动前就绪清单（与主页启动卡同一数据源）
+                    AppleCard(padding: 14) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            checklistRow(
+                                done: store.identityReady,
+                                title: "配件身份",
+                                detail: store.identityReady
+                                    ? "证书与私钥已就绪"
+                                    : (store.identityHint ?? "缺少身份三件套")
+                            )
+                            checklistRow(
+                                done: lanOK,
+                                title: "本地网络权限",
+                                detail: lanOK
+                                    ? (lanCheck?.detail ?? "TCP 监听可用")
+                                    : "日志 -65555 NoAuth：到 设置 → 极核智行 → 本地网络 打开"
+                            )
+                            checklistRow(
+                                done: wifiPresetOK && localIPOK,
+                                title: "Wi-Fi 预设 + 本机地址",
+                                detail: wifiPresetOK
+                                    ? (localIPOK
+                                       ? "SSID「\(store.resolvedSSID)」· \(CPMirrorDiagnostics.localIPv4() ?? "")"
+                                       : "已填 SSID，但还没拿到 Wi-Fi IP——请先连上热点")
+                                    : "必须填写 Wi-Fi 名称（密码开放网可留空）——否则 0x4301 发不出去"
+                            )
+                        }
+                    }
+
                     if checks.isEmpty {
                         Text(runningChecks ? "正在自检…" : "尚未自检")
                             .font(Theme.footnote)
@@ -976,130 +938,7 @@ struct MirrorView: View {
         return results
     }
 
-    // MARK: - 可操作预览窗口
 
-    /// 弹出的可操作预览窗口：内嵌触控画面，同一 Wi-Fi 下的 iPad/电脑
-    /// 打开提示地址也能看到同一画面并回传触控。可全屏。
-    private var previewWindowSheet: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Capsule()
-                    .fill(Theme.tertiary.opacity(0.4))
-                    .frame(width: 40, height: 5)
-                Spacer()
-            }
-            .padding(.horizontal, Theme.page)
-            .padding(.top, 10)
-
-            HStack(spacing: 10) {
-                Image(systemName: "rectangle.inset.filled")
-                    .foregroundStyle(Theme.brand)
-                Text("可操作预览窗口")
-                    .font(Theme.headline)
-                    .foregroundStyle(Theme.label)
-                Spacer(minLength: 0)
-                Button {
-                    showPreviewWindow = false
-                    _ = controller.startPictureInPicture()
-                } label: {
-                    Image(systemName: "pip.enter")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.secondary)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(Theme.surfaceAlt))
-                }
-                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-
-                Button {
-                    showPreviewWindow = false
-                    previewWindowFullscreen = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.secondary)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(Theme.surfaceAlt))
-                }
-                .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-            }
-            .padding(.horizontal, Theme.page)
-            .padding(.top, 8)
-
-            if let url = controller.previewURL {
-                Text("同一 Wi-Fi 下的 iPad / 电脑浏览器打开：\(url)，即可看到同一画面并触控操作。")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.secondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.page)
-                    .padding(.top, 4)
-                    .textSelection(.enabled)
-
-                PreviewWindowWebView(url: url)
-                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, Theme.page)
-                    .padding(.top, 10)
-            } else {
-                Text("预览窗口服务尚未就绪，请先启动投屏。")
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            Spacer(minLength: 0)
-        }
-        .presentationDetents([.large])
-        .background(Theme.groupedBackground)
-    }
-
-    /// 全屏态预览窗口。
-    private var previewWindowFullscreenView: some View {        ZStack {
-            Color.black.ignoresSafeArea()
-            if let url = controller.previewURL {
-                PreviewWindowWebView(url: url)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button {
-                            previewWindowFullscreen = false
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 30))
-                                .foregroundStyle(.white.opacity(0.75))
-                        }
-                        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-                        .padding(16)
-                    }
-                    Spacer()
-                }
-            } else {
-                Text("预览窗口服务尚未就绪，请先启动投屏。")
-                    .font(Theme.footnote)
-                    .foregroundStyle(Theme.secondary)
-            }
-        }
-    }
-}
-
-// MARK: - 可操作预览窗口的触控页面
-
-private struct PreviewWindowWebView: UIViewRepresentable {
-    let url: String
-
-    func makeUIView(context: Context) -> WKWebView {
-        let view = WKWebView()
-        view.isOpaque = false
-        view.backgroundColor = .black
-        if let address = URL(string: url) {
-            view.load(URLRequest(url: address))
-        }
-        return view
-    }
-
-    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 // MARK: - 启动步骤追踪器（分段胶囊进度）

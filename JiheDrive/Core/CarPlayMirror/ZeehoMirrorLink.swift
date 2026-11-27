@@ -295,6 +295,7 @@ final class ZeehoMirrorLink {
     private var condition = NSCondition()
 
     private func awaitConnect(host: String, port: UInt16, name: String) throws -> ZeehoMirrorChannel {
+        log("正在连接\(name) \(host):\(port)…")
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<ZeehoMirrorChannel, Error>?
         Task.detached {
@@ -306,9 +307,15 @@ final class ZeehoMirrorLink {
             }
             semaphore.signal()
         }
-        semaphore.wait()
+        // 必须带超时：仪表未开启投屏（10930 未监听）时 TCP 可能静默挂起，
+        // 没有超时会让整个投屏流程无日志卡死
+        if semaphore.wait(timeout: .now() + 6) == .timedOut {
+            throw CPError.timeout("连接\(name)超时——请确认仪表已开启投屏/互联功能")
+        }
         switch result! {
-        case .success(let channel): return channel
+        case .success(let channel):
+            log("\(name)已连接")
+            return channel
         case .failure(let error): throw error
         }
     }

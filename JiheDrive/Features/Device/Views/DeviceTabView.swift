@@ -203,7 +203,7 @@ struct DeviceTabView: View {
                 summaryTile(value: "\(rt.map { abs($0.power) } ?? 0)", unit: "W", label: "功率", color: Theme.orange)
             })
         case .shilanLight:
-            // 已存记忆：显示记忆预设（点进详情可直达）；未存：显示当前角度
+            // 已存记忆：显示记忆预设，点击直接下发移动（不进详情页）；未存：显示当前角度
             let saved = HeadlightMemory.load()
             if saved.isEmpty {
                 let p = headlightStore.params
@@ -217,6 +217,7 @@ struct DeviceTabView: View {
             return AnyView(HStack(spacing: 8) {
                 ForEach(Array(saved.prefix(4).enumerated()), id: \.offset) { index, percent in
                     summaryTile(value: "\(percent)", unit: "%", label: "记忆 \(index + 1)", color: Theme.teal)
+                        .onTapGesture { triggerHeadlightMemory(percent) }
                 }
             })
         }
@@ -225,6 +226,28 @@ struct DeviceTabView: View {
     private func fmt1(_ value: Double?) -> String {
         guard let value else { return "--" }
         return String(format: "%.1f", value)
+    }
+
+    /// 列表记忆格点击：已连接石栏设备时直接下发移动，不进详情页；
+    /// 参数未读时先读参数再动；未连接则不动（点击卡片本体才扫描/进详情）
+    private func triggerHeadlightMemory(_ percent: Int) {
+        guard ble.isConnected, ble.connectedDevice?.kind == .shilanLight else { return }
+        if !headlightStore.paramsLoaded {
+            headlightStore.attach(ble, handlerKey: "headlight")
+            headlightStore.loadParams()
+            // 参数读到后自动走到记忆位（loadParams 成功后由详情/列表共用 store 触发）
+            Task {
+                for _ in 0..<10 {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if headlightStore.paramsLoaded {
+                        headlightStore.moveTo(percent: Double(percent))
+                        return
+                    }
+                }
+            }
+            return
+        }
+        headlightStore.moveTo(percent: Double(percent))
     }
 
     private func summaryTile(value: String, unit: String, label: String, color: Color) -> some View {

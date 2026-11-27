@@ -52,6 +52,13 @@ final class DeviceBLEManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        // 故意不在这里创建 CBCentralManager：蓝牙权限弹窗应出现在
+        // 用户真正「扫描/连接蓝牙」时，而不是 App 启动进首页时
+    }
+
+    /// 惰性创建中央管理器（首次扫描/连接时触发蓝牙权限请求）
+    private func ensureCentral() {
+        guard central == nil else { return }
         central = CBCentralManager(
             delegate: self,
             queue: .main,
@@ -161,7 +168,8 @@ final class DeviceBLEManager: NSObject, ObservableObject {
 
     /// 启动时回连上次设备：无需扫描，直接 retrievePeripherals + connect
     func autoConnectSavedDevice() {
-        guard central.state == .poweredOn, connectionState == .idle, !autoConnectAttempted else { return }
+        ensureCentral()
+        guard central?.state == .poweredOn, connectionState == .idle, !autoConnectAttempted else { return }
         guard let archive = UserDefaults.standard.dictionary(forKey: Self.archiveKey) as? [String: String],
               let idString = archive["id"],
               let id = UUID(uuidString: idString),
@@ -189,6 +197,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     ///   - kinds: 只保留这些类型；默认保护板 + 石栏，避免满屏无关 BLE。
     ///   - timeout: 默认 10 秒；设备广播间隔约 100ms~1s，正常 1~2 秒内就会出现在列表。
     func startScan(kinds: Set<DeviceKind>? = nil, timeout: TimeInterval = 10) {
+        ensureCentral()
         guard central.state == .poweredOn else {
             lastError = DeviceBLEError.bluetoothOff.localizedDescription
             log("扫描失败：\(lastError ?? "")")
@@ -216,7 +225,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     }
 
     func stopScan() {
-        if central.state == .poweredOn { central.stopScan() }
+        if central?.state == .poweredOn { central?.stopScan() }
         isScanning = false
         scanTimeout?.cancel()
         scanTimeout = nil
@@ -239,6 +248,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     }
 
     private func connectCore(_ device: BLEDevice) async throws {
+        ensureCentral()
         guard central.state == .poweredOn else { throw DeviceBLEError.bluetoothOff }
 
         if let current = peripheral, current.identifier == device.id, connectionState == .connected {
