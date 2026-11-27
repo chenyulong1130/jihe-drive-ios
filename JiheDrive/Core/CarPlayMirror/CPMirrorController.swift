@@ -167,6 +167,8 @@ final class CPMirrorController: ObservableObject {
     private var currentIdentity: CPAccessoryIdentity?
     private var startToken = UUID()
 
+    private var pipWanted = false
+
     // MARK: - 启动 / 停止
 
     /// 先起 RTSP 接收端；拿到实际监听端口后再发起 iAP2 引导（端口就绪前发会话会白等）。
@@ -220,10 +222,15 @@ final class CPMirrorController: ObservableObject {
         // 2) CarPlay RTSP 接收端
         let receiver = CPReceiver()
         receiver.onLog = { [weak self] in self?.appendLog($0) }
-        // 全量帧：转码器（极核仪表输出）依赖连续解码流，不做任何丢弃
+        // 全量帧：转码器（极核仪表输出）依赖连续解码流，不做任何丢弃。
+        // 但它只服务三处消费者——仪表投屏 / 画中画 / 网页预览；都不在用时
+        // 别白解一路（整条 VT 解码管线跟预览抢 CPU/GPU，预览就发涩）
         receiver.onVideo = { [weak self] data, codec in
             guard let self, codec == .h264 else { return }
-            self.transcoder.appendAnnexB(data)
+            if self.castToZeeho || self.pip.isActive || self.pipWanted
+                || self.previewServer.hasActiveViewers() {
+                self.transcoder.appendAnnexB(data)
+            }
         }
         // 本机预览帧：受接收端背压控制（积压时跳到关键帧），直接吃原始访问单元
         receiver.onLocalVideo = { [weak self] data, codec in
@@ -292,6 +299,7 @@ final class CPMirrorController: ObservableObject {
         previewPumpTask = nil
         previewServer.stop()
         pip.stop()
+        pipWanted = false
         bootstrap?.stop()
         bootstrap = nil
         receiver?.stop()
@@ -602,6 +610,7 @@ final class CPMirrorController: ObservableObject {
         pip.frameProvider = { [weak self] in self?.transcoder.snapshotForDisplay() }
         pip.onLog = { [weak self] in self?.appendLog($0) }
         pip.onStopped = { [weak self] in
+            self?.pipWanted = false
             self?.appendLog("画中画已关闭")
         }
         previewServer.onTouch = { [weak self] id, x, y, down in
@@ -688,6 +697,8 @@ final class CPMirrorController: ObservableObject {
 
     /// 启动系统画中画悬浮窗（需在用户手势里调用）。
     func startPictureInPicture() -> Bool {
+        // 先标记想要画中画：转码器解码门控放行，首次启动才拿得到画面
+        pipWanted = true
         let started = pip.start()
         appendLog(started ? "已启动画中画悬浮窗" : "画中画暂未就绪（画面输出后才能启动）")
         return started

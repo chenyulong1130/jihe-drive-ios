@@ -35,6 +35,17 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         }
     }
 
+    /// 扫描列表标题口径（用户约定）：保护板 / 石栏 / 充电器 / 点睛仪表 / 速牛灯具
+    var scanTitle: String {
+        switch self {
+        case .bms: return "保护板"
+        case .shilanLight: return "石栏"
+        case .charger: return "充电器"
+        case .dianjingMeter: return "点睛仪表"
+        case .lamp: return "速牛灯具"
+        }
+    }
+
     var detail: String {
         switch self {
         case .bms: return "蚂蚁 / 彦阳 · 电压 / 电流 / 单体 / 保护"

@@ -4,6 +4,7 @@ import UserNotifications
 @main
 struct JiheDriveApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
         ResourceCache.bootstrap()
@@ -19,6 +20,18 @@ struct JiheDriveApp: App {
                     MainThreadHangMonitor.note("场景→\(phase)")
                 }
         }
+    }
+}
+
+/// 方向门控：全 App 默认竖屏；CarPlay 全屏呈现期间放行横屏（由 fullscreen 开关切换）
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    static var orientationMask: UIInterfaceOrientationMask = .portrait
+
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        Self.orientationMask
     }
 }
 

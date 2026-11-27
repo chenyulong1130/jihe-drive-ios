@@ -18,6 +18,7 @@ struct MirrorView: View {
     @State private var wifiSaveTask: Task<Void, Never>?
     @State private var wifiSaved = false
     @State private var showLogs = false
+    @State private var showWifiSetup = false
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
     @State private var exitButtonVisible = true
@@ -33,7 +34,10 @@ struct MirrorView: View {
                         ? "画面已就绪 · 点按/滑动画面直接操作"
                         : "启动后画面在上方，直接触控操作"
                 ) {
-                    circleIcon("doc.text.magnifyingglass", label: "运行日志") { showLogs = true }
+                    HStack(spacing: 10) {
+                        circleIcon("wifi", label: "Wi-Fi 预设") { showWifiSetup = true }
+                        circleIcon("doc.text.magnifyingglass", label: "运行日志") { showLogs = true }
+                    }
                 }
                 .staggerIn(0)
 
@@ -41,9 +45,7 @@ struct MirrorView: View {
 
                 launchCard.staggerIn(2)
 
-                wifiSetupCard.staggerIn(3)
-
-                outputSettingsCard.staggerIn(4)
+                outputSettingsCard.staggerIn(3)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -69,6 +71,7 @@ struct MirrorView: View {
             }
         }
         .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
+        .sheet(isPresented: $showWifiSetup) { wifiSetupSheet }
         .sheet(isPresented: $showLogs) { logsSheet }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
@@ -81,9 +84,11 @@ struct MirrorView: View {
     /// 全屏与画中画收进画面右上角浮层，不再单独占一行按钮。
     @ViewBuilder
     private var previewSection: some View {
+        Group {
         if controller.hasVideo {
             ZStack(alignment: .topTrailing) {
-                CPPreviewView(controller: controller)
+                // 全屏呈现期间卡片停喂数据：同一帧不再两路解码（点全屏卡住的根因之一）
+                CPPreviewView(controller: controller, paused: showFullscreen)
                     .aspectRatio(1024.0 / 480.0, contentMode: .fit)
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -95,7 +100,6 @@ struct MirrorView: View {
                     .onTapGesture { showFullscreen = true }
 
                 HStack(spacing: 8) {
-                    StatusPill(text: "LIVE", color: Theme.green, pulsing: true)
                     previewOverlayIcon("pip.enter", label: "画中画") {
                         _ = controller.startPictureInPicture()
                     }
@@ -128,6 +132,9 @@ struct MirrorView: View {
                     }
                 }
         }
+        }
+        // 主页面 16pt 边距内再外扩 8pt：预览栏更宽更大
+        .padding(.horizontal, -8)
     }
 
     /// 预览右上角的半透明浮层小圆钮
@@ -363,6 +370,26 @@ struct MirrorView: View {
         }
     }
 
+    /// Wi-Fi 预设弹窗：从主页面收进弹窗，页面只剩预览/启动/输出设置，不用上下滚
+    private var wifiSetupSheet: some View {
+        SheetShell(
+            title: "Wi-Fi 预设",
+            subtitle: "CarPlay 会话必填 · 输入后自动保存",
+            onClose: { showWifiSetup = false }
+        ) {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 12) {
+                    wifiSetupCard
+                }
+                .padding(.horizontal, Theme.page)
+                .padding(.top, 4)
+                .padding(.bottom, 28)
+            }
+            .background(Theme.groupedBackground)
+        }
+        .sheetChrome()
+    }
+
     // MARK: - Wi-Fi 预设卡片（内联，输入后防抖自动保存）
 
     private var wifiSetupCard: some View {
@@ -374,7 +401,7 @@ struct MirrorView: View {
                         .foregroundStyle(Theme.brand)
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Wi-Fi 预设（StartSession 必填）")
+                        Text("Wi-Fi 预设")
                             .font(Theme.headline)
                             .foregroundStyle(Theme.label)
                         Text(store.currentSSID.map { "已检测：\($0)" }
@@ -727,7 +754,7 @@ struct MirrorView: View {
         if !ssid.isEmpty {
             return "将使用 Wi-Fi「\(ssid)」发起会话。先出本机画面，需要投仪表时在下方「输出设置」开启。"
         }
-        return "请先连上 Wi-Fi/仪表热点，并在上方填写 Wi-Fi 名称与密码，否则 iPhone 无法回连控制端口。"
+        return "请先连上 Wi-Fi/仪表热点，并点右上角「Wi-Fi 预设」填写名称与密码，否则 iPhone 无法回连控制端口。"
     }
 
     /// 启动阶段计时：5 秒还没出画面才显示提示；出画/停止后清除
@@ -839,11 +866,25 @@ struct MirrorView: View {
                 .transition(.opacity)
             }
         }
+        .onAppear { setFullscreenLandscape(true) }
+        .onDisappear { setFullscreenLandscape(false) }
         .onAppear { reviveFullscreenExit() }
         .onDisappear {
             exitFadeTask?.cancel()
             exitFadeTask = nil
             exitButtonVisible = true
+        }
+    }
+
+    /// 全屏自动横屏：门控放行横屏 + 请求几何旋转；退出时回到竖屏
+    private func setFullscreenLandscape(_ landscape: Bool) {
+        AppDelegate.orientationMask = landscape ? .landscape : .portrait
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+        Task {
+            try? await scene.requestGeometryUpdate(.iOS(
+                interfaceOrientations: landscape ? .landscapeRight : .portrait
+            ))
         }
     }
 

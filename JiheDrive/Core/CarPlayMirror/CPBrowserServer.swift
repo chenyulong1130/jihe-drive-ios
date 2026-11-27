@@ -252,6 +252,13 @@ final class CPBrowserServer {
 
     // MARK: - 观看者
 
+    /// 是否有浏览器观看者（转码器按需解码的判定之一）
+    func hasActiveViewers() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return !viewers.isEmpty
+    }
+
     private func registerViewer(_ id: UUID, connection: NWConnection) {
         stateLock.lock()
         viewers[id] = Viewer(id: id, connection: connection)

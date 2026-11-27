@@ -310,17 +310,19 @@ struct DeviceScanSheet: View {
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(device.displayName)
+                // 分类名在前（保护板/石栏/充电器/点睛仪表/速牛灯具），广播名收进下面当介绍
+                Text(device.kind.scanTitle)
                     .font(Theme.headline)
                     .foregroundStyle(Theme.label)
                 HStack(spacing: 6) {
-                    Text(device.kind.shortTitle)
+                    Text(device.displayName)
                     if isConnecting {
                         Text("· 连接中…")
                     }
                 }
                 .font(Theme.caption)
                 .foregroundStyle(isConnecting ? Theme.brand : Theme.secondary)
+                .lineLimit(1)
             }
 
             Spacer(minLength: 4)

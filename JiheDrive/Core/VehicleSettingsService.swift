@@ -16,6 +16,8 @@ enum VehicleSettingKind {
 
 enum VehicleSettingEndpoint {
     case property
+    /// 与 AppModel.openCushion 一致的通路（cmd 28 坐垫实测可用）
+    case propertyTwo
     case soundSize
     case lowPower
     case motoPlay
@@ -155,7 +157,8 @@ enum VehicleSettingsService {
                 desc: "座桶弹开后 5 秒内可打开",
                 cmd: "28",
                 kind: .action,
-                readKeys: []
+                readKeys: [],
+                endpoint: .propertyTwo
             )
         ]),
         VehicleSettingGroup(title: "快捷键", items: [
@@ -201,7 +204,7 @@ enum VehicleSettingsService {
             VehicleSettingItem(
                 key: "automaticShutdownTimeout",
                 title: "超时关机时间",
-                desc: "触发自动关机的等待时长",
+                desc: "触发自动关机的等待时长（分钟）",
                 cmd: "108",
                 kind: .select([
                     VehicleSettingOption(value: "5", label: "5 分钟"),
@@ -223,7 +226,7 @@ enum VehicleSettingsService {
             VehicleSettingItem(
                 key: "leaveOffTime",
                 title: "离车关机时长",
-                desc: "离开后等待多久关机",
+                desc: "离开后等待多久关机（秒）",
                 cmd: "33",
                 kind: .select([
                     VehicleSettingOption(value: "3", label: "3 秒"),
@@ -274,7 +277,7 @@ enum VehicleSettingsService {
             VehicleSettingItem(
                 key: "comeHomeWithYouTime",
                 title: "延时关灯",
-                desc: "大灯延时关闭时间",
+                desc: "大灯延时关闭时间（秒）",
                 cmd: "58",
                 kind: .select([
                     VehicleSettingOption(value: "3", label: "3 秒"),
@@ -399,6 +402,17 @@ enum VehicleSettingsService {
                 "/v1.0/app/cfmotoserverapp/vehicleSet/motoPlay/one",
                 body: ["vinNo": vin, "motoPlay": value == "1" ? 1 : 0]
             )
+        case .propertyTwo:
+            // 与车辆页坐垫按钮完全一致（cmd 28 实测走 propertyTwo）
+            response = try await ZeehoClient.shared.put(
+                "/v1.0/app/cfmotoserverapp/vehicleSet/propertyTwo/one",
+                body: [
+                    "commond": item.cmd,
+                    "commondParam": value,
+                    "vcu": vin,
+                    "version": item.version
+                ]
+            )
         case .property:
             response = try await ZeehoClient.shared.put(
                 "/v1.0/app/cfmotoserverapp/vehicleSet/propertyOne/one",
@@ -430,15 +444,20 @@ enum VehicleSettingsService {
         return ""
     }
 
-    private static func rawValue(in raw: [String: Any], path: String) -> Any? {
+    fileprivate static func rawValue(in raw: [String: Any], path: String) -> Any? {
+        // 顶层精确命中优先（快路径，且避免同名嵌套键误伤）
         if path.contains(".") {
             let parts = path.split(separator: ".")
-            guard let first = parts.first, let sub = raw[String(first)] as? [String: Any] else {
-                return nil
+            if let first = parts.first, let sub = raw[String(first)] as? [String: Any] {
+                let rest = parts.dropFirst().joined(separator: ".")
+                if let direct = sub[rest] { return direct }
             }
-            return sub[parts.dropFirst().joined(separator: ".")]
+        } else if let direct = raw[path] {
+            return direct
         }
-        return raw[path]
+        // 兜底：vehicleSetInfo 的载荷结构可能有包层（data.property 之类），
+        // 顶层找不到就 BFS 递归搜同名键（复用电池解析的 JSONDig）
+        return JSONDig.first(raw, keys: [path])
     }
 
     private static func normalize(_ value: Any) -> String {
@@ -482,6 +501,16 @@ final class VehicleSettingsStore: ObservableObject {
         VehicleSettingsService.currentValue(in: raw, for: item)
     }
 
+    /// 排查用：vehicleSetInfo 原始载荷的格式化文本
+    var rawJSON: String {
+        guard !raw.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "(空)"
+        }
+        return text
+    }
+
     @discardableResult
     func toggle(item: VehicleSettingItem) async -> Bool {
         let current = value(for: item)
@@ -506,7 +535,7 @@ final class VehicleSettingsStore: ObservableObject {
         busyKey = item.key
         error = nil
         let previous = raw
-        applyOptimistic(key: item.readKeys.first ?? item.key, value: value)
+        applyOptimistic(item: item, value: value)
 
         do {
             try await VehicleSettingsService.write(vin: vin, item: item, value: value)
@@ -520,18 +549,35 @@ final class VehicleSettingsStore: ObservableObject {
         }
     }
 
-    private func applyOptimistic(key: String, value: String) {
-        if key.contains(".") {
-            let parts = key.split(separator: ".").map(String.init)
+    private func applyOptimistic(item: VehicleSettingItem, value: String) {
+        // 别名键全部同步：vehicleSetInfo 里同一设置可能落在任意一个别名键上
+        // （如 cruiseControlFunction / cruiseMode），只写第一个会造成
+        // 「界面切了、服务器刷新后弹回去」的显示不一致
+        let keys = item.readKeys.isEmpty ? [item.key] : item.readKeys
+        var touched = false
+        for key in keys {
+            if VehicleSettingsService.rawValue(in: raw, path: key) != nil {
+                setRawValue(path: key, value: value)
+                touched = true
+            }
+        }
+        if !touched, let first = keys.first {
+            setRawValue(path: first, value: value)
+        }
+    }
+
+    private func setRawValue(path: String, value: String) {
+        if path.contains(".") {
+            let parts = path.split(separator: ".").map(String.init)
             guard parts.count >= 2 else {
-                raw[key] = value
+                raw[path] = value
                 return
             }
             var nested = raw[parts[0]] as? [String: Any] ?? [:]
-            nested[parts[1]] = value
+            nested[parts.dropFirst().joined(separator: ".")] = value
             raw[parts[0]] = nested
         } else {
-            raw[key] = value
+            raw[path] = value
         }
     }
 }

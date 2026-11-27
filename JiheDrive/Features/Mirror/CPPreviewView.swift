@@ -36,9 +36,10 @@ final class CPVideoFrameHub {
         let current = Array(sinks.values)
         lock.unlock()
         guard !current.isEmpty else { return }
-        DispatchQueue.main.async {
-            for sink in current { sink(event) }
-        }
+        // 接收线程直接分发：每个 sink 各自跳自己的解码队列。
+        // 不再绕主线程——帧事件（25~30fps）不该碰主线程，全屏+卡片
+        // 同时订阅时主线程被轰炸正是「一点全屏就卡住」的根因
+        for sink in current { sink(event) }
     }
 }
 
@@ -47,10 +48,13 @@ final class CPVideoFrameHub {
 struct CPPreviewView: View {
     @ObservedObject var controller: CPMirrorController
     var fullscreen: Bool = false
+    /// true 时取消订阅（全屏呈现期间卡片预览停喂数据，同一帧不再双路解码）
+    var paused: Bool = false
 
     var body: some View {
         PreviewUIViewRepresentable(
             hub: controller.frameHub,
+            paused: paused,
             onTouches: { controller.touches($0) },
             onKeyframeNeeded: { controller.requestKeyFrame() })
             .clipped()
@@ -59,6 +63,7 @@ struct CPPreviewView: View {
 
 struct PreviewUIViewRepresentable: UIViewRepresentable {
     let hub: CPVideoFrameHub
+    var paused: Bool = false
     let onTouches: ([(id: Int, x: Double, y: Double, down: Bool)]) -> Void
     let onKeyframeNeeded: () -> Void
 
@@ -67,19 +72,11 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
         context.coordinator.hub = hub
-        // 解析/建缓冲移出主线程：AnnexB 解析 + CMBlockBuffer 拷贝每帧都要做，
-        // 全在主线程跑会让滑动/动画发涩；层操作统一走专用串行队列
-        context.coordinator.token = hub.subscribe { [weak view] event in
-            guard let view else { return }
-            context.coordinator.decodeQueue.async {
-                switch event {
-                case .frame(let data, let codec):
-                    do { try view.enqueue(accessUnit: data, codec: codec) }
-                    catch { view.onDecodeError?(error.localizedDescription) }
-                case .reset:
-                    view.reset()
-                }
-            }
+        context.coordinator.paused = paused
+        if !paused {
+            // 解析/建缓冲移出主线程：AnnexB 解析 + CMBlockBuffer 拷贝每帧都要做，
+            // 全在主线程跑会让滑动/动画发涩；层操作统一走专用串行队列
+            context.coordinator.subscribe(to: hub, view: view)
         }
         return view
     }
@@ -87,11 +84,21 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
     func updateUIView(_ view: CPDisplaySurface, context: Context) {
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
+        if paused != context.coordinator.paused {
+            context.coordinator.paused = paused
+            // reset 一律排进解码队列：状态/层只在该队列访问，主线程不动
+            view.decodeQueue.async { view.reset() }
+            if paused {
+                // 全屏期间卡片停喂数据：防双路解码，也防后台攒帧
+                context.coordinator.unsubscribe()
+            } else {
+                context.coordinator.subscribe(to: hub, view: view)
+            }
+        }
     }
 
     static func dismantleUIView(_ view: CPDisplaySurface, coordinator: Coordinator) {
-        coordinator.hub?.unsubscribe(coordinator.token)
-        coordinator.token = nil
+        coordinator.unsubscribe()
         coordinator.hub = nil
     }
 
@@ -100,8 +107,30 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
     final class Coordinator {
         var hub: CPVideoFrameHub?
         var token: UUID?
+        var paused = false
         /// 帧解析/解码队列（与层交互全部在此队列，主线程只管触摸）
         let decodeQueue = DispatchQueue(label: "cp.preview.decode")
+
+        func subscribe(to hub: CPVideoFrameHub, view: CPDisplaySurface) {
+            guard token == nil else { return }
+            token = hub.subscribe { [weak view] event in
+                guard let view else { return }
+                view.decodeQueue.async {
+                    switch event {
+                    case .frame(let data, let codec):
+                        do { try view.enqueue(accessUnit: data, codec: codec) }
+                        catch { view.onDecodeError?(error.localizedDescription) }
+                    case .reset:
+                        view.reset()
+                    }
+                }
+            }
+        }
+
+        func unsubscribe() {
+            hub?.unsubscribe(token)
+            token = nil
+        }
     }
 }
 
@@ -373,6 +402,8 @@ final class CPDisplaySurface: UIView {
     /// 全量触控状态：移动按 60Hz 合并，按下/抬起立即上报，
     /// 避免 move 事件逐条 RTSP 命令洪泛拖慢车机 HID 处理
     private var contacts: [Int: TouchState] = [:]
+    /// 车端已知触点状态：只上报有变化的整帧，静止时不再 60Hz 重发
+    private var lastSent: [Int: TouchState] = [:]
     private var touchTimer: Timer?
 
     private func videoRect() -> CGRect {
@@ -422,12 +453,35 @@ final class CPDisplaySurface: UIView {
 
     private func flushContacts() {
         guard !contacts.isEmpty else { return }
+        // HID 是全量状态帧：任一触点变化就整帧上报；完全没变化时不再
+        // 60Hz 重发同一帧——洪泛会拖慢车机 HID，操作反而发涩
+        var changed = contacts.count != lastSent.count
+        if !changed {
+            for (key, state) in contacts {
+                guard let sent = lastSent[key],
+                      sent.down == state.down, sent.x == state.x, sent.y == state.y else {
+                    changed = true
+                    break
+                }
+            }
+        }
         let list = contacts.map { entry in
             (id: entry.key, x: entry.value.x, y: entry.value.y, down: entry.value.down)
         }
-        onTouches?(list)
         // 抬起的槽上报后移除；没有活动触点就停掉定时器
         contacts = contacts.filter { $0.value.down }
+        guard changed else {
+            lastSent = lastSent.filter { contacts[$0.key] != nil }
+            if contacts.isEmpty {
+                touchTimer?.invalidate()
+                touchTimer = nil
+            }
+            return
+        }
+        lastSent = Dictionary(uniqueKeysWithValues: list.map {
+            ($0.id, TouchState(x: $0.x, y: $0.y, down: $0.down))
+        })
+        onTouches?(list)
         if contacts.isEmpty {
             touchTimer?.invalidate()
             touchTimer = nil
@@ -450,6 +504,8 @@ final class CPDisplaySurface: UIView {
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         update(touches)
+        // 移动立即上报（带变化去重）：不等 16ms 定时器节拍，少半帧指针延迟
+        flushContacts()
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {

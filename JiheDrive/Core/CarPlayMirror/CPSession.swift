@@ -430,6 +430,8 @@ final class CPReceiver {
 
 final class CPMediaSession {
     private let queue: DispatchQueue
+    /// 视频解密/分帧专用队列：触控 HID 命令走会话队列，绝不等视频解密（操作丝滑的关键）
+    private let videoParseQueue = DispatchQueue(label: "cp.media.videoParse", qos: .userInitiated)
     private let secret: SymmetricKey
     private let peerAddress: String
     private var eventListener: CPMediaTCPListener?
@@ -490,20 +492,32 @@ final class CPMediaSession {
                     }
                     self.video = connection
                     self.log("视频 TCP 通道已连接")
-                    connection.onBytes = { [weak self] bytes in
+                    connection.onBytes = { [weak self, weak connection] bytes in
                         guard let self, let screen = self.screen else { return }
-                        self.videoBytes += bytes.count
-                        do {
-                            for unit in try screen.append(bytes) {
-                                self.videoPackets += 1
-                                if self.videoPackets <= 2 {
-                                    self.log("已解码 \(screen.codec.displayName) 访问单元 \(self.videoPackets)（\(unit.count) 字节）")
+                        // 解密/分帧挪出会话队列：视频帧大且密，排在它后面的
+                        // 触控 HID 命令会多等几毫秒——手指一动就发涩
+                        self.videoParseQueue.async {
+                            do {
+                                let units = try screen.append(bytes)
+                                let codec = screen.codec
+                                self.queue.async {
+                                    self.videoBytes += bytes.count
+                                    for unit in units {
+                                        self.videoPackets += 1
+                                        if self.videoPackets <= 2 {
+                                            self.log("已解码 \(codec.displayName) 访问单元 \(self.videoPackets)（\(unit.count) 字节）")
+                                        }
+                                        self.onVideo?(unit, codec)
+                                    }
                                 }
-                                self.onVideo?(unit, screen.codec)
+                            } catch {
+                                // 与原行为一致：视频数据被拒 → 停掉这条视频连接
+                                self.queue.async {
+                                    self.log("视频数据被拒绝：\(error)")
+                                    connection?.stop()
+                                    connection?.onClose?()
+                                }
                             }
-                        } catch {
-                            self.log("视频数据被拒绝：\(error)")
-                            throw error
                         }
                     }
                     connection.onClose = { [weak self] in

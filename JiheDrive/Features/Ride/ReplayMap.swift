@@ -234,8 +234,7 @@ struct ReplayMap: UIViewRepresentable {
             startLink()
             if !didZoomFollow {
                 didZoomFollow = true
-                // 比初始 setCamera 动画略长：动画没跑完就开始每帧硬设中心会打架抖动
-                lerpUntil = now + (cinematic ? 0.55 : 0.45)
+                lerpUntil = now + (cinematic ? 0.55 : 0.16)
                 let heading = cinematicEnabled ? displayHeading : 0
                 let camera = MKMapCamera(
                     lookingAtCenter: pose,
@@ -742,6 +741,7 @@ final class ReplayMapGLBView: WKWebView {
     private let schemeHandler: ModelSchemeHandler
     private var loadedFile: URL?
     private var lastYaw = Double.nan
+    private var lastYawSent = TimeInterval(0)
 
     static func make() -> ReplayMapGLBView {
         let handler = ModelSchemeHandler.shared
@@ -782,8 +782,11 @@ final class ReplayMapGLBView: WKWebView {
     }
 
     func setYaw(_ degrees: Double) {
-        guard abs(degrees - lastYaw) > 2 || lastYaw.isNaN else { return }
+        // WKWebView 桥是最贵的进程间调用：转向 >2° 才发，且限 20Hz
+        let now = CACurrentMediaTime()
+        guard abs(degrees - lastYaw) > 2 || lastYaw.isNaN, now - lastYawSent > 0.05 else { return }
         lastYaw = degrees
+        lastYawSent = now
         evaluateJavaScript("window.jhSetYaw && window.jhSetYaw(\(degrees))", completionHandler: nil)
     }
 

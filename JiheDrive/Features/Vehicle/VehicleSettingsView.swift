@@ -19,7 +19,7 @@ struct VehicleSettingsView: View {
                     VStack(spacing: 0) {
                         if !store.loading || !store.raw.isEmpty {
                         ForEach(VehicleSettingsService.groups) { group in
-                            SectionHeader(group.title)
+                            sectionHeader(group.title)
                             AppleCard(padding: 0) {
                                 VStack(spacing: 0) {
                                     ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
@@ -47,6 +47,20 @@ struct VehicleSettingsView: View {
                             .multilineTextAlignment(.center)
                             .padding(.top, 18)
                             .padding(.horizontal, 10)
+
+                        Button {
+                            UIPasteboard.general.string = store.rawJSON
+                            showToast("设置原始数据已复制，可发给开发者排查")
+                        } label: {
+                            Label("复制设置原始数据（排查用）", systemImage: "doc.on.doc")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.secondary)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+                        .padding(.top, 6)
                         }
                     }
                 }
@@ -78,6 +92,37 @@ struct VehicleSettingsView: View {
     }
 
     // MARK: - 行
+
+    /// 分组标题（带语义图标，比纯文字标题更有辨识度）
+    private func sectionHeader(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: sectionIcon(title))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.brand)
+            Text(title)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Theme.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 14)
+        .padding(.bottom, 8)
+    }
+
+    private func sectionIcon(_ title: String) -> String {
+        switch title {
+        case "骑行": return "speedometer"
+        case "解锁": return "lock.open.fill"
+        case "快捷键": return "hand.tap.fill"
+        case "安防": return "shield.lefthalf.filled"
+        case "感应": return "dot.radiowaves.left.and.right"
+        case "灯光": return "lightbulb.fill"
+        case "仪表": return "gauge.high"
+        case "音效": return "speaker.wave.2.fill"
+        case "电池": return "battery.75percent"
+        default: return "gearshape.fill"
+        }
+    }
 
     private func row(_ item: VehicleSettingItem) -> some View {
         HStack(alignment: .center, spacing: 12) {
@@ -125,6 +170,19 @@ struct VehicleSettingsView: View {
 
         case .select(let options):
             Menu {
+                // 服务器当前值不在选项表里时（如车型提供别的档位），把当前值补进菜单
+                let current = store.value(for: item)
+                let known = options.contains(where: { $0.value == current })
+                if !current.isEmpty, !known {
+                    Button {
+                        Task {
+                            let ok = await store.select(item: item, newValue: current)
+                            showToast(ok ? "\(item.title)：保持当前值" : (store.error ?? "设置失败"))
+                        }
+                    } label: {
+                        Label("当前值 \(current)", systemImage: "checkmark")
+                    }
+                }
                 ForEach(options) { option in
                     Button {
                         Task {
@@ -183,7 +241,8 @@ struct VehicleSettingsView: View {
 
     private func label(for item: VehicleSettingItem, options: [VehicleSettingOption]) -> String {
         let current = store.value(for: item)
-        return options.first(where: { $0.value == current })?.label ?? "未设置"
+        if current.isEmpty { return "未设置" }
+        return options.first(where: { $0.value == current })?.label ?? "当前值 \(current)"
     }
 
     private func showToast(_ text: String) {
