@@ -387,17 +387,17 @@ struct DianjingDetailView: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.label)
 
-                configSegmentedRow("电量显示", options: ["电量格", "容量", "电压"], selection: store.batteryDisplayMode) {
-                    Task { await store.setBatteryDisplay($0 + 1) }
+                configSegmentedRow("电量显示", options: ["电量格", "容量", "电压"], selection: store.batteryDisplayMode) { value in
+                    Task { await store.setBatteryDisplay(value + 1) }
                 }
-                configSegmentedRow("时间格式", options: ["24h", "12h"], selection: store.timeFormat) {
-                    Task { await store.setTimeFormat($0 + 1) }
+                configSegmentedRow("时间格式", options: ["24h", "12h"], selection: store.timeFormat) { value in
+                    Task { await store.setTimeFormat(value + 1) }
                 }
-                configSegmentedRow("背光", options: ["低", "中", "高"], selection: store.backlight) {
-                    Task { await store.setBacklight($0 + 1) }
+                configSegmentedRow("背光", options: ["低", "中", "高"], selection: store.backlight) { value in
+                    Task { await store.setBacklight(value + 1) }
                 }
-                configSegmentedRow("能耗单位", options: ["Wh/km", "Ah/km"], selection: store.energyUnit) {
-                    Task { await store.setEnergyUnit($0 + 1) }
+                configSegmentedRow("能耗单位", options: ["Wh/km", "Ah/km"], selection: store.energyUnit) { value in
+                    Task { await store.setEnergyUnit(value + 1) }
                 }
 
                 Divider().opacity(0.6)
