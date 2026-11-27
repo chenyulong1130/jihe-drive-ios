@@ -142,6 +142,8 @@ final class CPDisplaySurface: UIView {
     var onTouches: (([(id: Int, x: Double, y: Double, down: Bool)]) -> Void)?
     var onKeyframeNeeded: (() -> Void)?
     var onDecodeError: ((String) -> Void)?
+    /// 帧解析/解码队列（层与状态只在此队列访问，主线程只管触摸）
+    let decodeQueue = DispatchQueue(label: "cp.preview.decode")
 
     private var format: CMVideoFormatDescription?
     private var parameters: CPParameterSets?
@@ -408,11 +410,10 @@ final class CPDisplaySurface: UIView {
     private func lift(_ touches: Set<UITouch>) {
         for touch in touches {
             let key = touchKey(touch)
-            guard let state = contacts[key] else { continue }
+            guard contacts[key] != nil else { continue }
             if let normalized = normalizedPoint(touch) {
-                state.x = normalized.x
-                state.y = normalized.y
-                contacts[key] = state
+                contacts[key]?.x = normalized.x
+                contacts[key]?.y = normalized.y
             }
             contacts[key]?.down = false
         }
