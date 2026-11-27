@@ -402,11 +402,11 @@ struct DianjingDetailView: View {
 
                 Divider().opacity(0.6)
 
-                configToggleRow("磁控开关", isOn: store.magneticSwitch) {
-                    Task { await store.setSwitch(DianjingRegister.magneticSwitch, on: $0) }
+                configToggleRow("磁控开关", isOn: store.magneticSwitch) { value in
+                    Task { await store.setSwitch(DianjingRegister.magneticSwitch, on: value) }
                 }
-                configToggleRow("轮切声音", isOn: store.switchSound) {
-                    Task { await store.setSwitch(DianjingRegister.switchSound, on: $0) }
+                configToggleRow("轮切声音", isOn: store.switchSound) { value in
+                    Task { await store.setSwitch(DianjingRegister.switchSound, on: value) }
                 }
 
                 Divider().opacity(0.6)
