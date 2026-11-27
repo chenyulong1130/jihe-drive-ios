@@ -67,7 +67,7 @@ struct HeadlightDetailView: View {
             .padding(.bottom, 40)
         }
         .background(Theme.groupedBackground)
-        .navigationTitle("石栏大灯")
+        .navigationTitle("石栏")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {

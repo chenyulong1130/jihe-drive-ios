@@ -29,7 +29,7 @@ struct ChargerDetailView: View {
             .padding(.bottom, 48)
         }
         .background(Theme.groupedBackground)
-        .navigationTitle("充电机")
+        .navigationTitle("充电器")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -95,8 +95,7 @@ struct ChargerDetailView: View {
                 // 充电状态徽章（对齐官方顶部胶囊）
                 HStack {
                     Spacer()
-                    Label(charging ? "充电状态 · 充电中" : (connected ? "充电状态 · 待机" : "充电状态"),
-                          systemImage: charging ? "bolt.fill" : "powerplug.fill")
+                    Text(charging ? "充电状态 · 充电中" : (connected ? "充电状态 · 待机" : "充电状态"))
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
@@ -648,7 +647,7 @@ struct ChargerDetailView: View {
                 .padding(.vertical, 12)
             }
             .background(Theme.groupedBackground)
-            .navigationTitle("充电机设置")
+            .navigationTitle("充电器设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("完成") { showSettings = false } }

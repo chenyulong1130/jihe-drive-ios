@@ -18,25 +18,14 @@ enum DeviceKind: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .bms: return "保护板"
-        case .shilanLight: return "石栏大灯"
-        case .charger: return "充电机"
-        case .dianjingMeter: return "仪表"
-        case .lamp: return "灯具"
+        case .shilanLight: return "石栏"
+        case .charger: return "充电器"
+        case .dianjingMeter: return "点睛仪表"
+        case .lamp: return "速牛灯具"
         }
     }
 
     var shortTitle: String {
-        switch self {
-        case .bms: return "保护板"
-        case .shilanLight: return "石栏"
-        case .charger: return "充电机"
-        case .dianjingMeter: return "仪表"
-        case .lamp: return "灯具"
-        }
-    }
-
-    /// 扫描列表标题口径（用户约定）：保护板 / 石栏 / 充电器 / 点睛仪表 / 速牛灯具
-    var scanTitle: String {
         switch self {
         case .bms: return "保护板"
         case .shilanLight: return "石栏"

@@ -18,7 +18,7 @@ struct MirrorView: View {
     @State private var wifiSaveTask: Task<Void, Never>?
     @State private var wifiSaved = false
     @State private var showLogs = false
-    @State private var showWifiSetup = false
+    @State private var showSettings = false
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
     @State private var exitButtonVisible = true
@@ -35,7 +35,7 @@ struct MirrorView: View {
                         : "启动后画面在上方，直接触控操作"
                 ) {
                     HStack(spacing: 10) {
-                        circleIcon("wifi", label: "Wi-Fi 预设") { showWifiSetup = true }
+                        circleIcon("gearshape.fill", label: "CarPlay 设置") { showSettings = true }
                         circleIcon("doc.text.magnifyingglass", label: "运行日志") { showLogs = true }
                     }
                 }
@@ -44,8 +44,6 @@ struct MirrorView: View {
                 previewSection.staggerIn(1)
 
                 launchCard.staggerIn(2)
-
-                outputSettingsCard.staggerIn(3)
             }
             .padding(.horizontal, Theme.page)
             .padding(.top, 8)
@@ -71,7 +69,7 @@ struct MirrorView: View {
             }
         }
         .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
-        .sheet(isPresented: $showWifiSetup) { wifiSetupSheet }
+        .sheet(isPresented: $showSettings) { settingsSheet }
         .sheet(isPresented: $showLogs) { logsSheet }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
@@ -370,16 +368,17 @@ struct MirrorView: View {
         }
     }
 
-    /// Wi-Fi 预设弹窗：从主页面收进弹窗，页面只剩预览/启动/输出设置，不用上下滚
-    private var wifiSetupSheet: some View {
+    /// 设置弹窗：Wi-Fi 预设 + 输出设置两卡合一
+    private var settingsSheet: some View {
         SheetShell(
-            title: "Wi-Fi 预设",
-            subtitle: "CarPlay 会话必填 · 输入后自动保存",
-            onClose: { showWifiSetup = false }
+            title: "CarPlay 设置",
+            subtitle: "Wi-Fi 预设与输出",
+            onClose: { showSettings = false }
         ) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 12) {
                     wifiSetupCard
+                    outputSettingsCard
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.top, 4)
@@ -500,20 +499,30 @@ struct MirrorView: View {
                                      accent: phaseColor)
 
                     if let checkFailure {
-                        // 自检硬性失败：内联原因，改完条件直接再点启动
+                        // 自检硬性失败：红色软底行内联原因，改完条件直接再点启动
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "xmark.octagon.fill")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Theme.red)
                             Text(checkFailure)
                                 .font(Theme.footnote)
                                 .foregroundStyle(Theme.red)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        .padding(10)
+                        .background(Theme.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     } else {
-                        Text(connectionGuide)
-                            .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.brand)
+                            Text(connectionGuide)
+                                .font(Theme.footnote)
+                                .foregroundStyle(Theme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10)
+                        .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                 }
 
@@ -535,11 +544,14 @@ struct MirrorView: View {
                     Button {
                         controller.retryBootstrap()
                     } label: {
-                        Text("重试本机 CarPlay 引导")
-                            .font(Theme.footnote.weight(.semibold))
+                        Label("重试本机 CarPlay 引导", systemImage: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Theme.brand)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(Theme.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: Theme.buttonRadius, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
                 }
 
                 startButton

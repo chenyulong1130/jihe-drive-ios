@@ -197,9 +197,23 @@ struct DeviceScanSheet: View {
     /// 正在连接的设备：按钮转 spinner、其余行禁点，避免「点了没反应」的卡顿感
     @State private var connectingID: UUID?
 
+    /// 常见手机/穿戴/杂设备关键词：扫描列表不显示（大小写不敏感）
+    private static let junkKeywords: [String] = [
+        "iphone", "ipad", "macbook", "imac", "airpod", "android", "galaxy",
+        "xiaomi", "redmi", "honor", "huawei", "oppo", "vivo", "oneplus",
+        "realme", "pixel", "sm-g", "sm-a", "watch", "buds", "band",
+        "手环", "手机", "耳机", "平板", "电视", "音箱",
+    ]
+
     private var visibleDevices: [BLEDevice] {
-        guard let activeFilter else { return ble.discovered }
-        return ble.discovered.filter { $0.kind == activeFilter }
+        let base = ble.discovered.filter { device in
+            // 无名设备 + 手机/穿戴等杂设备全部隐藏
+            guard !device.name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+            let lower = device.name.lowercased()
+            return !Self.junkKeywords.contains { lower.contains($0) }
+        }
+        guard let activeFilter else { return base }
+        return base.filter { $0.kind == activeFilter }
     }
 
     var body: some View {
@@ -310,12 +324,12 @@ struct DeviceScanSheet: View {
                 .frame(width: 32)
 
             VStack(alignment: .leading, spacing: 3) {
-                // 分类名在前（保护板/石栏/充电器/点睛仪表/速牛灯具），广播名收进下面当介绍
-                Text(device.kind.scanTitle)
+                // 扫描行标题 = 广播名（不改用户的蓝牙名）；分类收进下面一行
+                Text(device.displayName)
                     .font(Theme.headline)
                     .foregroundStyle(Theme.label)
                 HStack(spacing: 6) {
-                    Text(device.displayName)
+                    Text(device.kind.title)
                     if isConnecting {
                         Text("· 连接中…")
                     }

@@ -147,9 +147,8 @@ struct JiheDriveWidgetEntryView: View {
                     progress
                         .frame(maxWidth: 128)
                     if snap.charging {
-                        Text("充电中")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color(hex: 0x94A3B8))
+                        // 充电时以两行折线（电流/功率）替代「充电中」文字
+                        electricalSparkRow
                     }
                     Spacer(minLength: 4)
                     controlBar
@@ -226,7 +225,7 @@ struct JiheDriveWidgetEntryView: View {
     // MARK: - Large
 
     private var large: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             headerRow(titleSize: 15)
 
             HStack(alignment: .firstTextBaseline) {
@@ -239,34 +238,39 @@ struct JiheDriveWidgetEntryView: View {
                 pointsInline
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+            Divider()
+
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text("\(snap.soc)")
-                            .font(.system(size: 32, weight: .heavy, design: .rounded))
+                            .font(.system(size: 40, weight: .heavy, design: .rounded))
                             .monospacedDigit()
                         Text("%")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Color(hex: 0x9AA4B2))
+                        Spacer(minLength: 6)
+                        if snap.charging {
+                            Text("充电中")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Color(hex: 0x166534))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color(hex: 0xDCFCE7)))
+                        }
                         Text("\(snap.rangeKm) km")
-                            .font(.system(size: 13))
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Color(hex: 0x6B7280))
+                            .monospacedDigit()
                     }
                     progress
                     electricalSparkRow
-                    if snap.charging {
-                        Text("充电中")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color(hex: 0x94A3B8))
-                    }
-                    controlBar
-                        .padding(.top, 8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 5) {
                     vehicleImage
-                        .frame(maxWidth: .infinity, maxHeight: 120)
+                        .frame(maxWidth: .infinity, maxHeight: 128)
                     if !snap.tireFrontText.isEmpty || !snap.tireRearText.isEmpty {
                         HStack(spacing: 0) {
                             Text(snap.tireFrontText.isEmpty ? "--" : snap.tireFrontText)
@@ -282,9 +286,13 @@ struct JiheDriveWidgetEntryView: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .frame(width: 168)
+                .frame(width: 172)
             }
             .frame(maxHeight: .infinity)
+
+            controlBar
+
+            Divider()
 
             HStack {
                 Text(snap.locked ? "已关锁" : "未关锁")
@@ -323,44 +331,23 @@ struct JiheDriveWidgetEntryView: View {
         return String(format: "%.1f", value)
     }
 
-    /// 右上角两行：社区/签到/时间，下面积分数据
+    /// 右上角：时间 + 积分数据（签到/社区字样已去掉）
     private var pointsCorner: some View {
         VStack(alignment: .trailing, spacing: 3) {
-            HStack(spacing: 5) {
-                pill(
-                    snap.communityDone ? "社区已做" : "社区未做",
-                    bg: snap.communityDone ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
-                    fg: snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C)
-                )
-                signPill
-                Text(timeText)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color(hex: 0x94A3B8))
-                    .monospacedDigit()
-            }
+            Text(timeText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color(hex: 0x94A3B8))
+                .monospacedDigit()
             HStack(spacing: 5) {
                 Text("积分 \(snap.pointsTotal > 0 ? "\(snap.pointsTotal)" : "--")")
                     .foregroundStyle(Color(hex: 0x0F172A))
                 Text("今日 +\(snap.displayTodayPoints)")
                     .foregroundStyle(Color(hex: 0x16A34A))
-                Text("连签 \(snap.continueDays)天")
-                    .foregroundStyle(Color(hex: 0x3B82F6))
             }
             .font(.system(size: 10, weight: .semibold))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
         }
-    }
-
-    private var signPill: some View {
-        Text(snap.signedToday ? "已签" : "未签")
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(snap.signedToday ? Color(hex: 0x166534) : Color(hex: 0xE11D48))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                Capsule().fill(snap.signedToday ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFE4E6))
-            )
     }
 
     private func durationLabel(_ minutes: Int) -> String {
@@ -372,28 +359,23 @@ struct JiheDriveWidgetEntryView: View {
         return "\(minutes) min"
     }
 
+    /// 头部：极核 + 车辆名 + 盲盒 + 时间（签到/社区字样已去掉）
     private func headerRow(titleSize: CGFloat, compact: Bool = false) -> some View {
         HStack(spacing: compact ? 4 : 5) {
             Text("极核")
                 .font(.system(size: titleSize, weight: .heavy))
                 .foregroundStyle(Color(hex: 0x0F172A))
-            Spacer(minLength: 0)
-            if !compact {
-                pill(
-                    snap.communityDone ? "社区已做" : "社区未做",
-                    bg: snap.communityDone ? Color(hex: 0xDCFCE7) : Color(hex: 0xFFEDD5),
-                    fg: snap.communityDone ? Color(hex: 0x166534) : Color(hex: 0xC2410C)
-                )
+            if !compact, !snap.name.isEmpty {
+                Text(snap.name)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(hex: 0x64748B))
+                    .lineLimit(1)
             }
+            Spacer(minLength: 0)
             pill(
                 lotteryPillText,
                 bg: Color(hex: 0xFEF3C7),
                 fg: Color(hex: 0xB45309)
-            )
-            pill(
-                snap.signedToday ? "已签" : "未签",
-                bg: snap.signedToday ? Color(hex: 0xDCFCE7) : Color(hex: 0xFEE2E2),
-                fg: snap.signedToday ? Color(hex: 0x166534) : Color(hex: 0x991B1B)
             )
             if !compact {
                 Text(timeText)
@@ -411,8 +393,6 @@ struct JiheDriveWidgetEntryView: View {
                 .foregroundStyle(Color(hex: 0x0F172A))
             Text(" · 今日积分 +\(snap.displayTodayPoints)")
                 .foregroundStyle(Color(hex: 0x10B981))
-            Text(" · 连签 \(snap.continueDays)天")
-                .foregroundStyle(Color(hex: 0x3B82F6))
         }
         .font(.system(size: 9, weight: .semibold))
         .lineLimit(1)
@@ -462,7 +442,7 @@ struct JiheDriveWidgetEntryView: View {
     /// 电量进度条下面的两段装饰折线（电流/功率），右边跟着实时数值。
     /// 没有历史采样数据，波形是固定形状的"假"曲线，只做视觉占位
     private var electricalSparkRow: some View {
-        HStack(spacing: 16) {
+        VStack(spacing: 5) {
             sparkCell(
                 label: "电流",
                 value: snap.chargeCurrentText.isEmpty ? "--" : snap.chargeCurrentText,
@@ -475,13 +455,12 @@ struct JiheDriveWidgetEntryView: View {
                 color: Color(hex: 0xF59E0B),
                 phase: 1.7
             )
-            Spacer(minLength: 0)
         }
         .padding(.top, 2)
     }
 
     private func sparkCell(label: String, value: String, color: Color, phase: Double) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Canvas { context, size in
                 var path = Path()
                 let steps = 28
@@ -504,7 +483,8 @@ struct JiheDriveWidgetEntryView: View {
                     style: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
                 )
             }
-            .frame(width: 44, height: 13)
+            .frame(maxWidth: .infinity)
+            .frame(height: 13)
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(label)
@@ -517,6 +497,7 @@ struct JiheDriveWidgetEntryView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
+            .frame(width: 52, alignment: .leading)
         }
     }
 
@@ -659,7 +640,7 @@ struct JiheDriveHomeWidget: Widget {
             JiheDriveWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("极核智行")
-        .description("今日骑行、电量、积分、签到与社区")
+        .description("今日骑行、电量与快捷控制")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()
     }

@@ -36,7 +36,7 @@ struct DianjingDetailView: View {
             .padding(.bottom, 48)
         }
         .background(Theme.groupedBackground)
-        .navigationTitle("仪表")
+        .navigationTitle("点睛仪表")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -872,7 +872,7 @@ struct DianjingDetailView: View {
                 .padding(.vertical, 12)
             }
             .background(Theme.groupedBackground)
-            .navigationTitle("仪表设置")
+            .navigationTitle("点睛仪表设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("完成") { showSettings = false } }

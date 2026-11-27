@@ -16,8 +16,7 @@ struct LampDetailView: View {
     @State private var speed: Double = 0.5
     @State private var hue: Double = 0
     @State private var saturation: Double = 1
-    @State private var mode: Int = 1
-    @State private var channel: LampChannel = .driving
+    @State private var appliedModeId: String?
     @State private var highWhite = false
     @State private var highYellow = false
     @State private var daytimeOn = false
@@ -87,7 +86,7 @@ struct LampDetailView: View {
             .padding(.bottom, 48)
         }
         .background(Theme.groupedBackground)
-        .navigationTitle("灯具")
+        .navigationTitle("速牛灯具")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -135,7 +134,7 @@ struct LampDetailView: View {
             HStack(spacing: 12) {
                 CircleIconBadge(icon: productIcon, color: Theme.brand, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(profileName(store.profile))
+                    Text(store.catalogProductName ?? profileName(store.profile))
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Theme.label)
                         .lineLimit(1)
@@ -227,6 +226,11 @@ struct LampDetailView: View {
                     .foregroundStyle(Theme.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                if let product = store.catalogProductName {
+                    Text("已按产品目录识别：\(product)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.green)
+                }
             }
         }
     }
@@ -813,158 +817,109 @@ struct LampDetailView: View {
         }
     }
 
-    // MARK: - 灯效模式（行车/开机/转向通道 + 渐变模式格）
+    // MARK: - 模式库（按产品目录，每产品独立数据，速调试同款离线库）
+
+    /// 分组列表：保持库内原序，组内模式原序
+    private var libraryGroups: [(id: String, title: String, modes: [LampLibraryMode])] {
+        var order: [String] = []
+        var buckets: [String: [LampLibraryMode]] = [:]
+        for mode in store.libraryModes {
+            if buckets[mode.groupName] == nil { order.append(mode.groupName) }
+            buckets[mode.groupName, default: []].append(mode)
+        }
+        return order.map { key in
+            let title = store.libraryModes.first { $0.groupName == key }?.groupTitle ?? key
+            return (key, title, buckets[key] ?? [])
+        }
+    }
 
     private var modeCard: some View {
-        let table = channel.modes
-        let ids = table.keys.sorted()
-        return AppleCard(padding: 14) {
+        AppleCard(padding: 14) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("灯效模式")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Theme.label)
+                    sectionHeader("模式库", icon: "square.grid.2x2.fill", color: Theme.brand)
                     Spacer()
-                    Text("\(ids.count) 个")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.brand)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Theme.surfaceAlt, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Theme.separator.opacity(0.6), lineWidth: 1))
-                }
-                Text("模式名与通道绑定：同一编号在行车/转向/开机下是不同灯效。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondary)
-
-                HStack(spacing: 8) {
-                    ForEach(LampChannel.allCases) { item in
-                        channelTab(item)
+                    if !store.libraryModes.isEmpty {
+                        Text("\(store.libraryModes.count) 个")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Theme.brand)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Theme.surfaceAlt, in: Capsule())
                     }
                 }
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
-                    ForEach(ids, id: \.self) { id in
-                        modeTile(id: id, name: table[id] ?? "模式 \(id)", selected: mode == id)
+                if let product = store.catalogProductName {
+                    Text("产品「\(product)」的专属模式，点按即下发。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondary)
+                }
+
+                if store.libraryModes.isEmpty {
+                    Text(store.catalogProductName == nil
+                         ? "未匹配到产品目录，暂无该产品的模式数据。"
+                         : "产品目录中暂未收录该产品的模式。")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                } else {
+                    ForEach(libraryGroups, id: \.id) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Text(group.title)
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Theme.label)
+                                Text("\(group.modes.count) 个")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Theme.tertiary)
+                            }
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                                ForEach(group.modes) { mode in
+                                    libraryModeTile(mode)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    private func channelTab(_ item: LampChannel) -> some View {
-        let selected = channel == item
+    /// 模式格：名称 + 编号，点按即下发（干净底色，选中主题色描边）
+    private func libraryModeTile(_ mode: LampLibraryMode) -> some View {
+        let selected = appliedModeId == mode.id
         return Button {
-            channel = item
-            // 切通道后当前编号可能不存在，回落到该表第一个
-            let ids = item.modes.keys.sorted()
-            mode = ids.contains(mode) ? mode : (ids.first ?? 1)
+            appliedModeId = mode.id
+            Task {
+                await store.applyLibraryMode(mode)
+                showToast("\(mode.name) 已下发")
+            }
         } label: {
-            Text(item.title)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(selected ? Theme.brand : Theme.label)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
-                .background(
-                    selected ? Theme.brand.opacity(0.12) : Theme.surfaceAlt,
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(selected ? Theme.brand.opacity(0.55) : Theme.separator.opacity(0.6), lineWidth: 1)
-                )
-        }
-        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
-    }
-
-    /// 模式格：按模式名里的颜色词上渐变背板（对齐设计稿 _ModeTile）
-    private func modeTile(id: Int, name: String, selected: Bool) -> some View {
-        let (from, to) = Self.modeColors(name)
-        let on: Color = {
-            let luminance = (Self.luminance(from) + Self.luminance(to)) / 2
-            return luminance > 0.52 ? Color(red: 0.05, green: 0.06, blue: 0.08) : .white
-        }()
-        return Button {
-            mode = id
-            Task { await store.setMode(id, channel: channel.rawValue) }
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                Text(name)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(on)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(mode.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? Theme.brand : Theme.label)
                     .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 3)
-                Text(String(format: "%03d", id))
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(on.opacity(0.68))
-                    .padding(3)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("编号 \(mode.no)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(selected ? Theme.brand : Theme.tertiary)
             }
-            .frame(height: 44)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                LinearGradient(colors: [from, to], startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                selected ? Theme.brand.opacity(0.10) : Theme.surfaceAlt,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(selected ? .white : .white.opacity(0.25), lineWidth: selected ? 2.4 : 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(selected ? Theme.brand.opacity(0.55) : Theme.separator.opacity(0.5), lineWidth: 1)
             )
-            .shadow(color: selected ? from.opacity(0.5) : .clear, radius: 10)
         }
-        .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
-    }
-
-    /// 模式名颜色词 → 代表色（主/副），双色渐变背板
-    private static let modeColorWords: [(String, Color)] = [
-        ("粉", Color(red: 1, green: 0.41, blue: 0.71)),
-        ("黄", Color(red: 1, green: 0.78, blue: 0.12)),
-        ("青", Color(red: 0.07, green: 0.79, blue: 0.81)),
-        ("蓝", Color(red: 0.18, green: 0.48, blue: 0.96)),
-        ("紫", Color(red: 0.55, green: 0.29, blue: 0.91)),
-        ("红", Color(red: 1, green: 0.23, blue: 0.19)),
-        ("绿", Color(red: 0.20, green: 0.78, blue: 0.35)),
-        ("橙", Color(red: 1, green: 0.58, blue: 0)),
-        ("白", Color(red: 0.91, green: 0.93, blue: 0.95)),
-        ("黑", Color(red: 0.23, green: 0.23, blue: 0.24)),
-    ]
-
-    private static func modeColors(_ name: String) -> (Color, Color) {
-        if name.contains("彩虹") {
-            return (Color(red: 1, green: 0.37, blue: 0.36), Color(red: 0.48, green: 0.36, blue: 1))
-        }
-        var hits: [(Int, Color)] = []
-        for (word, color) in modeColorWords {
-            if let range = name.range(of: word) {
-                hits.append((name.distance(from: name.startIndex, to: range.lowerBound), color))
-            }
-        }
-        if hits.isEmpty {
-            return (Color(red: 0.56, green: 0.59, blue: 0.65), Color(red: 0.76, green: 0.78, blue: 0.82))
-        }
-        hits.sort { $0.0 < $1.0 }
-        if hits.count == 1 {
-            let c = hits[0].1
-            return (c, darken(c, ratio: 0.3))
-        }
-        return (hits[0].1, hits[1].1)
-    }
-
-    /// 线性压暗（替代不存在的 Color.mix）
-    private static func darken(_ color: Color, ratio: Double) -> Color {
-        let ui = UIColor(color)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        let factor = CGFloat(1 - ratio)
-        return Color(red: Double(r) * factor, green: Double(g) * factor, blue: Double(b) * factor)
-    }
-
-    /// 相对亮度（Rec. 601），用于决定渐变背板上的文字用黑还是白
-    private static func luminance(_ color: Color) -> Double {
-        let ui = UIColor(color)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return Double(r) * 0.299 + Double(g) * 0.587 + Double(b) * 0.114
+        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
+        .disabled(!connected)
     }
 
     // MARK: - 底部命令状态条（对齐原版 command-status）

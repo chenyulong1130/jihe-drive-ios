@@ -28,7 +28,7 @@ struct DeviceTabView: View {
                 VStack(spacing: 12) {
                     LargeTitle(
                         "设备",
-                        subtitle: ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "保护板 · 大灯 · 灯具 · 充电机 · 仪表"
+                        subtitle: ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "保护板 · 石栏 · 充电器 · 点睛仪表 · 速牛灯具"
                     ) {
                         HStack(spacing: 8) {
                             circleButton(icon: "magnifyingglass", label: "扫描设备") {

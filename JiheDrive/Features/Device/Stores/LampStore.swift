@@ -19,6 +19,12 @@ final class LampStore: ObservableObject {
     @Published private(set) var angle: Int = 0
     @Published private(set) var lastError = ""
     @Published private(set) var logs: [String] = []
+    /// 产品目录识别出的产品名（如「FX大灯」「AE7恶魔眼」），未命中为 nil
+    @Published private(set) var catalogProductName: String?
+    /// 目录产品 ID（模式库按此取该产品的模式列表）
+    @Published private(set) var catalogProductId: Int?
+    /// 该产品的模式库列表（速调试同款离线库，每产品不同）
+    @Published private(set) var libraryModes: [LampLibraryMode] = []
     @Published var customCommandHex = ""
 
     private let state = LampState()
@@ -33,6 +39,21 @@ final class LampStore: ObservableObject {
     func attach(_ ble: DeviceBLEManager) {
         self.ble = ble
         transport = ble.connectedDevice?.lampTransport ?? LampTransport.detect(name: ble.connectedDevice?.name ?? "")
+        // 自动识别调试类型（速调试同款目录机制）：产品名含 AE7/M5/FX/角度 → 对应类型
+        if let name = ble.connectedDevice?.name {
+            let matched = LampCatalog.match(for: name)
+            catalogProductName = matched?.productName
+            catalogProductId = matched?.productId
+            libraryModes = LampModeLibrary.modes(for: matched?.productId)
+            if let auto = LampCatalog.profile(for: name), profile != auto {
+                profile = auto
+                appendLog("已按产品目录自动识别：\(matched?.productName ?? "") → \(profile.title)")
+            }
+        } else {
+            catalogProductName = nil
+            catalogProductId = nil
+            libraryModes = []
+        }
         state.select(profile)
         syncProfileToView()
         ble.registerDataHandler("lamp") { [weak self] data in
@@ -206,6 +227,16 @@ final class LampStore: ObservableObject {
         let payload = [UInt8(max(1, min(0x6A, mode)))]
         await send(parent: 2, command: LampProtocol.GenericCommand.mode,
                    payload: payload, genericMapped: true, label: "设置灯效模式", channel: channel)
+    }
+
+    /// 应用模式库中的一条模式（每产品独立数据）：模式号走通用命令，
+    /// 分组映射到通道 TLV（行车/开机/转向/急刹），其余分组不带通道
+    func applyLibraryMode(_ mode: LampLibraryMode) async {
+        guard let number = mode.number, number > 0, number <= 0x6A else {
+            lastError = "模式号 \(mode.no) 超出设备支持范围（1–106）"
+            return
+        }
+        await setMode(number, channel: mode.channel?.rawValue)
     }
 
     /// 调试面板：按当前通道组帧发送任意 HEX 载荷
