@@ -13,6 +13,21 @@ final class DianjingStore: ObservableObject {
     @Published private(set) var deviceID = ""
     @Published private(set) var versionMain = ""
     @Published private(set) var rssi: Int = 0
+    // MARK: 配置项（连接时补读，SET 后本地乐观更新）
+    /// 当前表盘样式（A01~A04/B01~B03/C01/D01/E01）
+    @Published private(set) var dialStyle = ""
+    /// 电量显示模式：1=电量格 2=容量 3=电压
+    @Published private(set) var batteryDisplayMode: Int = 1
+    /// 时间格式：1=24h 2=12h
+    @Published private(set) var timeFormat: Int = 1
+    /// 背光：1=低 2=中 3=高
+    @Published private(set) var backlight: Int = 2
+    /// 能耗单位：1=Wh/km 2=Ah/km
+    @Published private(set) var energyUnit: Int = 1
+    @Published private(set) var magneticSwitch = false
+    @Published private(set) var switchSound = false
+    /// 续航里程更新阈值（1~100）
+    @Published private(set) var socThreshold: Int = 0
     @Published private(set) var lastAck = ""
     @Published private(set) var isPolling = false
     @Published private(set) var logs: [String] = []
@@ -74,14 +89,22 @@ final class DianjingStore: ObservableObject {
         isPolling = false
     }
 
-    /// 连接后补读电池/设备信息（对齐小程序 synchroData 的 connected 阶段）
+    /// 连接后补读电池/设备信息/配置（对齐小程序 synchroData 的 connected 阶段）
     private func bootstrap() async {
         guard let ble, ble.isConnected else { return }
         let targets: [UInt8] = [
             DianjingRegister.batteryDirect,
             DianjingRegister.speedTestRecord,
             DianjingRegister.deviceID,
-            DianjingRegister.versionMain
+            DianjingRegister.versionMain,
+            DianjingRegister.dialStyle,
+            DianjingRegister.batteryDisplayMode,
+            DianjingRegister.timeFormat,
+            DianjingRegister.backlight,
+            DianjingRegister.energyUnit,
+            DianjingRegister.magneticSwitch,
+            DianjingRegister.switchSound,
+            DianjingRegister.socPercent
         ]
         for target in targets {
             do {
@@ -123,6 +146,22 @@ final class DianjingStore: ObservableObject {
                 deviceID = DianjingProtocol.ascii(frame.data)
             case DianjingRegister.versionMain:
                 versionMain = DianjingProtocol.ascii(frame.data)
+            case DianjingRegister.dialStyle:
+                dialStyle = DianjingProtocol.ascii(frame.data)
+            case DianjingRegister.batteryDisplayMode:
+                batteryDisplayMode = Int(frame.data.first ?? 1)
+            case DianjingRegister.timeFormat:
+                timeFormat = Int(frame.data.first ?? 1)
+            case DianjingRegister.backlight:
+                backlight = Int(frame.data.first ?? 2)
+            case DianjingRegister.energyUnit:
+                energyUnit = Int(frame.data.first ?? 1)
+            case DianjingRegister.magneticSwitch:
+                magneticSwitch = frame.data.first == 1
+            case DianjingRegister.switchSound:
+                switchSound = frame.data.first == 1
+            case DianjingRegister.socPercent:
+                socThreshold = Int(frame.data.first ?? 0)
             case DianjingRegister.rssi:
                 if let rssi = DianjingProtocol.parseRSSI(frame.data) { self.rssi = rssi.rssi }
             default:
@@ -147,6 +186,57 @@ final class DianjingStore: ObservableObject {
     /// 清空单次行驶信息：SET 寄存器 192 空 content
     func clearSingleTrip() async {
         await sendSet(DianjingRegister.clearSingleTrip, content: [])
+    }
+
+    // MARK: - 配置下发（对齐点睛小程序设置页）
+
+    /// 切表盘样式：寄存器 4 写 3 字节样式名 ASCII
+    func setDialStyle(_ id: String) async {
+        let bytes = Array(id.uppercased().utf8.prefix(3))
+        guard bytes.count == 3 else { return }
+        await sendSet(DianjingRegister.dialStyle, content: bytes)
+        dialStyle = id.uppercased()
+    }
+
+    /// 电量显示三选一：1=电量格 2=容量 3=电压
+    func setBatteryDisplay(_ mode: Int) async {
+        await sendSet(DianjingRegister.batteryDisplayMode, content: [UInt8(mode)])
+        batteryDisplayMode = mode
+    }
+
+    /// 时间格式：1=24h 2=12h
+    func setTimeFormat(_ value: Int) async {
+        await sendSet(DianjingRegister.timeFormat, content: [UInt8(value)])
+        timeFormat = value
+    }
+
+    /// 背光：1=低 2=中 3=高
+    func setBacklight(_ value: Int) async {
+        await sendSet(DianjingRegister.backlight, content: [UInt8(value)])
+        backlight = value
+    }
+
+    /// 能耗单位：1=Wh/km 2=Ah/km
+    func setEnergyUnit(_ value: Int) async {
+        await sendSet(DianjingRegister.energyUnit, content: [UInt8(value)])
+        energyUnit = value
+    }
+
+    /// 开关类寄存器（磁控/轮切声音）：1=开 2=关
+    func setSwitch(_ register: UInt8, on: Bool) async {
+        await sendSet(register, content: [on ? 1 : 2])
+        if register == DianjingRegister.magneticSwitch {
+            magneticSwitch = on
+        } else if register == DianjingRegister.switchSound {
+            switchSound = on
+        }
+    }
+
+    /// 续航里程更新阈值（1~100）
+    func setSocThreshold(_ value: Int) async {
+        let clamped = min(100, max(1, value))
+        await sendSet(DianjingRegister.socPercent, content: [UInt8(clamped)])
+        socThreshold = clamped
     }
 
     private func sendSet(_ target: UInt8, content: [UInt8]) async {

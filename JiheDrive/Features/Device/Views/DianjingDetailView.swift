@@ -24,6 +24,8 @@ struct DianjingDetailView: View {
                 headerRow
                 gaugeHeroCard
                 mileageCard
+                styleCard
+                configCard
                 speedTestCard
                 mileageControlCard
             }
@@ -281,6 +283,192 @@ struct DianjingDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - 表盘主题（对齐小程序 setting-style：五组样式，寄存器 4 写 3 字节 ASCII）
+
+    /// 样式分组与名称，真值来自点睛小程序 style.js + assets/meterStyle
+    private let styleGroups: [(name: String, styles: [(id: String, title: String)])] = [
+        ("混合", [("A01", "样式1"), ("A02", "样式2"), ("A03", "样式3"), ("A04", "样式4")]),
+        ("电池", [("B01", "单体电压"), ("B02", "完整信息"), ("B03", "实时健康")]),
+        ("里程", [("C01", "里程信息")]),
+        ("温度", [("D01", "温度信息")]),
+        ("胎压", [("E01", "胎压信息")]),
+    ]
+
+    @State private var styleGroupIndex = 0
+
+    private var styleCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("表盘主题")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Theme.label)
+                    Spacer()
+                    if !store.dialStyle.isEmpty {
+                        Text("当前 \(store.dialStyle)")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Theme.brand)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Theme.brand.opacity(0.1), in: Capsule())
+                    }
+                }
+
+                // 分组选择
+                HStack(spacing: 0) {
+                    ForEach(styleGroups.indices, id: \.self) { index in
+                        let selected = styleGroupIndex == index
+                        Button {
+                            styleGroupIndex = index
+                        } label: {
+                            Text(styleGroups[index].name)
+                                .font(.system(size: 12.5, weight: selected ? .bold : .semibold))
+                                .foregroundStyle(selected ? Theme.brand : Theme.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    selected ? Theme.brand.opacity(0.10) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+                    }
+                }
+                .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                // 该组样式格
+                let group = styleGroups[styleGroupIndex]
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
+                    ForEach(group.styles, id: \.id) { style in
+                        let selected = store.dialStyle == style.id
+                        Button {
+                            Task { await store.setDialStyle(style.id) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(style.id)
+                                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(selected ? Theme.brand : Theme.label)
+                                    Spacer()
+                                    if selected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Theme.brand)
+                                    }
+                                }
+                                Text(style.title)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .strokeBorder(selected ? Theme.brand.opacity(0.55) : Theme.separator.opacity(0.5), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                        .disabled(!connected)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 配置（对齐小程序 setting-basic/extra：picker 下发 = 下标+1，开关 1/2）
+
+    private var configCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("仪表配置")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.label)
+
+                configSegmentedRow("电量显示", options: ["电量格", "容量", "电压"], selection: store.batteryDisplayMode) {
+                    Task { await store.setBatteryDisplay($0 + 1) }
+                }
+                configSegmentedRow("时间格式", options: ["24h", "12h"], selection: store.timeFormat) {
+                    Task { await store.setTimeFormat($0 + 1) }
+                }
+                configSegmentedRow("背光", options: ["低", "中", "高"], selection: store.backlight) {
+                    Task { await store.setBacklight($0 + 1) }
+                }
+                configSegmentedRow("能耗单位", options: ["Wh/km", "Ah/km"], selection: store.energyUnit) {
+                    Task { await store.setEnergyUnit($0 + 1) }
+                }
+
+                Divider().opacity(0.6)
+
+                configToggleRow("磁控开关", isOn: store.magneticSwitch) {
+                    Task { await store.setSwitch(DianjingRegister.magneticSwitch, on: $0) }
+                }
+                configToggleRow("轮切声音", isOn: store.switchSound) {
+                    Task { await store.setSwitch(DianjingRegister.switchSound, on: $0) }
+                }
+
+                Divider().opacity(0.6)
+
+                HStack {
+                    Text("续航更新阈值")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                    Spacer()
+                    Stepper(
+                        "\(store.socThreshold > 0 ? "\(store.socThreshold)" : "--")",
+                        onIncrement: {
+                            Task { await store.setSocThreshold(store.socThreshold + 1) }
+                        },
+                        onDecrement: {
+                            Task { await store.setSocThreshold(store.socThreshold - 1) }
+                        }
+                    )
+                    .fixedSize()
+                }
+                Text("取值 1~100，续航低于该阈值时仪表提示。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+    }
+
+    private func configSegmentedRow(
+        _ title: String, options: [String], selection: Int,
+        onChange: @escaping (Int) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.label)
+            Picker(title, selection: Binding(
+                get: { max(0, selection - 1) },
+                set: { onChange($0) }
+            )) {
+                ForEach(options.indices, id: \.self) { index in
+                    Text(options[index]).tag(index)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!connected)
+        }
+    }
+
+    private func configToggleRow(_ title: String, isOn: Bool, onChange: @escaping (Bool) -> Void) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.label)
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { isOn },
+                set: { onChange($0) }
+            ))
+            .labelsHidden()
+            .tint(Theme.brand)
+            .disabled(!connected)
+        }
     }
 
     // MARK: - 零百测速

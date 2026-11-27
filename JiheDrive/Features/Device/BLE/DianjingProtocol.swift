@@ -19,13 +19,25 @@ enum DianjingCommand: UInt8 {
     case readFailed = 5
 }
 
-/// 寄存器 ID（profile.js RegisterId 全表的业务子集，暂接数据/测速/电池相关）
+/// 寄存器 ID（profile.js RegisterId 全表的业务子集）
 enum DianjingRegister {
     static let language: UInt8 = 0
+    /// 时间格式：1=24h 2=12h
+    static let timeFormat: UInt8 = 1
+    /// 背光：1=低 2=中 3=高
     static let backlight: UInt8 = 2
+    /// 表盘样式：SET 3 字节 ASCII（A01~A04/B01~B03/C01/D01/E01）
     static let dialStyle: UInt8 = 4
+    /// 电量显示三选一：1=电量格 2=容量 3=电压
     static let batteryDisplayMode: UInt8 = 6
+    /// 磁控开关：1=开 2=关
+    static let magneticSwitch: UInt8 = 8
+    /// 轮切声音：1=开 2=关
+    static let switchSound: UInt8 = 9
+    /// 续航里程更新阈值（1~100，小程序 basic 页输入框）
     static let socPercent: UInt8 = 10
+    /// 能耗单位：1=Wh/km 2=Ah/km
+    static let energyUnit: UInt8 = 11
     static let deviceID: UInt8 = 22
     static let versionMain: UInt8 = 29
     static let versionSub: UInt8 = 30
