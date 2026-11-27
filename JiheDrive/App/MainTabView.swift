@@ -80,6 +80,11 @@ struct MainTabView: View {
                 // 车辆页上半（3D 车模）不响应，边缘热区兜底
                 .simultaneousGesture(pageDrag(width: w, canStart: { start in
                     if start.x < 28 || start.x > w - 28 { return true }
+                    if tab == .mirror {
+                        // CarPlay 预览占满本页：横滑全部交给预览的触控转发，
+                        // 翻页只走左右边缘热区，否则滑预览就把主界面切页了
+                        return false
+                    }
                     if tab == .vehicle {
                         return start.y > geo.size.height * 0.56
                     }

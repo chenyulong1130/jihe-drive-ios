@@ -582,7 +582,8 @@ struct LampDetailView: View {
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 0).onChanged { value in
-                            temperatureValue = min(100, max(0, value.location.x / max(1, geo.size.width) * 100))
+                            let ratio = value.location.x / max(CGFloat(1), geo.size.width)
+                            temperatureValue = min(100, max(0, Double(ratio) * 100))
                         }
                     )
                 }
