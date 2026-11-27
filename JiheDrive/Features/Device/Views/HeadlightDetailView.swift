@@ -221,68 +221,83 @@ struct HeadlightDetailView: View {
     private var mainControlCard: some View {
         AppleCard(padding: 16) {
             VStack(alignment: .leading, spacing: 16) {
-                // 大数字摘要
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(scrubbing ? Int(scrubValue) : current)")
-                        .font(.system(size: 44, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Theme.label)
-                        .contentTransition(.numericText())
-                    Text("%")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Theme.secondary)
-                    Text(scrubbing ? "拖动预览" : "当前高度")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 4) {
-                        HStack(spacing: 5) {
-                            Rectangle()
-                                .fill(Theme.orange)
-                                .frame(width: 12, height: 2)
-                            Text("目标 \(target)%")
-                                .font(Theme.footnote)
-                                .foregroundStyle(Theme.orange)
-                        }
-                        Text("限位 \(store.params.minPercent)–\(store.params.maxPercent)%")
-                            .font(Theme.caption)
-                            .foregroundStyle(Theme.tertiary)
-                    }
-                }
-
-                // 主滑杆：拖动 3D 光束实时预览，松手一次性下发
-                VStack(alignment: .leading, spacing: 6) {
-                    Slider(
-                        value: Binding(
-                            get: { displayPercent },
-                            set: { newValue in
-                                scrubValue = newValue
-                                store.targetPercent = newValue
-                            }
-                        ),
-                        in: 0...100,
-                        step: 1,
-                        onEditingChanged: { editing in
-                            if editing {
-                                scrubbing = true
-                            } else {
-                                scrubbing = false
-                                store.moveTo(percent: scrubValue)
-                            }
-                        }
-                    )
-                    .tint(accent)
-                    .disabled(!store.paramsLoaded || store.busy)
-                    Text("拖动时 3D 灯光实时预览；调好后点「保存当前」存为记忆，列表页可一键直达")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.tertiary)
-                }
-
+                heightSummaryRow
+                sliderSection
                 Divider().opacity(0.6)
-
-                // 记忆位置：用户存的快捷高度，点按直达，长按删除
                 memorySection
             }
         }
+    }
+
+    /// 大数字摘要：当前/拖动预览 + 目标标线 + 限位
+    private var heightSummaryRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            bigPercentText
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 5) {
+                    Rectangle()
+                        .fill(Theme.orange)
+                        .frame(width: 12, height: 2)
+                    Text("目标 \(target)%")
+                        .font(Theme.footnote)
+                        .foregroundStyle(Theme.orange)
+                }
+                Text("限位 \(store.params.minPercent)–\(store.params.maxPercent)%")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var bigPercentText: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("\(scrubbing ? Int(scrubValue) : current)")
+                .font(.system(size: 44, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.label)
+                .contentTransition(.numericText())
+            Text("%")
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(Theme.secondary)
+            Text(scrubbing ? "拖动预览" : "当前高度")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+        }
+    }
+
+    /// 主滑杆：拖动 3D 光束实时预览，松手一次性下发
+    private var sliderSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sliderBinding
+            Text("拖动时 3D 灯光实时预览；调好后点「保存当前」存为记忆，列表页可一键直达")
+                .font(Theme.caption)
+                .foregroundStyle(Theme.tertiary)
+        }
+    }
+
+    private var sliderBinding: some View {
+        Slider(
+            value: Binding(
+                get: { displayPercent },
+                set: { newValue in
+                    scrubValue = newValue
+                    store.targetPercent = newValue
+                }
+            ),
+            in: 0...100,
+            step: 1,
+            onEditingChanged: { editing in
+                if editing {
+                    scrubbing = true
+                } else {
+                    scrubbing = false
+                    store.moveTo(percent: scrubValue)
+                }
+            }
+        )
+        .tint(accent)
+        .disabled(!store.paramsLoaded || store.busy)
     }
 
     /// 记忆位置区：替代固定快捷档位，内容来自用户保存（本地持久化）
