@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import Network
 
 /// 极核仪表 PXC 投屏会话（档案驱动，支持极核各尺寸仪表）。
 /// 手机监听 10922(控制)/10711(媒体)/10710(视频)，主动连仪表 10930 发起投屏请求；
@@ -257,7 +258,18 @@ final class ZeehoMirrorLink {
 
             // 主动向仪表发起投屏请求
             currentState = .announcing
-            let announcement = try awaitConnect(host: targetIP, port: Ports.standard.announcement, name: "仪表公告通道")
+            let announcement: ZeehoMirrorChannel
+            do {
+                announcement = try awaitConnect(host: targetIP, port: Ports.standard.announcement, name: "仪表公告通道")
+            } catch {
+                // 直连失败：仪表不一定是 .1，按 /24 自动发现（上次成功地址优先）后重试
+                guard let found = awaitAsync({ await Self.discoverDashboard(localIP: self.localIP, log: self.log) }),
+                      let address = found else {
+                    throw CPError.timeout("未在网段内发现仪表（10930）——请确认仪表已开启投屏/互联功能，或手动填写仪表 IP")
+                }
+                targetIP = address
+                announcement = try awaitConnect(host: address, port: Ports.standard.announcement, name: "仪表公告通道")
+            }
             defer { announcement.close() }
             let request = try ZeehoMirrorFrame.encodeControl(
                 command: 0x70000010,
@@ -293,6 +305,101 @@ final class ZeehoMirrorLink {
     }
 
     private var condition = NSCondition()
+
+    // MARK: - 仪表 IP 自动发现（/24 TCP 探测；思路对齐 CarWithin 的 TailingDiscovery：
+    // 单播 TCP 不依赖组播 entitlement；上次成功地址优先，其次网关/网段常规地址，最后全段）
+
+    static let discoveredAddressKey = "zeehoLastDiscoveredAddress"
+
+    /// 并发探测网段内监听 10930 的设备，命中即返回 IP（只做 TCP 连接探测，不发 PXC 帧）
+    static func discoverDashboard(localIP: String, log: @escaping (String) -> Void) async -> String? {
+        guard let parts = ipv4Parts(localIP) else { return nil }
+        let prefix = "\(parts.0).\(parts.1).\(parts.2)"
+        var candidates: [String] = []
+        if let previous = UserDefaults.standard.string(forKey: discoveredAddressKey) {
+            candidates.append(previous)
+        }
+        candidates.append("\(prefix).1")   // 仪表热点网关（最常见）
+        candidates.append("\(prefix).2")   // 部分固件占用 .2
+        for host in 1...254 {
+            candidates.append("\(prefix).\(host)")
+        }
+        var seen = Set<String>()
+        candidates = candidates.filter { seen.insert($0).inserted && $0 != localIP }
+
+        log("直连失败，开始自动发现仪表（/24 探测 10930，共 \(candidates.count) 个地址）…")
+        var batchStart = 0
+        while batchStart < candidates.count {
+            let batch = Array(candidates[batchStart..<min(batchStart + 16, candidates.count)])
+            batchStart += 16
+            let hit: String? = await withTaskGroup(of: String?.self) { group in
+                for address in batch {
+                    group.addTask { await probePort(address, port: Ports.standard.announcement) ? address : nil }
+                }
+                var found: String?
+                for await result in group {
+                    if let result {
+                        found = result
+                        group.cancelAll()
+                    }
+                }
+                return found
+            }
+            if let hit {
+                UserDefaults.standard.set(hit, forKey: discoveredAddressKey)
+                log("已在 \(hit) 发现仪表")
+                return hit
+            }
+        }
+        return nil
+    }
+
+    private static func ipv4Parts(_ address: String) -> (UInt8, UInt8, UInt8)? {
+        let parts = address.split(separator: ".").compactMap { UInt8($0) }
+        guard parts.count == 4 else { return nil }
+        return (parts[0], parts[1], parts[2])
+    }
+
+    /// 单次 TCP 连接探测（1.2s 超时；该地址 10930 有监听即命中）
+    static func probePort(_ host: String, port: UInt16, timeout: TimeInterval = 1.2) async -> Bool {
+        await withCheckedContinuation { continuation in
+            guard let portValue = NWEndpoint.Port(rawValue: port) else {
+                continuation.resume(returning: false)
+                return
+            }
+            let connection = NWConnection(host: NWEndpoint.Host(host), port: portValue, using: .tcp)
+            let queue = DispatchQueue(label: "jihedrive.probe")
+            var finished = false
+            let finish: (Bool) -> Void = { ok in
+                if !finished {
+                    finished = true
+                    connection.cancel()
+                    continuation.resume(returning: ok)
+                }
+            }
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready: finish(true)
+                case .failed, .cancelled: finish(false)
+                default: break
+                }
+            }
+            queue.asyncAfter(deadline: .now() + timeout) { finish(false) }
+            connection.start(queue: queue)
+        }
+    }
+
+    /// async 工作桥接到同步上下文（runSession 运行在串行 queue 上）
+    private func awaitAsync<T>(_ work: @escaping () async -> T) -> T? {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: T?
+        Task.detached {
+            result = await work()
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
+    }
 
     private func awaitConnect(host: String, port: UInt16, name: String) throws -> ZeehoMirrorChannel {
         log("正在连接\(name) \(host):\(port)…")

@@ -276,25 +276,17 @@ struct MirrorView: View {
                     .textInputAutocapitalization(.never)
                     .onChange(of: store.wifiPassword) { _, _ in scheduleWifiSave() }
 
-                Button {
-                    store.commitWiFi()
-                    store.joinDashboardHotspot(ssid: store.resolvedSSID,
-                                               password: store.wifiPassword)
-                } label: {
-                    Label("一键加入此 Wi-Fi", systemImage: "antenna.radiowaves.left.and.right")
-                        .font(Theme.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.brand)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Theme.brand.opacity(0.1)))
-                }
-                .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
-
-                if let status = store.hotspotStatus {
-                    Text(status)
+                // 只保存预设（CarPlay 会话用），不会替你去连接热点——
+                // 加入仪表热点请在系统设置完成
+                HStack(spacing: 8) {
+                    Image(systemName: wifiSaved ? "checkmark.circle.fill" : "square.and.arrow.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(wifiSaved ? Theme.green : Theme.secondary)
+                    Text(wifiSaved ? "已保存，启动 CarPlay 时自动使用"
+                                   : "填写后自动保存（仅保存，不会替你连接热点）")
                         .font(Theme.caption)
                         .foregroundStyle(Theme.secondary)
+                    Spacer()
                 }
             }
         }

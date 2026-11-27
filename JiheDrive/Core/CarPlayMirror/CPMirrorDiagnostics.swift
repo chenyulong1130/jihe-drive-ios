@@ -42,16 +42,21 @@ enum CPMirrorDiagnostics {
         }
     }
 
-    /// Wi-Fi：当前 SSID 是否可读。
+    /// Wi-Fi：真正决定投屏成败的是本机 IP（连上热点即可），SSID 读取在 iOS 13+ 需要
+    /// 定位权限，拿不到只影响显示，不再作为失败项。
     static func checkWiFi() async -> CheckResult {
-        await MainActor.run {
-            if let ssid = MirrorStore.currentSSIDSnapshot(), !ssid.isEmpty {
+        if let address = localIPv4() {
+            let ssid = MirrorStore.currentSSIDSnapshot()
+            if let ssid, !ssid.isEmpty {
                 return CheckResult(name: "Wi-Fi 连接", passed: true, detail: "已连接 \(ssid)", warning: false)
             }
-            return CheckResult(name: "Wi-Fi 连接", passed: false,
-                detail: "未检测到 Wi-Fi。加入仪表热点需要定位权限（iOS 要求）；可在系统设置 → 隐私 → 定位服务中允许极核智行。",
+            return CheckResult(name: "Wi-Fi 连接", passed: true,
+                detail: "已连接 Wi-Fi（本机 \(address)）。SSID 需定位权限才可自动读取，未读到时请手填名称。",
                 warning: false)
         }
+        return CheckResult(name: "Wi-Fi 连接", passed: false,
+            detail: "未连接 Wi-Fi：请先在系统设置加入仪表热点（网关即仪表地址），并在投屏设置里填写 Wi-Fi 名称。",
+            warning: false)
     }
 
     /// 本机 IP：en0 是否拿到 IPv4（CarPlay StartSession 与 PXC 回连都需要）。

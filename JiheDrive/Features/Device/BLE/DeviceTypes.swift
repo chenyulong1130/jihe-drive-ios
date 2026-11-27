@@ -185,34 +185,46 @@ enum DeviceAuth {
     }
 }
 
-/// 石栏大灯记忆位置：本地持久化（用户调好高度后选择保存），设备列表与详情页共用
+/// 石栏大灯记忆：用户调好高度后命名保存（本地持久化），列表与详情页共用
+struct HeadlightMemoryItem: Codable, Equatable, Identifiable {
+    var name: String
+    var percent: Int
+    var id: String { "\(name)-\(percent)" }
+}
+
 enum HeadlightMemory {
-    static let key = "device.headlight.memory.percents"
+    static let key = "device.headlight.memory.items"
 
-    static func load() -> [Int] {
-        UserDefaults.standard.array(forKey: key) as? [Int] ?? []
+    static func load() -> [HeadlightMemoryItem] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let items = try? JSONDecoder().decode([HeadlightMemoryItem].self, from: data) else { return [] }
+        return items
     }
 
-    static func save(_ list: [Int]) {
-        UserDefaults.standard.set(list, forKey: key)
-    }
-
-    /// 添加记忆（去重排序），返回最新列表
-    static func add(_ percent: Int) -> [Int] {
-        var list = load()
-        if !list.contains(percent) {
-            list.append(min(100, max(0, percent)))
-            list.sort()
+    static func save(_ items: [HeadlightMemoryItem]) {
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: key)
         }
-        save(list)
-        return list
     }
 
-    static func remove(_ percent: Int) -> [Int] {
-        var list = load()
-        list.removeAll { $0 == percent }
-        save(list)
-        return list
+    /// 添加/按名覆盖（同名更新高度），按高度排序
+    static func add(name: String, percent: Int) -> [HeadlightMemoryItem] {
+        var items = load()
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = clean.isEmpty ? "记忆 \(items.count + 1)" : clean
+        let clamped = min(100, max(0, percent))
+        items.removeAll { $0.name == finalName }
+        items.append(HeadlightMemoryItem(name: finalName, percent: clamped))
+        items.sort { $0.percent < $1.percent }
+        save(items)
+        return items
+    }
+
+    static func remove(_ item: HeadlightMemoryItem) -> [HeadlightMemoryItem] {
+        var items = load()
+        items.removeAll { $0 == item }
+        save(items)
+        return items
     }
 }
 

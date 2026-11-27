@@ -619,6 +619,9 @@ struct RideHomeView: View {
         guard let next = Calendar.current.date(byAdding: .month, value: delta, to: monthAnchor) else { return }
         if delta > 0, !canGoNextMonth { return }
         monthAnchor = next
+        // 切月立即清缓存标记并进入加载态，绕过 loadedKey 缓存，避免「点了没反应」
+        loadedKey = ""
+        loading = true
     }
 
     /// 上拉加载尾部：加载中转圈、没有更多给提示、否则放透明哨兵（出现即触发追加）

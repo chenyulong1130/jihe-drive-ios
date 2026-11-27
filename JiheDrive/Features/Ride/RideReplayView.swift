@@ -76,11 +76,13 @@ struct RideReplayView: View {
         ReplayClock.make(track)
     }
 
-    /// 回放墙钟时长：压缩真实行程，点与点之间的时间比例保持不变。
-    /// 放慢一倍：30 分钟行程约 75 秒回放完，短行程至少 40 秒，长行程封顶 100 秒
+    /// 回放墙钟时长：压缩真实行程（点与点之间的时间比例保持不变），
+    /// 同时按采样点数兜底——点多的长行程按每点约 0.15 秒计算，
+    /// 不再被 100 秒封顶压成快进；上限 10 分钟，可用倍速调节
     private var playbackSeconds: Double {
         let real = max(clock.duration, 1)
-        return min(100, max(40, real / 24))
+        let densityFloor = Double(max(track.points.count, 1)) * 0.15
+        return min(600, max(40, max(real / 24, densityFloor)))
     }
 
     private var currentSpeed: Double {

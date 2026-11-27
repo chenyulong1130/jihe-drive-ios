@@ -215,9 +215,9 @@ struct DeviceTabView: View {
                 })
             }
             return AnyView(HStack(spacing: 8) {
-                ForEach(Array(saved.prefix(4).enumerated()), id: \.offset) { index, percent in
-                    summaryTile(value: "\(percent)", unit: "%", label: "记忆 \(index + 1)", color: Theme.teal)
-                        .onTapGesture { triggerHeadlightMemory(percent) }
+                ForEach(saved.prefix(4)) { item in
+                    summaryTile(value: "\(item.percent)", unit: "%", label: item.name, color: Theme.teal)
+                        .onTapGesture { triggerHeadlightMemory(item.percent) }
                 }
             })
         }
