@@ -742,7 +742,7 @@ struct RideHomeView: View {
         // 最近一周改为「按天拉」：范围请求按天升序分页，第一页只会拿到最旧的一天，
         // 导致首屏只出现一周前的记录；按天逐日拉保证最新骑行首屏可见
         let recentStart = max(bounds.start, Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? bounds.start)
-        let recentStartKey = dotted.string(from: recentStart)
+        let recentStartKey = Self.dotted.string(from: recentStart)
         let recentDays = days.filter { $0.date >= recentStartKey && $0.mileage > 0 }
         if !recentDays.isEmpty {
             let recent = await Self.tracksForDays(vin: vehicle.vinNo, days: Array(recentDays))

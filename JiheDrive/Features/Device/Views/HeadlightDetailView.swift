@@ -24,6 +24,7 @@ struct HeadlightDetailView: View {
     @State private var showNameSheet = false
     @State private var namingPercent: Int = 0
     @State private var memoryName: String = ""
+    @State private var editingItem: HeadlightMemoryItem?
 
     private var current: Int { store.params.absolutePercent }
     private var target: Int { store.params.targetPercent }
@@ -313,23 +314,27 @@ struct HeadlightDetailView: View {
             Text("记忆位置")
                 .font(Theme.footnote)
                 .foregroundStyle(Theme.secondary)
+            Text("点按直达 · 长按管理")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.tertiary)
             Spacer()
-            saveCurrentButton
+            // 新增记忆：以当前滑杆角度保存（点图标才弹命名窗口）
+            Button {
+                editingItem = nil
+                namingPercent = Int(displayPercent.rounded())
+                memoryName = ""
+                showNameSheet = true
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 30, height: 30)
+                    .background(Theme.surfaceAlt, in: Circle())
+            }
+            .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+            .disabled(!store.paramsLoaded)
+            .accessibilityLabel("新增记忆")
         }
-    }
-
-    private var saveCurrentButton: some View {
-        Button {
-            namingPercent = Int(displayPercent.rounded())
-            memoryName = ""
-            showNameSheet = true
-        } label: {
-            Label("保存当前 \(Int(displayPercent.rounded()))%", systemImage: "plus.circle")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.brand)
-        }
-        .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
-        .disabled(!store.paramsLoaded)
     }
 
     @ViewBuilder
@@ -364,6 +369,14 @@ struct HeadlightDetailView: View {
         .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
         .disabled(!store.paramsLoaded || store.busy)
         .contextMenu {
+            Button {
+                editingItem = item
+                namingPercent = item.percent
+                memoryName = item.name
+                showNameSheet = true
+            } label: {
+                Label("编辑名称", systemImage: "pencil")
+            }
             Button(role: .destructive) {
                 memories = HeadlightMemory.remove(item)
             } label: {
@@ -395,21 +408,27 @@ struct HeadlightDetailView: View {
         )
     }
 
-    /// 记忆命名弹窗：输入名字（留空自动编号），保存后列表页可一键直达
+    /// 记忆命名弹窗：新增以当前角度保存；编辑模式只改名字
     private var nameMemorySheet: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 14) {
-                Text("将当前高度 \(namingPercent)% 保存为记忆")
+                Text(editingItem == nil
+                     ? "将当前高度 \(namingPercent)% 保存为记忆"
+                     : "编辑记忆「\(editingItem?.name ?? "")」")
                     .font(Theme.headline)
                     .foregroundStyle(Theme.label)
                 TextField("记忆名称，如：跑山 / 代驾 / 市区", text: $memoryName)
                     .textFieldStyle(.roundedBorder)
                 Button {
+                    if let editing = editingItem {
+                        _ = HeadlightMemory.remove(editing)
+                    }
                     memories = HeadlightMemory.add(name: memoryName, percent: namingPercent)
+                    editingItem = nil
                     showNameSheet = false
                     memorySavedFeedback()
                 } label: {
-                    Text("保存记忆")
+                    Text(editingItem == nil ? "保存记忆" : "保存修改")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -424,7 +443,7 @@ struct HeadlightDetailView: View {
             .navigationTitle("保存记忆")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("取消") { showNameSheet = false } }
+                ToolbarItem(placement: .topBarTrailing) { Button("取消") { showNameSheet = false; editingItem = nil } }
             }
         }
         .presentationDetents([.medium])
