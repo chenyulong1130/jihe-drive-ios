@@ -36,6 +36,12 @@ struct DeviceTabView: View {
                             circleButton(icon: "doc.text.magnifyingglass", label: "蓝牙日志") {
                                 showBLELogs = true
                             }
+                            if ble.isConnected {
+                                // 断开当前蓝牙设备：停止扫描/轮询由各 Store 的 deactivate 兜底
+                                circleButton(icon: "xmark.circle.fill", label: "断开连接", tint: Theme.red) {
+                                    ble.disconnect()
+                                }
+                            }
                         }
                     }
                     .staggerIn(0)
@@ -138,12 +144,12 @@ struct DeviceTabView: View {
         }
     }
 
-    /// 标题右侧圆形图标按钮（扫描 / 日志）
-    private func circleButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+    /// 标题右侧圆形图标按钮（扫描 / 日志 / 断开）
+    private func circleButton(icon: String, label: String, tint: Color = Theme.brand, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Theme.brand)
+                .foregroundStyle(tint)
                 .frame(width: 36, height: 36)
                 .background(Theme.surfaceAlt, in: Circle())
         }

@@ -164,7 +164,8 @@ enum LampProtocol {
         static let brightness: UInt8 = 0x81
         static let modeSpeed: UInt8 = 0x82
         static let modeA: UInt8 = 0x83
-        static let modeB: UInt8 = 0x85
+        /// 灯效模式选择（映射后 0x08，载荷 1 字节模式号）
+        static let mode: UInt8 = 0x85
     }
 
     /// 角度设置载荷：有符号角度 + 复位标志
@@ -259,6 +260,71 @@ final class LampFrameDecoder {
         if pos > 0 { buffer.removeFirst(min(pos, buffer.count)) }
         return frames
     }
+}
+
+// MARK: - 灯效模式表
+// 真值来源：调试工具 assets/mode-library-seed.json 的产品 154/400/430
+// （极核 AE4/5 前位置灯二代，广播前缀 NWC3154/400/430，与 KVNWC 同源）。
+// 模式名与通道绑定：同一编号在行车/转向/开机下是不同模式，不能混排。
+// 固件把模式号钳制在 1...0x6A(106)，只收录该范围。
+
+enum LampChannel: Int, CaseIterable, Identifiable {
+    /// 行车灯效（0x01 通道值 0）
+    case driving = 0
+    /// 开机灯效
+    case welcome = 1
+    /// 转向灯效
+    case turn = 2
+    /// 急刹（无独立表，沿用行车）
+    case brake = 3
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .driving: return "行车"
+        case .welcome: return "开机"
+        case .turn: return "转向"
+        case .brake: return "急刹"
+        }
+    }
+
+    var modes: [Int: String] {
+        switch self {
+        case .welcome: return Self.welcomeModes
+        case .turn: return Self.turnModes
+        default: return Self.drivingModes
+        }
+    }
+
+    /// 行车通道 70 项
+    static let drivingModes: [Int: String] = [
+        1: "彩虹渐变", 2: "粉色呼吸", 3: "黄色呼吸1", 4: "黄色呼吸2", 5: "黄色呼吸3",
+        6: "青色呼吸", 7: "蓝色呼吸1", 8: "蓝色呼吸2", 9: "蓝色呼吸3",
+        16: "紫色呼吸1", 17: "紫色呼吸2", 18: "紫色呼吸3", 19: "紫色呼吸4", 20: "彩虹呼吸",
+        21: "粉色流水", 22: "黄色流水1", 23: "黄色流水2", 24: "黄色流水3", 25: "青色流水",
+        32: "蓝色流水1", 33: "蓝色流水2", 34: "蓝色流水3", 35: "紫色流水1", 36: "紫色流水2",
+        37: "紫色流水3", 38: "紫色流水4", 39: "彩虹流水", 40: "粉黄律动", 41: "黄蓝律动1",
+        48: "黄蓝律动2", 49: "黄蓝律动3", 50: "青蓝律动", 51: "蓝紫律动1", 52: "蓝紫律动2",
+        53: "蓝紫律动3", 54: "紫粉律动1", 55: "紫粉律动2", 56: "紫黄律动1", 57: "紫黄律动2",
+        64: "彩虹律动", 65: "粉蓝追逐", 66: "黄蓝追逐1", 67: "黄蓝追逐2", 68: "黄紫追逐",
+        69: "青紫追逐1", 70: "青紫追逐2", 71: "青紫追逐3", 72: "蓝黄追逐1", 73: "蓝黄追逐2",
+        80: "紫黄追逐", 81: "紫青追逐1", 82: "紫青追逐2", 83: "彩虹追逐", 84: "粉色渐变",
+        85: "黄色渐变1", 86: "黄色渐变2", 87: "黄色渐变3", 88: "青色渐变", 89: "蓝色渐变1",
+        96: "蓝色渐变2", 97: "蓝色渐变3", 98: "紫色渐变1", 99: "紫色渐变2", 100: "紫色渐变3",
+        101: "紫色渐变4", 102: "彩虹渐变2", 103: "粉色拖影", 104: "黄色拖影1", 105: "黄色拖影2",
+        106: "黄色拖影3",
+    ]
+
+    /// 开机通道 5 项
+    static let welcomeModes: [Int: String] = [
+        1: "自适应1", 2: "流水1", 3: "流水2", 4: "自适应2", 5: "关灯",
+    ]
+
+    /// 转向通道 2 项
+    static let turnModes: [Int: String] = [
+        1: "规律爆闪", 2: "变速爆闪",
+    ]
 }
 
 // MARK: - 产品专用参数状态机（LampState.java 对齐）

@@ -80,71 +80,91 @@ struct DianjingDetailView: View {
         }
     }
 
-    // MARK: - Hero（SOC 环 + 电池规格 / 单次电耗）
+    // MARK: - Hero（大电池电量条 + 电压/容量/规格，区别于保护板的 SOC 环）
 
     private var heroCard: some View {
-        let soc = connected ? Double(rt?.soc ?? 0) : 0
-        let socColor: Color = soc > 20 ? Theme.green : Theme.orange
+        let soc = connected ? (rt?.soc ?? 0) : 0
+        let socColor: Color = soc > 50 ? Theme.green : (soc > 20 ? Theme.orange : Theme.red)
 
-        return AppleCard(padding: 0) {
+        return AppleCard(padding: 16) {
             VStack(spacing: 0) {
-                ZStack {
-                    Circle()
-                        .stroke(Theme.surfaceAlt, lineWidth: 12)
-                    Circle()
-                        .trim(from: 0, to: connected ? CGFloat(min(1, max(0, soc / 100))) : 0)
-                        .stroke(
-                            socColor,
-                            style: StrokeStyle(lineWidth: 12, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                        .animation(.easeInOut(duration: 0.45), value: soc)
-
-                    VStack(spacing: 6) {
-                        if connected {
-                            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                                Text("\(Int(soc))")
-                                    .font(.system(size: 46, weight: .bold, design: .rounded))
-                                    .foregroundStyle(Theme.label)
-                                Text("%")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundStyle(Theme.label)
+                HStack(spacing: 6) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Theme.separator, lineWidth: 2)
+                        // 电量填充（未连接时不显示误导性的 0）
+                        GeometryReader { geo in
+                            HStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(socColor.opacity(0.85))
+                                    .frame(width: connected ? max(14, geo.size.width * CGFloat(soc) / 100) : 0)
+                                    .animation(.easeInOut(duration: 0.45), value: soc)
+                                Spacer(minLength: 0)
                             }
-                        } else {
-                            Text("--")
-                                .font(.system(size: 44, weight: .bold, design: .rounded))
-                                .foregroundStyle(Theme.label)
+                            .padding(4)
                         }
-                        Text(connected ? "电量" : "未连接")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.secondary)
+                        HStack {
+                            Spacer()
+                            if connected {
+                                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                                    Text("\(soc)")
+                                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                                        .foregroundStyle(Theme.label)
+                                    Text("%")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundStyle(Theme.secondary)
+                                }
+                                .padding(.trailing, 14)
+                            } else {
+                                Text("--")
+                                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Theme.tertiary)
+                                    .padding(.trailing, 14)
+                            }
+                        }
                     }
+                    .frame(height: 58)
+                    // 电池正极凸头
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(Theme.separator)
+                        .frame(width: 7, height: 22)
                 }
-                .frame(width: 180, height: 180)
-                .padding(.top, 22)
-                .padding(.bottom, 22)
+                .frame(height: 58)
+                .padding(.top, 6)
+                .padding(.bottom, 6)
+
+                Text(connected ? "电池电量" : "未连接")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.secondary)
+                    .padding(.bottom, 14)
 
                 Divider().opacity(0.6)
 
                 HStack(spacing: 0) {
                     infoCell(
-                        "电池规格",
-                        connected && store.batterySeries > 0
-                            ? "\(store.batterySeries) 串"
-                            : "--",
-                        connected && store.batterySeries > 0 ? String(format: "满电 %.1fV", store.batteryFullVoltage) : nil
+                        "电压",
+                        connected ? String(format: "%.1f", rt?.voltage ?? 0) : "--",
+                        connected ? "V" : nil
                     )
                     Rectangle()
                         .fill(Theme.separator.opacity(0.5))
                         .frame(width: 1, height: 34)
                     infoCell(
-                        "单次电耗",
-                        connected ? String(format: "%.2f", rt?.singleEnergy ?? 0) : "--",
-                        connected ? "kWh" : nil
+                        "剩余容量",
+                        connected ? String(format: "%.1f", rt?.remainingCapacity ?? 0) : "--",
+                        connected ? "Ah" : nil
+                    )
+                    Rectangle()
+                        .fill(Theme.separator.opacity(0.5))
+                        .frame(width: 1, height: 34)
+                    infoCell(
+                        "电池规格",
+                        connected && store.batterySeries > 0 ? "\(store.batterySeries) 串" : "--",
+                        connected && store.batterySeries > 0 ? String(format: "满电 %.1fV", store.batteryFullVoltage) : nil
                     )
                 }
                 .padding(.vertical, 14)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 2)
             }
         }
     }

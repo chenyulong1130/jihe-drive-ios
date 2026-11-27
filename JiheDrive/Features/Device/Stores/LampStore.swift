@@ -62,7 +62,7 @@ final class LampStore: ObservableObject {
 
     // MARK: - 组帧下发
 
-    private func send(parent: UInt8, command: UInt8, payload: [UInt8], genericMapped: Bool = false, label: String) async {
+    private func send(parent: UInt8, command: UInt8, payload: [UInt8], genericMapped: Bool = false, label: String, channel: Int? = nil) async {
         guard let ble, ble.isConnected else { return }
         guard let transport else {
             lastError = "未识别灯具通道，请在扫描列表手动按灯具打开"
@@ -76,8 +76,14 @@ final class LampStore: ObservableObject {
         let frame: Data
         switch transport {
         case .uq:
+            // UQ：有通道时命令码置 01，载荷变 [通道, 事件命令, 数据长度, 数据…]
             let wire = genericMapped ? (LampProtocol.genericCommand(command, transport: transport) ?? command) : command
-            frame = LampProtocol.uqFrame(command: wire, payload: payload, serial: serial)
+            frame = LampProtocol.uqFrame(
+                command: wire,
+                payload: payload,
+                serial: serial,
+                channel: channel.map { [UInt8(max(0, min(255, $0)))] }
+            )
         case .compact:
             guard let wire = genericMapped ? LampProtocol.genericCommand(command, transport: transport) : command else {
                 lastError = "该设备尚未适配此功能"
@@ -85,8 +91,15 @@ final class LampStore: ObservableObject {
             }
             frame = LampProtocol.compactFrame(command: wire, payload: payload)
         default:
+            // 标准帧：通道以分区 TLV（command 01）附加在控制 TLV 之前
             let wire = genericMapped ? (LampProtocol.genericCommand(command, transport: transport) ?? command) : command
-            frame = LampProtocol.frame(parent: parent, command: wire, payload: payload, serial: serial)
+            frame = LampProtocol.frame(
+                parent: parent,
+                command: wire,
+                payload: payload,
+                serial: serial,
+                partition: channel.map { [UInt8(max(0, min(255, $0)))] }
+            )
         }
         if parent == 1 { pendingSerial = serial }
         commandBusy = true
@@ -156,6 +169,14 @@ final class LampStore: ObservableObject {
     func setGeneric(_ command: UInt8, value: Int) async {
         await send(parent: 2, command: command, payload: [UInt8(value)], genericMapped: true,
                    label: command == LampProtocol.GenericCommand.brightness ? "设置灯光亮度" : "设置模式速度")
+    }
+
+    /// 灯效模式选择（原命令 85 → 普通协议 08 / 紧凑 93）。
+    /// - Parameter channel: 行车 0 / 开机 1 / 转向 2 / 急刹 3，按分区帧下发
+    func setMode(_ mode: Int, channel: Int? = nil) async {
+        let payload = [UInt8(max(1, min(0x6A, mode)))]
+        await send(parent: 2, command: LampProtocol.GenericCommand.mode,
+                   payload: payload, genericMapped: true, label: "设置灯效模式", channel: channel)
     }
 
     /// 调试面板：按当前通道组帧发送任意 HEX 载荷
