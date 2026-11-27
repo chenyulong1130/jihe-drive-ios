@@ -97,7 +97,7 @@ struct RideReplayView: View {
     private static func realTimes(_ track: RideTrack) -> [Double]? {
         guard track.realTimestamps.count == track.points.count,
               track.realTimestamps.contains(where: { $0 > 1_000_000_000 }) else { return nil }
-        return track.realTimestamps.map(Double.init)
+        return track.realTimestamps.map { Double($0) }
     }
 
     /// 墙钟文本：与 ReplayClock.wallDate 同逻辑，但吃缓存数据，不再每帧重新 make

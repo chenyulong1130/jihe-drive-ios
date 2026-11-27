@@ -484,11 +484,17 @@ struct LampDetailView: View {
                 sectionHeader("远光灯", icon: "sun.max.fill", color: Theme.red)
                 switchRow("远光 · 白光", isOn: Binding(
                     get: { highWhite },
-                    set: { highWhite = $0; Task { await store.change(kind: "highWhite", value: $0 ? 1 : 0) } }
+                    set: { newValue in
+                        highWhite = newValue
+                        Task { await store.change(kind: "highWhite", value: newValue ? 1 : 0) }
+                    }
                 ), tint: Theme.red)
                 switchRow("远光 · 黄光", isOn: Binding(
                     get: { highYellow },
-                    set: { highYellow = $0; Task { await store.change(kind: "highYellow", value: $0 ? 1 : 0) } }
+                    set: { newValue in
+                        highYellow = newValue
+                        Task { await store.change(kind: "highYellow", value: newValue ? 1 : 0) }
+                    }
                 ), tint: Color(hex: 0xF59E0B))
             }
         }
@@ -569,7 +575,10 @@ struct LampDetailView: View {
                 sectionHeader("恶魔眼", icon: "eye.fill", color: Theme.brand)
                 switchRow("RGB 开关", isOn: Binding(
                     get: { rgbOn },
-                    set: { rgbOn = $0; Task { await store.change(kind: "rgbOn", value: $0 ? 1 : 0) } }
+                    set: { newValue in
+                        rgbOn = newValue
+                        Task { await store.change(kind: "rgbOn", value: newValue ? 1 : 0) }
+                    }
                 ), tint: Theme.brand)
 
                 HStack(spacing: 10) {
@@ -629,7 +638,10 @@ struct LampDetailView: View {
                 sectionHeader("日行开关", icon: "sun.max.fill", color: Theme.green)
                 switchRow("日行灯", isOn: Binding(
                     get: { daytimeOn },
-                    set: { daytimeOn = $0; Task { await store.change(kind: "daytime", value: $0 ? 1 : 0) } }
+                    set: { newValue in
+                        daytimeOn = newValue
+                        Task { await store.change(kind: "daytime", value: newValue ? 1 : 0) }
+                    }
                 ), tint: Theme.green)
             }
         }
