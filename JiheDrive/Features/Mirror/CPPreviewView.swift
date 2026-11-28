@@ -50,11 +50,14 @@ struct CPPreviewView: View {
     var fullscreen: Bool = false
     /// true 时取消订阅（全屏呈现期间卡片预览停喂数据，同一帧不再双路解码）
     var paused: Bool = false
+    /// 单击手势（UIKit 识别器实现，不经 SwiftUI 手势层——手势层会让触控下发变涩）
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         PreviewUIViewRepresentable(
             hub: controller.frameHub,
             paused: paused,
+            onTap: onTap,
             onTouches: { controller.touches($0) },
             onKeyframeNeeded: { controller.requestKeyFrame() })
             .clipped()
@@ -64,6 +67,7 @@ struct CPPreviewView: View {
 struct PreviewUIViewRepresentable: UIViewRepresentable {
     let hub: CPVideoFrameHub
     var paused: Bool = false
+    var onTap: (() -> Void)? = nil
     let onTouches: ([(id: Int, x: Double, y: Double, down: Bool)]) -> Void
     let onKeyframeNeeded: () -> Void
 
@@ -71,6 +75,7 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
         let view = CPDisplaySurface()
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
+        view.onTap = onTap
         context.coordinator.hub = hub
         context.coordinator.paused = paused
         if !paused {
@@ -84,6 +89,7 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
     func updateUIView(_ view: CPDisplaySurface, context: Context) {
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
+        view.onTap = onTap
         if paused != context.coordinator.paused {
             context.coordinator.paused = paused
             // reset 一律排进解码队列：状态/层只在该队列访问，主线程不动
@@ -171,6 +177,7 @@ final class CPDisplaySurface: UIView {
     var onTouches: (([(id: Int, x: Double, y: Double, down: Bool)]) -> Void)?
     var onKeyframeNeeded: (() -> Void)?
     var onDecodeError: ((String) -> Void)?
+    var onTap: (() -> Void)?
     /// 帧解析/解码队列（层与状态只在此队列访问，主线程只管触摸）
     let decodeQueue = DispatchQueue(label: "cp.preview.decode")
 
@@ -200,12 +207,22 @@ final class CPDisplaySurface: UIView {
         isMultipleTouchEnabled = true
         backgroundColor = .black
         displayLayer.videoGravity = .resizeAspect
+        // 单击走 UIKit 识别器（不经 SwiftUI 手势层，触控下发不延迟）；
+        // 不取消触摸：CarPlay 侧照常收到完整的按下/抬起
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        addGestureRecognizer(tap)
         NotificationCenter.default.addObserver(
             self, selector: #selector(decodeFailed(_:)),
             name: .AVSampleBufferDisplayLayerFailedToDecode, object: displayLayer)
         NotificationCenter.default.addObserver(
             self, selector: #selector(recoveryFlagChanged),
             name: .AVSampleBufferDisplayLayerRequiresFlushToResumeDecodingDidChange, object: displayLayer)
+    }
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        onTap?()
     }
 
     deinit {
@@ -405,6 +422,9 @@ final class CPDisplaySurface: UIView {
     /// 车端已知触点状态：只上报有变化的整帧，静止时不再 60Hz 重发
     private var lastSent: [Int: TouchState] = [:]
     private var touchTimer: Timer?
+    /// 上报限速 ≤60Hz：移动事件可能 120Hz 到达，洪泛会拖慢车机 HID
+    private var lastSendUptime: TimeInterval = 0
+    private var flushScheduled = false
 
     private func videoRect() -> CGRect {
         let boundsSize = bounds.size
@@ -453,8 +473,7 @@ final class CPDisplaySurface: UIView {
 
     private func flushContacts() {
         guard !contacts.isEmpty else { return }
-        // HID 是全量状态帧：任一触点变化就整帧上报；完全没变化时不再
-        // 60Hz 重发同一帧——洪泛会拖慢车机 HID，操作反而发涩
+        // HID 是全量状态帧：任一触点变化才上报（不能按槽去重，否则未变化槽会被判抬起）
         var changed = contacts.count != lastSent.count
         if !changed {
             for (key, state) in contacts {
@@ -465,26 +484,46 @@ final class CPDisplaySurface: UIView {
                 }
             }
         }
-        let list = contacts.map { entry in
-            (id: entry.key, x: entry.value.x, y: entry.value.y, down: entry.value.down)
-        }
-        // 抬起的槽上报后移除；没有活动触点就停掉定时器
-        contacts = contacts.filter { $0.value.down }
         guard changed else {
-            lastSent = lastSent.filter { contacts[$0.key] != nil }
+            contacts = contacts.filter { $0.value.down }
             if contacts.isEmpty {
                 touchTimer?.invalidate()
                 touchTimer = nil
             }
             return
         }
-        lastSent = Dictionary(uniqueKeysWithValues: list.map {
-            ($0.id, TouchState(x: $0.x, y: $0.y, down: $0.down))
-        })
+        // 上报限速 ≤60Hz：移动事件可能 120Hz 到达，洪泛会拖慢车机 HID；
+        // 限速窗口内到达的移动合并，到点后只发最新状态
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastSendUptime < 0.015 {
+            schedulePendingFlush()
+            return
+        }
+        lastSendUptime = now
+        let list = contacts.map { entry in
+            (id: entry.key, x: entry.value.x, y: entry.value.y, down: entry.value.down)
+        }
+        for (key, state) in contacts where state.down {
+            lastSent[key] = state
+        }
+        for key in lastSent.keys where contacts[key] == nil {
+            lastSent.removeValue(forKey: key)
+        }
         onTouches?(list)
+        // 抬起的槽上报后移除；没有活动触点就停掉定时器
+        contacts = contacts.filter { $0.value.down }
         if contacts.isEmpty {
             touchTimer?.invalidate()
             touchTimer = nil
+        }
+    }
+
+    private func schedulePendingFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+            self?.flushScheduled = false
+            self?.flushContacts()
         }
     }
 

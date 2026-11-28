@@ -71,6 +71,11 @@ struct MirrorView: View {
         .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
         .sheet(isPresented: $showSettings) { settingsSheet }
         .sheet(isPresented: $showLogs) { logsSheet }
+        .onChange(of: showFullscreen) { _, active in
+            // 翻转状态由父级驱动：全屏 cover 的 onDisappear 在部分退出路径不回调，
+            // 曾导致退全屏后方向卡死在横屏
+            setFullscreenLandscape(active)
+        }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
         }
@@ -86,16 +91,16 @@ struct MirrorView: View {
         if controller.hasVideo {
             ZStack(alignment: .topTrailing) {
                 // 全屏呈现期间卡片停喂数据：同一帧不再两路解码（点全屏卡住的根因之一）
-                CPPreviewView(controller: controller, paused: showFullscreen)
-                    .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture { showFullscreen = true }
+                CPPreviewView(controller: controller, paused: showFullscreen) {
+                    showFullscreen = true
+                }
+                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
 
                 HStack(spacing: 8) {
                     previewOverlayIcon("pip.enter", label: "画中画") {
@@ -281,6 +286,14 @@ struct MirrorView: View {
                 .padding(.bottom, 40)
             }
             .background(Theme.groupedBackground)
+        }
+        .sheetChrome()
+        .onAppear {
+            // 打开即补一次车辆数据，避免图标/文字因数据未加载而空白
+            if model.selectedVehicle == nil {
+                Task { await model.loadVehicles() }
+            }
+            refreshInfo()
         }
     }
 
@@ -855,11 +868,11 @@ struct MirrorView: View {
     private var fullscreenView: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            CPPreviewView(controller: controller, fullscreen: true)
-                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture { reviveFullscreenExit() }
+            CPPreviewView(controller: controller, fullscreen: true) {
+                reviveFullscreenExit()
+            }
+            .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if exitButtonVisible {
                 Button {
@@ -878,9 +891,10 @@ struct MirrorView: View {
                 .transition(.opacity)
             }
         }
-        .onAppear { setFullscreenLandscape(true) }
-        .onDisappear { setFullscreenLandscape(false) }
-        .onAppear { reviveFullscreenExit() }
+        .onAppear {
+            reviveFullscreenExit()
+            // 父级 onChange(showFullscreen) 统一驱动旋转，这里不再重复设置方向
+        }
         .onDisappear {
             exitFadeTask?.cancel()
             exitFadeTask = nil
@@ -888,15 +902,22 @@ struct MirrorView: View {
         }
     }
 
-    /// 全屏自动横屏：门控放行横屏 + 请求几何旋转；退出时回到竖屏
+    /// 全屏自动横屏：门控放行横屏 + 请求几何旋转；退出时回到竖屏。
+    /// 双保险：requestGeometryUpdate（iOS 16+）+ KVC 触发（兜底旧路径），
+    /// 全部在主线程异步执行，避免与转场动画竞态导致旋转请求被吞。
     private func setFullscreenLandscape(_ landscape: Bool) {
         AppDelegate.orientationMask = landscape ? .landscape : .portrait
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
-        Task {
-            try? await scene.requestGeometryUpdate(.iOS(
-                interfaceOrientations: landscape ? .landscapeRight : .portrait
-            ))
+        DispatchQueue.main.async {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+            if landscape {
+                try? scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeRight))
+                UIDevice.current.setValue(UIInterfaceOrientation.landscapeRight.rawValue, forKey: "orientation")
+            } else {
+                try? scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+                UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+            }
+            UIViewController.attemptRotationToDeviceOrientation()
         }
     }
 

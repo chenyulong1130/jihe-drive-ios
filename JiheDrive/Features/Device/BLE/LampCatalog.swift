@@ -56,16 +56,6 @@ enum LampCatalog {
     static func productName(for bleName: String) -> String? {
         match(for: bleName)?.productName
     }
-
-    /// 蓝牙广播名 → 调试类型（产品名大写后含 AE7/M5/FX/角度，判定顺序与安卓一致）
-    static func profile(for bleName: String) -> LampState.Profile? {
-        guard let name = match(for: bleName)?.productName.uppercased() else { return nil }
-        if name.contains("AE7") { return .ae7 }
-        if name.contains("M5") { return .m5 }
-        if name.contains("FX") { return .fx }
-        if name.contains("角度") { return .angle }
-        return nil
-    }
 }
 
 // MARK: - 每产品模式库（mode-library-seed.json，15848 个模式 / 272 个产品）

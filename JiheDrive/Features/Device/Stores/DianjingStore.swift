@@ -1,17 +1,14 @@
 import Foundation
 
 /// 点睛仪表数据源：对齐点睛小程序的轮询与读取节奏。
-/// 实时参数（寄存器 193）小程序 500ms 轮询一次；连接后补读电池直读（97）/
-/// 零百记录（129）/ 设备信息（22/29）。
+/// 连接后补读配置寄存器（表盘样式 4 / 电量显示 / 时间格式 / 背光 / 能耗单位 /
+/// 磁控 / 轮切声音 / 续航阈值），轮询保活并回读当前样式。
 @MainActor
 final class DianjingStore: ObservableObject {
-    @Published private(set) var realtime: DianjingDebugParams?
-    @Published private(set) var speedTest: DianjingSpeedTest?
     /// 电池直读：串数 + 满电电压 V
     @Published private(set) var batterySeries: Int = 0
     @Published private(set) var batteryFullVoltage: Double = 0
     @Published private(set) var deviceID = ""
-    @Published private(set) var versionMain = ""
     @Published private(set) var rssi: Int = 0
     // MARK: 配置项（连接时补读，SET 后本地乐观更新）
     /// 当前表盘样式（A01~A04/B01~B03/C01/D01/E01）
@@ -42,14 +39,9 @@ final class DianjingStore: ObservableObject {
             UserDefaults.standard.set(pollInterval, forKey: "device.dianjing.pollInterval")
         }
     }
-    @Published var customTargetHex = "C1"
-    @Published var customCodeHex = "00"
-    @Published var customDataHex = ""
-
     private let decoder = DianjingFrameDecoder()
     private weak var ble: DeviceBLEManager?
     private var pollTask: Task<Void, Never>?
-    private var realtimeTick = 0
     private var didBootstrap = false
 
     func attach(_ ble: DeviceBLEManager) {
@@ -89,17 +81,13 @@ final class DianjingStore: ObservableObject {
         isPolling = false
     }
 
-    /// 清空缓存数据（实时/测速/设备信息/日志），下次连接重新补读配置
+    /// 清空缓存数据（设备信息/日志），下次连接重新补读配置
     func clearCache() {
-        realtime = nil
-        speedTest = nil
         batterySeries = 0
         batteryFullVoltage = 0
         deviceID = ""
-        versionMain = ""
         lastAck = ""
         logs = []
-        realtimeTick = 0
         didBootstrap = false
     }
 
@@ -108,9 +96,7 @@ final class DianjingStore: ObservableObject {
         guard let ble, ble.isConnected else { return }
         let targets: [UInt8] = [
             DianjingRegister.batteryDirect,
-            DianjingRegister.speedTestRecord,
             DianjingRegister.deviceID,
-            DianjingRegister.versionMain,
             DianjingRegister.dialStyle,
             DianjingRegister.batteryDisplayMode,
             DianjingRegister.timeFormat,
@@ -130,10 +116,11 @@ final class DianjingStore: ObservableObject {
         }
     }
 
+    /// 轮询改为低频保活 + 周期回读当前表盘样式/配置
     private func pollOnce() async {
         guard let ble, ble.isConnected else { return }
         do {
-            try await ble.write(DianjingProtocol.readFrame(DianjingRegister.debugParams))
+            try await ble.write(DianjingProtocol.readFrame(DianjingRegister.dialStyle))
         } catch {
             appendLog("读取失败：\(error.localizedDescription)")
         }
@@ -142,15 +129,6 @@ final class DianjingStore: ObservableObject {
     private func feed(_ data: Data) {
         for frame in decoder.feed(data) {
             switch frame.target {
-            case DianjingRegister.debugParams:
-                if let params = DianjingProtocol.parseDebugParams(frame.data) {
-                    realtime = params
-                    realtimeTick += 1
-                }
-            case DianjingRegister.speedTestRecord:
-                if let record = DianjingProtocol.parseSpeedTestRecord(frame.data) {
-                    speedTest = record
-                }
             case DianjingRegister.batteryDirect:
                 if let battery = DianjingProtocol.parseBatteryDirect(frame.data) {
                     batterySeries = battery.series
@@ -158,8 +136,6 @@ final class DianjingStore: ObservableObject {
                 }
             case DianjingRegister.deviceID:
                 deviceID = DianjingProtocol.ascii(frame.data)
-            case DianjingRegister.versionMain:
-                versionMain = DianjingProtocol.ascii(frame.data)
             case DianjingRegister.dialStyle:
                 dialStyle = DianjingProtocol.ascii(frame.data)
             case DianjingRegister.batteryDisplayMode:
@@ -188,18 +164,6 @@ final class DianjingStore: ObservableObject {
                 }
             }
         }
-    }
-
-    // MARK: - 控制
-
-    /// 零百测速启停：SET 寄存器 128，1=开始 2=停止
-    func setSpeedTest(start: Bool) async {
-        await sendSet(DianjingRegister.speedTestControl, content: [start ? 1 : 2])
-    }
-
-    /// 清空单次行驶信息：SET 寄存器 192 空 content
-    func clearSingleTrip() async {
-        await sendSet(DianjingRegister.clearSingleTrip, content: [])
     }
 
     // MARK: - 配置下发（对齐点睛小程序设置页）
@@ -261,37 +225,6 @@ final class DianjingStore: ObservableObject {
         } catch {
             appendLog("写入失败：\(error.localizedDescription)")
         }
-    }
-
-    /// 调试面板自定义帧：任意 target/code/数据
-    func sendCustomCommand() async {
-        guard let ble, ble.isConnected else { return }
-        let data = Self.bytes(from: customDataHex)
-        guard let target = UInt8(customTargetHex.filter { !$0.isWhitespace }, radix: 16),
-              let code = UInt8(customCodeHex.filter { !$0.isWhitespace }, radix: 16) else {
-            appendLog("十六进制格式不正确")
-            return
-        }
-        do {
-            try await ble.write(DianjingProtocol.frame(target: target, code: DianjingCommand(rawValue: code) ?? .read, content: data))
-            appendLog("自定义帧 AB \(String(format: "%02X", target)) \(String(format: "%02X", code))")
-        } catch {
-            appendLog("发送失败：\(error.localizedDescription)")
-        }
-    }
-
-    private static func bytes(from hex: String) -> [UInt8] {
-        let cleaned = hex.filter { !$0.isWhitespace }
-        guard cleaned.count % 2 == 0, !cleaned.isEmpty else { return [] }
-        var result: [UInt8] = []
-        var index = cleaned.startIndex
-        while index < cleaned.endIndex {
-            let next = cleaned.index(index, offsetBy: 2)
-            guard let value = UInt8(cleaned[index..<next], radix: 16) else { return [] }
-            result.append(value)
-            index = next
-        }
-        return result
     }
 
     private func appendLog(_ text: String) {

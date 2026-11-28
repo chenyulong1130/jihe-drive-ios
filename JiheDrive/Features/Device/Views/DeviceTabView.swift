@@ -312,10 +312,10 @@ struct DeviceTabView: View {
                 summaryTile(value: fmt1(rt?.enduranceMileage), unit: "km", label: "续航", color: Theme.orange)
             })
         case .lamp:
-            // 灯具：显示调试类型与同步状态，点击卡片进详情调节
+            // 灯具：显示目录识别产品与模式库数量，点击卡片进详情调节
             return AnyView(HStack(spacing: 8) {
-                summaryTile(value: lampStore.profile.title, unit: "", label: "调试类型", color: Theme.brand)
-                summaryTile(value: lampStore.synced ? "已同步" : "未读取", unit: "", label: "参数快照", color: lampStore.synced ? Theme.green : Theme.orange)
+                summaryTile(value: lampStore.catalogProductName ?? "通用 RGB", unit: "", label: "产品", color: Theme.brand)
+                summaryTile(value: "\(lampStore.libraryModes.count)", unit: "个", label: "模式库", color: Theme.teal)
                 summaryTile(value: lampStore.transport?.title ?? "--", unit: "", label: "通道", color: Theme.secondary)
             })
         }

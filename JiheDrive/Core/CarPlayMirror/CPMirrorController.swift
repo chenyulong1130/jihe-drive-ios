@@ -355,6 +355,8 @@ final class CPMirrorController: ObservableObject {
         if enabled {
             if zeehoLink == nil { installZeehoLink() }
             startDashboardLink()
+            // 转码器此前可能被按需解码饿着：先要关键帧才能立刻出画面
+            requestKeyFrame()
             appendLog("已开启极核仪表投屏")
         } else {
             feederTask?.cancel()
@@ -699,6 +701,7 @@ final class CPMirrorController: ObservableObject {
     func startPictureInPicture() -> Bool {
         // 先标记想要画中画：转码器解码门控放行，首次启动才拿得到画面
         pipWanted = true
+        requestKeyFrame()
         let started = pip.start()
         appendLog(started ? "已启动画中画悬浮窗" : "画中画暂未就绪（画面输出后才能启动）")
         return started
