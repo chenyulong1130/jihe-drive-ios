@@ -631,8 +631,7 @@ final class CPDisplaySurface: UIView {
         case .began:
             // 归属权交接：抬起当前所有原始触点，改由 pan 指针接管
             panOwnsPointer = true
-            let held = contacts.keys
-            liftKeys(held)
+            liftKeys(Array(contacts.keys))
             guard rect.contains(location) else { return }
             let x = Double((location.x - rect.minX) / rect.width)
             let y = Double((location.y - rect.minY) / rect.height)
