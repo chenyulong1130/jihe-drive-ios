@@ -191,6 +191,9 @@ final class CPMirrorController: ObservableObject {
         self.dashboardActive = false
         self.pendingControlConnected = false
         self.transcoder.onKeyframeNeeded = { [weak self] in self?.requestKeyFrame() }
+        // 每次启动前应用最新画面/投屏参数（分辨率/帧率/外观/极核帧率码率编码档）
+        self.transcoder.configureCastSettings()
+        self.applyCarPlayAppearance()
         self.zeehoStatus = castToZeeho ? "等待连接" : "未启用"
         setCropMode(UserDefaults(suiteName: MirrorLogStore.appGroupID)?.string(forKey: "mirror.crop") ?? "crop")
         startPreviewServer()
@@ -709,6 +712,14 @@ final class CPMirrorController: ObservableObject {
 
     /// 显示层/转码器需要重新同步时，请系统立即编码一个关键帧。
     func requestKeyFrame() { receiver?.requestKeyFrame() }
+
+    /// 应用 CarPlay 白天/夜间外观（跟随系统 = 不覆盖，白天/夜间 = 命令覆盖）。
+    /// 接收端会记住最新状态并对之后新建的媒体会话自动生效。
+    func applyCarPlayAppearance() {
+        let appearance = CPDisplayConfig.appearance
+        guard appearance != .system else { return }
+        receiver?.setNightMode(appearance == .dark)
+    }
 
     // MARK: - 状态
 

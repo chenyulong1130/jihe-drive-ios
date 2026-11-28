@@ -22,8 +22,29 @@ final class CPVideoTranscoder {
     // 输出尺寸：默认极核 6.2 寸；媒体协商出其他仪表尺寸时由上层 setOutputSize 切换
     private(set) var width = 1024
     private(set) var height = 480
-    let fps: Double = 25
-    let bitrate: Int = 2_500_000
+    /// 帧率/码率/编码档来自 CarPlay 设置（CPDisplayConfig），会话创建时读定
+    private(set) var fps: Double = Double(CPDisplayConfig.zeehoFPS.rawValue)
+    private(set) var bitrate: Int = CPDisplayConfig.zeehoEffectiveBitrate
+    /// H.264 档位：Main 允许 CABAC，同码率文字更干净；Baseline 兼容老解码器
+    private(set) var profileLevel: CFString = CPDisplayConfig.zeehoProfile == .main
+        ? kVTProfileLevel_H264_Main_AutoLevel
+        : kVTProfileLevel_H264_Baseline_AutoLevel
+
+    /// 每次启动 CarPlay 前应用最新设置：编码器即刻废弃，新会话按新参数创建
+    func configureCastSettings() {
+        encodeLock.lock()
+        fps = Double(CPDisplayConfig.zeehoFPS.rawValue)
+        bitrate = CPDisplayConfig.zeehoEffectiveBitrate
+        profileLevel = CPDisplayConfig.zeehoProfile == .main
+            ? kVTProfileLevel_H264_Main_AutoLevel
+            : kVTProfileLevel_H264_Baseline_AutoLevel
+        if let encoder { VTCompressionSessionInvalidate(encoder) }
+        encoder = nil
+        encoderParamSets = nil
+        encodedResult = nil
+        encodeLock.unlock()
+        MirrorLogStore.append("投屏参数：\(Int(fps))fps · \(bitrate / 1_000_000)Mbps · \(CPDisplayConfig.zeehoProfile.title)")
+    }
 
     /// 按协商结果切换输出尺寸（如极核其他尺寸仪表）。下一次编码前生效，
     /// 旧编码器即刻废弃，新会话按新尺寸创建。
@@ -452,7 +473,7 @@ final class CPVideoTranscoder {
         }
         // 压缩属性须在创建后通过 VTSessionSetProperties 设置
         let properties: [CFString: Any] = [
-            kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_Baseline_AutoLevel,
+            kVTCompressionPropertyKey_ProfileLevel: profileLevel,
             kVTCompressionPropertyKey_AverageBitRate: bitrate,
             kVTCompressionPropertyKey_ExpectedFrameRate: fps,
             kVTCompressionPropertyKey_RealTime: true,

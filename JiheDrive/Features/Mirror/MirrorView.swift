@@ -408,23 +408,54 @@ struct MirrorView: View {
         .sheetChrome()
     }
 
-    /// 画面参数卡：分辨率/帧率档位（重启动 CarPlay 会话生效）
+    /// 画面参数卡：分辨率 / 帧率 / 外观 / 图标大小（对齐 CarWithin 参数面）
     private var displayConfigCard: some View {
         AppleCard(padding: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("画面参数")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.label)
-                Picker("画面参数", selection: Binding(
-                    get: { CPDisplayConfig.current },
-                    set: { CPDisplayConfig.current = $0 }
+                Picker("分辨率", selection: Binding(
+                    get: { CPDisplayConfig.resolution },
+                    set: { CPDisplayConfig.resolution = $0 }
                 )) {
                     ForEach(CPDisplayConfig.Resolution.allCases) { res in
                         Text(res.rawValue).tag(res)
                     }
                 }
                 .pickerStyle(.segmented)
-                Text("越高清越流畅也越耗电；修改后需停止并重新启动 CarPlay 生效。触控坐标自动跟随。")
+                Picker("帧率", selection: Binding(
+                    get: { CPDisplayConfig.fps },
+                    set: { CPDisplayConfig.fps = $0 }
+                )) {
+                    ForEach(CPDisplayConfig.FPS.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Picker("外观", selection: Binding(
+                    get: { CPDisplayConfig.appearance },
+                    set: { newValue in
+                        CPDisplayConfig.appearance = newValue
+                        // 白天/夜间实时切换 CarPlay 界面；跟随系统需重启 CarPlay
+                        controller.applyCarPlayAppearance()
+                    }
+                )) {
+                    ForEach(CPDisplayConfig.Appearance.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Picker("图标大小", selection: Binding(
+                    get: { CPDisplayConfig.iconSize },
+                    set: { CPDisplayConfig.iconSize = $0 }
+                )) {
+                    ForEach(CPDisplayConfig.IconSize.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("分辨率/帧率/图标大小需停止并重新启动 CarPlay 生效；外观实时切换（回到跟随系统需重启）。触控坐标自动跟随分辨率。")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -648,6 +679,43 @@ struct MirrorView: View {
                 }
 
                 if store.castToZeeho {
+                    // 投屏参数（对齐 CarWithin 极核枚举）：帧率 / 码率 / 编码档，重启 CarPlay 生效
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("投屏参数")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Theme.secondary)
+                        Picker("投屏帧率", selection: Binding(
+                            get: { CPDisplayConfig.zeehoFPS },
+                            set: { CPDisplayConfig.zeehoFPS = $0 }
+                        )) {
+                            ForEach(CPDisplayConfig.ZeehoFPS.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Picker("投屏码率", selection: Binding(
+                            get: { CPDisplayConfig.zeehoBitrate },
+                            set: { CPDisplayConfig.zeehoBitrate = $0 }
+                        )) {
+                            ForEach(CPDisplayConfig.ZeehoBitrate.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Picker("编码档位", selection: Binding(
+                            get: { CPDisplayConfig.zeehoProfile },
+                            set: { CPDisplayConfig.zeehoProfile = $0 }
+                        )) {
+                            ForEach(CPDisplayConfig.ZeehoProfile.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Text("自动码率 = 2.5Mbps × 帧率/25；Main 档同码率文字更清晰。修改后重启 CarPlay 生效。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     HStack(spacing: 10) {
                         Image(systemName: "gauge.with.needle")
                             .font(.system(size: 15, weight: .semibold))

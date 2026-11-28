@@ -46,10 +46,12 @@ enum CPInfo {
         var oemIconLabel: String = "车辆信息"
 
         static func `default`(deviceID: String) -> Configuration {
-            // 画面参数来自设置（CPDisplayConfig）：默认与极核 6.2 寸仪表一致
+            // 画面参数来自设置（CPDisplayConfig）：默认与极核 6.2 寸仪表一致；
+            // 物理宽度决定 CarPlay 主屏图标大小（mm 越大图标越小）
             Configuration(name: "JiheDrive", deviceID: deviceID,
                           width: CPDisplayConfig.width, height: CPDisplayConfig.height,
-                          maxFPS: CPDisplayConfig.fps)
+                          maxFPS: CPDisplayConfig.sanitizedFPS,
+                          widthPhysicalMM: CPDisplayConfig.widthPhysicalMM)
         }
     }
 
@@ -69,6 +71,9 @@ enum CPInfo {
             "widthPhysical": widthPhysical, "heightPhysical": heightPhysical,
             "features": displayFeatureHighFidelityTouch | displayFeatureKnobs,
             "primaryInputDevice": 1,
+            // 外观：0 = 自动跟随手机；白天/夜间由会话就绪后发 setNightMode 命令切换
+            "uiAppearanceMode": 0, "uiAppearanceSetting": 0,
+            "mapAppearanceMode": 0, "mapAppearanceSetting": 0,
             "uiAppearanceMode": 0, "uiAppearanceSetting": 0,
             "mapAppearanceMode": 0, "mapAppearanceSetting": 0,
             "viewAreas": [view], "initialViewArea": 0,
