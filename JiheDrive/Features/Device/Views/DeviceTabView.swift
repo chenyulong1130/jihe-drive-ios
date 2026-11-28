@@ -304,12 +304,10 @@ struct DeviceTabView: View {
                 summaryTile(value: rt?.parsed == true ? "运行" : "等待", unit: "", label: "实时帧", color: rt?.parsed == true ? Theme.green : Theme.secondary)
             })
         case .dianjingMeter:
-            let rt = dianjingStore.realtime
             return AnyView(HStack(spacing: 8) {
-                summaryTile(value: "\(rt?.soc ?? 0)", unit: "%", label: "电量", color: Theme.green)
-                summaryTile(value: fmt1(rt?.voltage), unit: "V", label: "电压", color: Theme.brand)
-                summaryTile(value: fmt1(rt?.totalMileage), unit: "km", label: "总里程", color: Color(hex: 0x0EA5E9))
-                summaryTile(value: fmt1(rt?.enduranceMileage), unit: "km", label: "续航", color: Theme.orange)
+                summaryTile(value: dianjingStore.dialStyle.isEmpty ? "--" : dianjingStore.dialStyle, unit: "", label: "表盘", color: Theme.brand)
+                summaryTile(value: "\(dianjingStore.batterySeries)", unit: "串", label: "电池", color: Theme.green)
+                summaryTile(value: dianjingStore.batteryFullVoltage > 0 ? String(format: "%.1f", dianjingStore.batteryFullVoltage) : "--", unit: "V", label: "满电电压", color: Color(hex: 0x0EA5E9))
             })
         case .lamp:
             // 灯具：显示目录识别产品与模式库数量，点击卡片进详情调节

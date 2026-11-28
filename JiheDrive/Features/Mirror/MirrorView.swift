@@ -83,6 +83,11 @@ struct MirrorView: View {
 
     // MARK: - 预览区（第一交互面）
 
+    /// 画面宽高比（跟随 CarPlay 设置里的分辨率档位）
+    private var streamAspect: CGFloat {
+        CGFloat(CPDisplayConfig.width) / CGFloat(CPDisplayConfig.height)
+    }
+
     /// 出画前是同尺寸占位框，出画后画面直接可点/可滑（同手机小窗）；
     /// 全屏与画中画收进画面右上角浮层，不再单独占一行按钮。
     @ViewBuilder
@@ -94,7 +99,7 @@ struct MirrorView: View {
                 CPPreviewView(controller: controller, paused: showFullscreen) {
                     showFullscreen = true
                 }
-                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                .aspectRatio(streamAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
@@ -116,7 +121,7 @@ struct MirrorView: View {
             // 启动前占位：与出画后的预览同比例，流程视觉不断档
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Theme.surface.opacity(0.55))
-                .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+                .aspectRatio(streamAspect, contentMode: .fit)
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Theme.tertiary.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
@@ -391,6 +396,7 @@ struct MirrorView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 12) {
                     wifiSetupCard
+                    displayConfigCard
                     outputSettingsCard
                 }
                 .padding(.horizontal, Theme.page)
@@ -400,6 +406,30 @@ struct MirrorView: View {
             .background(Theme.groupedBackground)
         }
         .sheetChrome()
+    }
+
+    /// 画面参数卡：分辨率/帧率档位（重启动 CarPlay 会话生效）
+    private var displayConfigCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("画面参数")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.label)
+                Picker("画面参数", selection: Binding(
+                    get: { CPDisplayConfig.current },
+                    set: { CPDisplayConfig.current = $0 }
+                )) {
+                    ForEach(CPDisplayConfig.Resolution.allCases) { res in
+                        Text(res.rawValue).tag(res)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("越高清越流畅也越耗电；修改后需停止并重新启动 CarPlay 生效。触控坐标自动跟随。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: - Wi-Fi 预设卡片（内联，输入后防抖自动保存）
@@ -871,7 +901,7 @@ struct MirrorView: View {
             CPPreviewView(controller: controller, fullscreen: true) {
                 reviveFullscreenExit()
             }
-            .aspectRatio(1024.0 / 480.0, contentMode: .fit)
+            .aspectRatio(streamAspect, contentMode: .fit)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if exitButtonVisible {

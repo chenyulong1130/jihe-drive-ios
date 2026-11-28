@@ -78,9 +78,11 @@ enum DeviceKind: String, CaseIterable, Identifiable {
         if upper.contains("CHARGER") || trimmed.contains("充电") { return .charger }
         // 保护板：蚂蚁 ANT / 彦阳 YY
         if BMSBrand.detect(name: trimmed) != nil { return .bms }
-        // 灯具：调试工具的广播名分类规则。识别规则较宽（如 13 位名称→紧凑协议），
-        // 为避免把普通外设当灯具，带空格的常见消费设备名不参与灯具自动归类。
-        if !trimmed.contains(" "), LampTransport.detect(name: trimmed) != nil { return .lamp }
+        // 灯具：产品目录确认制（速调试同款）——广播名能最长前缀命中速牛产品目录
+        // （catalog-seed.json 369 个前缀）才判为灯具。不能用 LampTransport.detect
+        // 兜底判灯：它的 2760/旧认证分支会把任何 ≥7 位无空格名字瞎识别成灯具。
+        // 目录未收录的设备仍可在扫描列表里手动按灯具打开。
+        if !trimmed.contains(" "), LampCatalog.match(for: trimmed) != nil { return .lamp }
         return nil
     }
 }

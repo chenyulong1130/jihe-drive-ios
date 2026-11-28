@@ -675,8 +675,8 @@ final class CPMirrorController: ObservableObject {
             }
         }
         for point in points {
-            let x = UInt16(min(max(point.x, 0), 1) * 1024)
-            let y = UInt16(min(max(point.y, 0), 1) * 480)
+            let x = UInt16(min(max(point.x, 0), 1) * Double(CPDisplayConfig.width))
+            let y = UInt16(min(max(point.y, 0), 1) * Double(CPDisplayConfig.height))
             if let index = slots.firstIndex(where: { $0?.id == point.id }) {
                 slots[index] = TouchSlot(id: point.id, x: x, y: y)
             } else if let free = slots.firstIndex(where: { $0 == nil }) {

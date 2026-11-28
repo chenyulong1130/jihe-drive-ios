@@ -46,9 +46,10 @@ enum CPInfo {
         var oemIconLabel: String = "车辆信息"
 
         static func `default`(deviceID: String) -> Configuration {
-            // 与极核 6.2 寸仪表一致的分辨率：CarPlay 画面可直接透传投屏
+            // 画面参数来自设置（CPDisplayConfig）：默认与极核 6.2 寸仪表一致
             Configuration(name: "JiheDrive", deviceID: deviceID,
-                          width: 1024, height: 480, maxFPS: 30)
+                          width: CPDisplayConfig.width, height: CPDisplayConfig.height,
+                          maxFPS: CPDisplayConfig.fps)
         }
     }
 
