@@ -13,7 +13,7 @@ struct BMSDetailView: View {
     @State private var copyToast = false
 
     private var rt: BMSRealtime? { store.realtime }
-    private var connected: Bool { ble.isConnected }
+    private var connected: Bool { ble.isConnected(.bms) }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -83,7 +83,7 @@ struct BMSDetailView: View {
 
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(ble.connectedDevice?.displayName ?? "保护板")
+            Text(ble.connectedDevice(for: .bms)?.displayName ?? "保护板")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.label)
                 .lineLimit(1)
@@ -535,7 +535,7 @@ struct BMSDetailView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             ConnectionBannerTile(
                                 connected: connected,
-                                deviceName: ble.connectedDevice?.displayName ?? ""
+                                deviceName: ble.connectedDevice(for: .bms)?.displayName ?? ""
                             )
                             LazyVGrid(
                                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],

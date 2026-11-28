@@ -13,7 +13,7 @@ struct ChargerDetailView: View {
     @State private var copyToast = false
 
     private var rt: ChargerRealtime? { store.realtime }
-    private var connected: Bool { ble.isConnected }
+    private var connected: Bool { ble.isConnected(.charger) }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -68,7 +68,7 @@ struct ChargerDetailView: View {
 
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(ble.connectedDevice?.displayName ?? "充电机")
+            Text(ble.connectedDevice(for: .charger)?.displayName ?? "充电机")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.label)
                 .lineLimit(1)
@@ -474,7 +474,7 @@ struct ChargerDetailView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             ConnectionBannerTile(
                                 connected: connected,
-                                deviceName: ble.connectedDevice?.displayName ?? ""
+                                deviceName: ble.connectedDevice(for: .charger)?.displayName ?? ""
                             )
                             LazyVGrid(
                                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],

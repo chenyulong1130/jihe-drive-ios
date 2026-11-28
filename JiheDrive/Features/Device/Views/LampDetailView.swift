@@ -22,7 +22,7 @@ struct LampDetailView: View {
 
     private enum LevelKind { case brightness, speed }
 
-    private var connected: Bool { ble.isConnected }
+    private var connected: Bool { ble.isConnected(.lamp) }
 
     private var currentColor: Color {
         Color(hue: hue / 360, saturation: saturation, brightness: 1)
@@ -116,7 +116,7 @@ struct LampDetailView: View {
 
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(ble.connectedDevice?.displayName ?? "灯具")
+            Text(ble.connectedDevice(for: .lamp)?.displayName ?? "灯具")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.label)
                 .lineLimit(1)
@@ -151,7 +151,7 @@ struct LampDetailView: View {
                 }
                 Spacer(minLength: 8)
                 Button {
-                    ble.disconnect()
+                    ble.disconnect(.lamp)
                 } label: {
                     Text("断开")
                         .font(.system(size: 13, weight: .bold))
@@ -479,7 +479,7 @@ struct LampDetailView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             ConnectionBannerTile(
                                 connected: connected,
-                                deviceName: ble.connectedDevice?.displayName ?? ""
+                                deviceName: ble.connectedDevice(for: .lamp)?.displayName ?? ""
                             )
                             LazyVGrid(
                                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],

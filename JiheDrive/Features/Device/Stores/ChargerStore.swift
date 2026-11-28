@@ -81,9 +81,9 @@ final class ChargerStore: ObservableObject {
     }
 
     private func pollOnce() async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.charger) else { return }
         do {
-            try await ble.write(ChargerProtocol.realtimeFrame(address: address))
+            try await ble.write(ChargerProtocol.realtimeFrame(address: address), kind: .charger)
         } catch {
             appendLog("读取失败：\(error.localizedDescription)")
         }
@@ -118,7 +118,7 @@ final class ChargerStore: ObservableObject {
 
     /// 按页拉取历史监控数据（ChargerHistoryTools：页大小 + 起始序号，序号从 1 起）
     func fetchHistory(pages: Int = 3) async {
-        guard let ble, ble.isConnected else {
+        guard let ble, ble.isConnected(.charger) else {
             historyStatus = "请先连接设备"
             return
         }
@@ -127,7 +127,7 @@ final class ChargerStore: ObservableObject {
         for page in 0..<max(1, pages) {
             guard !Task.isCancelled else { return }
             do {
-                try await ble.write(ChargerProtocol.historyFrame(page: page, pageSize: ChargerCommandConfig.historyPageSize, address: address))
+                try await ble.write(ChargerProtocol.historyFrame(page: page, pageSize: ChargerCommandConfig.historyPageSize, address: address), kind: .charger)
                 // 页间留间隔，等设备返回再翻页
                 try? await Task.sleep(nanoseconds: 300_000_000)
             } catch {
@@ -152,7 +152,7 @@ final class ChargerStore: ObservableObject {
 
     /// 自定义帧：FUNC / 寄存器 / 数据（寄存器小端由协议层统一处理）
     func sendCustomCommand() async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.charger) else { return }
         let data = Self.bytes(from: customDataHex)
         guard let funcCode = UInt8(customFuncHex.filter { !$0.isWhitespace }, radix: 16),
               let register = UInt16(customRegisterHex.filter { !$0.isWhitespace }, radix: 16) else {
@@ -161,7 +161,7 @@ final class ChargerStore: ObservableObject {
         }
         let frame = ChargerProtocol.frame(funcCode: funcCode, register: register, data: data, readLength: data.isEmpty ? 0xF5 : 0, address: address)
         do {
-            try await ble.write(frame)
+            try await ble.write(frame, kind: .charger)
             lastAck = "已发送，等待应答"
             appendLog("自定义指令：\(frame.hexString)")
         } catch {

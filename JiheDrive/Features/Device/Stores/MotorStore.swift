@@ -76,7 +76,7 @@ final class MotorStore: ObservableObject {
     }
 
     private func send(_ command: [UInt8], timeout: Double = 2.0) async {
-        guard let ble, ble.isConnected else {
+        guard let ble, ble.isConnected(.shilanLight) else {
             status = "请先连接设备"
             return
         }
@@ -84,7 +84,7 @@ final class MotorStore: ObservableObject {
         let frame = MotorProtocol.frame(command)
         appendLog("发送 \(frame.hexString)")
         do {
-            try await ble.write(frame)
+            try await ble.write(frame, kind: .shilanLight)
             if timeout != 1.0 {
                 scheduleTimeout(seconds: timeout) { [weak self] in
                     guard let self else { return }

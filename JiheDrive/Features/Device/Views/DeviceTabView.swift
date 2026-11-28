@@ -28,7 +28,9 @@ struct DeviceTabView: View {
                 VStack(spacing: 12) {
                     LargeTitle(
                         "设备",
-                        subtitle: ble.isConnected ? "已连接 \(ble.connectedDevice?.displayName ?? "")" : "保护板 · 石栏 · 充电器 · 点睛仪表 · 速牛灯具"
+                        subtitle: ble.isConnected
+                            ? "已连接 \(ble.connectedDevices.count) 类 · \(ble.connectedDevices.keys.map(\.shortTitle).sorted().joined(separator: "、"))"
+                            : "保护板 · 石栏 · 充电器 · 点睛仪表 · 速牛灯具 · 可同时连接"
                     ) {
                         HStack(spacing: 8) {
                             circleButton(icon: "magnifyingglass", label: "扫描设备") {
@@ -97,21 +99,17 @@ struct DeviceTabView: View {
                 Button("清除缓存并断开", role: .destructive) { clearAllBleCaches() }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("将断开当前设备、忘记连接记忆，并清空扫描列表、通信日志与鉴权缓存，下次启动不再自动回连。")
+                Text("将断开全部已连接设备、忘记连接记忆，并清空扫描列表、通信日志与鉴权缓存，下次启动不再自动回连。")
             }
         }
         .environmentObject(ble)
         .environmentObject(session)
         .onChange(of: activeMainTab) { _, tab in
             if tab == .device {
-                // 回到设备页恢复扫描停止状态下的轮询/回调
                 syncListPolling()
             } else {
-                // 离开设备页立即停扫描、停轮询、注销回调：
-                // BLE 轮询每 0.5s 就是一次 @Published 更新，页面不在屏上时
-                // 仍会反复触发本页重算，切 Tab 动画叠加重页合成时明显卡顿
+                // 多类同时连接：离开设备页只停扫描，保持已连接设备的轮询
                 ble.stopScan()
-                pauseStores()
             }
         }
         .onChange(of: ble.powerState) { _, state in
@@ -121,40 +119,56 @@ struct DeviceTabView: View {
             ble.autoConnectSavedDevice()
             syncListPolling()
         }
-        .onChange(of: ble.connectionState) { _, _ in
+        .onChange(of: ble.connectedDevices) { _, _ in
             syncListPolling()
         }
         .onChange(of: path) { _, newPath in
-            // 从详情页返回列表时恢复列表卡片的实时轮询
             if newPath.isEmpty { syncListPolling() }
         }
     }
 
-    /// 列表卡片实时摘要的数据源：连接期间保持对应 Store 轮询；
-    /// 进入详情页后由详情页接管，返回列表（path 清空）时恢复。
+    /// 已连接的每一类各自跑自己的 Store（多类可同时轮询）。
     private func syncListPolling() {
-        guard ble.isConnected, let kind = ble.connectedDevice?.kind else {
+        let kinds = Set(ble.connectedDevices.keys)
+        if kinds.isEmpty {
             pauseStores()
             return
         }
-        // 每种设备同一时刻只保留一个 Store 在跑，避免通知回调互相竞争
-        pauseStores()
-        MainThreadHangMonitor.note("设备页→恢复轮询（\(kind.shortTitle)）")
-        switch kind {
-        case .bms:
+        MainThreadHangMonitor.note("设备页→多连轮询（\(kinds.map(\.shortTitle).sorted().joined(separator: "/"))）")
+
+        if kinds.contains(.bms) {
             bmsStore.attach(ble)
             bmsStore.startPolling()
-        case .shilanLight:
+        } else {
+            bmsStore.stopPolling()
+            bmsStore.deactivate()
+        }
+
+        if kinds.contains(.shilanLight) {
             headlightStore.attach(ble, handlerKey: "headlight")
             if !headlightStore.paramsLoaded { headlightStore.loadParams() }
-        case .charger:
+        } else {
+            headlightStore.deactivate()
+        }
+
+        if kinds.contains(.charger) {
             chargerStore.attach(ble)
             chargerStore.startPolling()
-        case .dianjingMeter:
+        } else {
+            chargerStore.deactivate()
+        }
+
+        if kinds.contains(.dianjingMeter) {
             dianjingStore.attach(ble)
             dianjingStore.startPolling()
-        case .lamp:
+        } else {
+            dianjingStore.deactivate()
+        }
+
+        if kinds.contains(.lamp) {
             lampStore.attach(ble)
+        } else {
+            lampStore.deactivate()
         }
     }
 
@@ -196,7 +210,8 @@ struct DeviceTabView: View {
     }
 
     private func deviceCard(_ kind: DeviceKind) -> some View {
-        let connected = ble.isConnected && ble.connectedDevice?.kind == kind
+        let connected = ble.isConnected(kind)
+        let device = ble.connectedDevice(for: kind)
         let accent = accentColor(for: kind)
         return AppleCard(padding: 14, onTap: {
             if connected {
@@ -230,7 +245,7 @@ struct DeviceTabView: View {
                                 StatusPill(text: "已连接", color: Theme.green, pulsing: true)
                             }
                         }
-                        Text(connected ? (ble.connectedDevice?.displayName ?? kind.detail) : kind.detail)
+                        Text(connected ? (device?.displayName ?? kind.detail) : kind.detail)
                             .font(Theme.caption)
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
@@ -238,9 +253,9 @@ struct DeviceTabView: View {
 
                     Spacer(minLength: 4)
                     if connected {
-                        // 单个断开：只断这台设备，保留连接记忆（下次启动仍自动回连）
+                        // 只断这一类，其它已连接设备保持
                         Button {
-                            ble.disconnect()
+                            ble.disconnect(kind)
                         } label: {
                             Image(systemName: "xmark.circle")
                                 .font(.system(size: 20, weight: .semibold))
@@ -327,7 +342,7 @@ struct DeviceTabView: View {
     /// 列表记忆格点击：已连接石栏设备时直接下发移动，不进详情页；
     /// 参数未读时先读参数再动；未连接则不动（点击卡片本体才扫描/进详情）
     private func triggerHeadlightMemory(_ percent: Int) {
-        guard ble.isConnected, ble.connectedDevice?.kind == .shilanLight else { return }
+        guard ble.isConnected(.shilanLight) else { return }
         if !headlightStore.paramsLoaded {
             headlightStore.attach(ble, handlerKey: "headlight")
             headlightStore.loadParams()

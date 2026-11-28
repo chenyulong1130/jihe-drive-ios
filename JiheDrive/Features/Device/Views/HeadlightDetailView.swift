@@ -484,8 +484,8 @@ struct HeadlightDetailView: View {
                     AppleCard(padding: 14) {
                         VStack(alignment: .leading, spacing: 8) {
                             ConnectionBannerTile(
-                                connected: ble.isConnected,
-                                deviceName: ble.connectedDevice?.displayName ?? ""
+                                connected: ble.isConnected(.shilanLight),
+                                deviceName: ble.connectedDevice(for: .shilanLight)?.displayName ?? ""
                             )
                             LazyVGrid(
                                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],

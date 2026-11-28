@@ -8,7 +8,7 @@ struct DianjingDetailView: View {
     @EnvironmentObject private var ble: DeviceBLEManager
     @ObservedObject var store: DianjingStore
 
-    private var connected: Bool { ble.isConnected }
+    private var connected: Bool { ble.isConnected(.dianjingMeter) }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -38,7 +38,7 @@ struct DianjingDetailView: View {
 
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(ble.connectedDevice?.displayName ?? "仪表")
+            Text(ble.connectedDevice(for: .dianjingMeter)?.displayName ?? "仪表")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.label)
                 .lineLimit(1)

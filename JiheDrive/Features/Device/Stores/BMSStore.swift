@@ -35,10 +35,10 @@ final class BMSStore: ObservableObject {
         self.ble = ble
         channel = ble.bmsChannel
         // 按已连接设备名判定品牌
-        if let name = ble.connectedDevice?.name,
+        if let name = ble.connectedDevice(for: .bms)?.name,
            let detected = BMSBrand.detect(name: name) {
             brand = detected
-        } else if let stored = ble.connectedDevice?.bmsBrand {
+        } else if let stored = ble.connectedDevice(for: .bms)?.bmsBrand {
             brand = stored
         } else {
             brand = .ant
@@ -89,11 +89,11 @@ final class BMSStore: ObservableObject {
     }
 
     private func bootstrapYanyang() async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.bms) else { return }
         do {
-            try await ble.write(yanyang.requestSaAddress())
+            try await ble.write(yanyang.requestSaAddress(), kind: .bms)
             try? await Task.sleep(nanoseconds: 120_000_000)
-            try await ble.write(yanyang.requestProtoFlag())
+            try await ble.write(yanyang.requestProtoFlag(), kind: .bms)
             appendLog("彦阳：已发送地址/协议探测")
         } catch {
             appendLog("彦阳探测失败：\(error.localizedDescription)")
@@ -101,12 +101,12 @@ final class BMSStore: ObservableObject {
     }
 
     private func pollOnce() async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.bms) else { return }
         switch brand {
         case .ant:
             let frame = BMSProtocol.frame(funcCode: 0x11, address: 0x0000, readLength: readLength)
             do {
-                try await ble.write(frame)
+                try await ble.write(frame, kind: .bms)
             } catch {
                 appendLog("读取失败：\(error.localizedDescription)")
             }
@@ -114,7 +114,7 @@ final class BMSStore: ObservableObject {
             for req in yanyang.pollRequests() {
                 guard !Task.isCancelled else { return }
                 do {
-                    try await ble.write(req)
+                    try await ble.write(req, kind: .bms)
                     try? await Task.sleep(nanoseconds: 80_000_000)
                 } catch {
                     appendLog("彦阳轮询失败：\(error.localizedDescription)")
@@ -157,7 +157,7 @@ final class BMSStore: ObservableObject {
             channelStatus = "彦阳固定 FFE1/FFE2，无需通道诊断"
             return
         }
-        guard let ble, ble.isConnected else {
+        guard let ble, ble.isConnected(.bms) else {
             channelStatus = "请先连接设备"
             return
         }
@@ -169,7 +169,7 @@ final class BMSStore: ObservableObject {
             do {
                 try await ble.selectBMSChannel(option)
                 let probe = BMSProtocol.frame(funcCode: 0x01, address: 0x0000, readLength: 0xF5)
-                try await ble.write(probe)
+                try await ble.write(probe, kind: .bms)
             } catch {
                 appendLog("\(option.title) 探测失败：\(error.localizedDescription)")
                 continue
@@ -200,7 +200,7 @@ final class BMSStore: ObservableObject {
             appendLog("自定义指令目前仅支持蚂蚁协议")
             return
         }
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.bms) else { return }
         guard let funcCode = Self.bytes(from: customFuncHex)?.first,
               let addressBytes = Self.bytes(from: customAddressHex),
               let dataBytes = Self.bytes(from: customDataHex) else {
@@ -212,7 +212,7 @@ final class BMSStore: ObservableObject {
             : UInt16(addressBytes.first ?? 0)
         let frame = BMSProtocol.frame(funcCode: funcCode, address: address, data: dataBytes)
         do {
-            try await ble.write(frame)
+            try await ble.write(frame, kind: .bms)
             lastAck = "已发送，等待应答"
             appendLog("自定义指令：\(frame.hexString)")
         } catch {

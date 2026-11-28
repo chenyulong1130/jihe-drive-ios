@@ -2,6 +2,7 @@ import Foundation
 import CoreBluetooth
 
 /// 设备页统一蓝牙中心：扫描、连接、服务发现、特征读写、通知分发、断线重连。
+/// 每类设备（DeviceKind）可同时各连一台；同类再连会替换旧的。
 /// 所有 CoreBluetooth 回调都在 main queue 上，UI 可直接观察 @Published 状态。
 final class DeviceBLEManager: NSObject, ObservableObject {
     static let shared = DeviceBLEManager()
@@ -15,11 +16,36 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         case disconnected
     }
 
+    /// 单路会话状态（一类设备一条）
+    private final class Session {
+        var device: BLEDevice
+        var peripheral: CBPeripheral
+        var characteristics: [String: CBCharacteristic] = [:]
+        var activeNotify: CBCharacteristic?
+        var connectionState: ConnectionState = .idle
+        var pendingServices = 0
+        var connectContinuation: CheckedContinuation<Void, Error>?
+        var notifyContinuation: CheckedContinuation<Void, Error>?
+        var writeContinuation: CheckedContinuation<Void, Error>?
+        var connectTimeout: DispatchWorkItem?
+        var notifyTimeout: DispatchWorkItem?
+        var writeTimeout: DispatchWorkItem?
+        var autoReconnect = false
+        var reconnectTask: Task<Void, Never>?
+
+        init(device: BLEDevice, peripheral: CBPeripheral) {
+            self.device = device
+            self.peripheral = peripheral
+        }
+    }
+
     @Published private(set) var powerState: CBManagerState = .unknown
     @Published private(set) var isScanning = false
     @Published private(set) var discovered: [BLEDevice] = []
-    @Published private(set) var connectionState: ConnectionState = .idle
-    @Published private(set) var connectedDevice: BLEDevice?
+    /// 每类已连接设备（同时多类）
+    @Published private(set) var connectedDevices: [DeviceKind: BLEDevice] = [:]
+    /// 每类连接状态
+    @Published private(set) var connectionStates: [DeviceKind: ConnectionState] = [:]
     @Published private(set) var lastError: String?
     @Published private(set) var logs: [String] = []
     @Published var bmsChannel: BMSChannel = {
@@ -30,33 +56,20 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     }
 
     private var central: CBCentralManager!
-    private var peripheral: CBPeripheral?
     private var cbPeripherals: [UUID: CBPeripheral] = [:]
-    private var characteristics: [String: CBCharacteristic] = [:]
-    private var activeNotify: CBCharacteristic?
-    private var pendingServices = 0
-
-    private var connectContinuation: CheckedContinuation<Void, Error>?
-    private var notifyContinuation: CheckedContinuation<Void, Error>?
-    private var writeContinuation: CheckedContinuation<Void, Error>?
-    private var connectTimeout: DispatchWorkItem?
-    private var notifyTimeout: DispatchWorkItem?
-    private var writeTimeout: DispatchWorkItem?
+    private var sessionsByID: [UUID: Session] = [:]
+    private var sessionByKind: [DeviceKind: Session] = [:]
     private var scanTimeout: DispatchWorkItem?
-
-    private var autoReconnect = false
-    private var reconnectTask: Task<Void, Never>?
-    private var dataHandlers: [String: (Data) -> Void] = [:]
-    /// 自动连接防重入：一次开机只尝试一次存档设备
+    /// handlerKey → (kind, handler)；通知按外设所属 kind 精确分发
+    private var dataHandlers: [String: (kind: DeviceKind, handler: (Data) -> Void)] = [:]
+    /// 自动连接防重入：一次开机只尝试一次存档
     private var autoConnectAttempted = false
+    private var scanKinds: Set<DeviceKind> = Set(DeviceKind.primaryKinds)
 
     override init() {
         super.init()
-        // 故意不在这里创建 CBCentralManager：蓝牙权限弹窗应出现在
-        // 用户真正「扫描/连接蓝牙」时，而不是 App 启动进首页时
     }
 
-    /// 惰性创建中央管理器（首次扫描/连接时触发蓝牙权限请求）
     private func ensureCentral() {
         guard central == nil else { return }
         central = CBCentralManager(
@@ -66,156 +79,173 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         )
     }
 
-    // MARK: - 工具
+    // MARK: - 查询
 
-    var isConnected: Bool { connectionState == .connected }
+    /// 任意一类已连接
+    var isConnected: Bool { !connectedDevices.isEmpty }
+
+    func isConnected(_ kind: DeviceKind) -> Bool {
+        connectionStates[kind] == .connected
+    }
+
+    func connectedDevice(for kind: DeviceKind) -> BLEDevice? {
+        connectedDevices[kind]
+    }
+
+    func connectionState(for kind: DeviceKind) -> ConnectionState {
+        connectionStates[kind] ?? .idle
+    }
+
+    /// 兼容旧 UI：最近一次/任意一台已连接设备
+    var connectedDevice: BLEDevice? {
+        if let bms = connectedDevices[.bms] { return bms }
+        return connectedDevices.values.first
+    }
+
+    /// 兼容旧 UI：优先显示「有连接」或扫描态
+    var connectionState: ConnectionState {
+        if isScanning { return .scanning }
+        if connectedDevices.isEmpty {
+            if connectionStates.values.contains(where: { $0 == .connecting || $0 == .discovering }) {
+                return .connecting
+            }
+            return .idle
+        }
+        return .connected
+    }
 
     func log(_ text: String) {
         let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         logs.append("\(stamp) \(text)")
         if logs.count > 80 { logs.removeFirst(logs.count - 80) }
-        // 同步进主线程事件环：卡死报告里能看到卡死时蓝牙在干什么
         MainThreadHangMonitor.note("BLE \(text)")
     }
 
+    func registerDataHandler(_ key: String, kind: DeviceKind, handler: @escaping (Data) -> Void) {
+        dataHandlers[key] = (kind, handler)
+    }
+
+    /// 兼容旧调用：按常见 key 推断 kind
     func registerDataHandler(_ key: String, handler: @escaping (Data) -> Void) {
-        dataHandlers[key] = handler
+        let kind: DeviceKind
+        switch key {
+        case "bms": kind = .bms
+        case "headlight", "motor": kind = .shilanLight
+        case "charger": kind = .charger
+        case "dianjing": kind = .dianjingMeter
+        case "lamp": kind = .lamp
+        default: kind = .bms
+        }
+        registerDataHandler(key, kind: kind, handler: handler)
     }
 
     func unregisterDataHandler(_ key: String) {
         dataHandlers.removeValue(forKey: key)
     }
 
-    /// 当前扫描允许的设备类型；nil = 主推类型（保护板 + 石栏）
-    private var scanKinds: Set<DeviceKind> = Set(DeviceKind.primaryKinds)
-
-    /// 已连接灯具的传输通道：优先扫描时识别结果，断档时按广播名重判
-    private func lampTransport() -> LampTransport? {
-        if let transport = connectedDevice?.lampTransport { return transport }
-        return LampTransport.detect(name: connectedDevice?.name ?? "")
-    }
-
-    private func activeWriteCharacteristic() -> CBCharacteristic? {
-        let preferred: String
-        switch connectedDevice?.kind {
-        case .bms:
-            // 彦阳写 FFE2；蚂蚁默认走通道写特征（FFE1 / FFF3 / FFF5）
-            if connectedDevice?.bmsBrand == .yanyang {
-                preferred = BMSBrand.yanyang.writeID
-            } else {
-                preferred = bmsChannel.writeID
+    private func publishState() {
+        var devices: [DeviceKind: BLEDevice] = [:]
+        var states: [DeviceKind: ConnectionState] = [:]
+        for (kind, session) in sessionByKind {
+            states[kind] = session.connectionState
+            if session.connectionState == .connected {
+                devices[kind] = session.device
             }
-        case .shilanLight: preferred = "FFF2"
-        case .charger: preferred = "FFE1"
-        case .dianjingMeter: preferred = "FF01"
-        case .lamp:
-            // 灯具按传输通道选写特征；2760 是非标长 UUID，按键查不到时按后缀兜底
-            switch lampTransport() {
-            case .gattFFF0: preferred = "FFF2"
-            case .gatt2760: preferred = "00002760-08C2-11E1-9073-0E8AC72E0001"
-            default: preferred = "FFE1"
-            }
-        case .none: preferred = ""
         }
-        if let exact = characteristics[preferred] { return exact }
-        // 部分固件把 FFE1/FFE2 以 128 位形式暴露，iOS 不折叠成短码，
-        // 存 key 时已做归一化；这里再加同服务兜底，避免挑中 OTA/DFU 等无关通道
-        if let notify = activeNotify, let chars = notify.service?.characteristics {
-            let writable = chars.filter {
-                $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
-            }
-            if let sameService = writable.first(where: { Self.shortUUIDKey($0.uuid) == preferred }) { return sameService }
-            if let ffe2 = writable.first(where: { Self.shortUUIDKey($0.uuid) == "FFE2" }) { return ffe2 }
-            if let first = writable.first { return first }
-        }
-        return characteristics.values.first {
-            $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
-        }
+        connectedDevices = devices
+        connectionStates = states
+        objectWillChange.send()
     }
 
-    /// CBUUID 短码：0000XXXX-0000-1000-8000-00805F9B34FB 形式折叠回 XXXX。
-    /// 彦阳 YY-AE4S 实测以 128 位暴露 FFE0/FFE1，iOS 的 uuidString 不自动折叠，
-    /// 直接用原始串做 key 会查不到 "FFE2"，写帧就进了错误的特征。
-    static func shortUUIDKey(_ uuid: CBUUID) -> String {
-        let raw = uuid.uuidString.uppercased()
-        guard raw.count == 36 else { return raw }
-        let parts = raw.split(separator: "-")
-        if parts.count == 5,
-           parts[1] == "0000", parts[2] == "1000", parts[3] == "8000",
-           parts[4] == "00805F9B34FB", parts[0].hasPrefix("0000") {
-            return String(parts[0].suffix(4))
-        }
-        return raw
-    }
+    // MARK: - 连接记忆（每类一台）
 
-    /// 特征属性速记（发现日志用）
-    private func propTags(_ c: CBCharacteristic) -> String {
-        var tags = ""
-        if c.properties.contains(.read) { tags += "读" }
-        if c.properties.contains(.write) { tags += tags.isEmpty ? "写" : " 写" }
-        if c.properties.contains(.writeWithoutResponse) { tags += " 写无应答" }
-        if c.properties.contains(.notify) { tags += " 通知" }
-        return tags.isEmpty ? "-" : tags
-    }
+    private static let archiveKey = "device.last.connections"
 
-    // MARK: - 连接记忆（下次启动自动重连）
-
-    private static let archiveKey = "device.last.connection"
-
-    /// 连接成功后存档：id/名称/类型/品牌，下次启动自动回连
     private func saveConnectionArchive() {
-        guard let device = connectedDevice else { return }
-        let archive: [String: String] = [
-            "id": device.id.uuidString,
-            "name": device.name,
-            "kind": device.kind.rawValue,
-            "brand": device.bmsBrand?.rawValue ?? "",
-            "lampTransport": device.lampTransport?.rawValue ?? "",
-        ]
-        UserDefaults.standard.set(archive, forKey: Self.archiveKey)
+        var all: [String: [String: String]] = [:]
+        for (kind, device) in connectedDevices {
+            all[kind.rawValue] = [
+                "id": device.id.uuidString,
+                "name": device.name,
+                "kind": device.kind.rawValue,
+                "brand": device.bmsBrand?.rawValue ?? "",
+                "lampTransport": device.lampTransport?.rawValue ?? "",
+            ]
+        }
+        UserDefaults.standard.set(all, forKey: Self.archiveKey)
+        // 兼容旧单档案
+        if let first = connectedDevices.values.first {
+            UserDefaults.standard.set([
+                "id": first.id.uuidString,
+                "name": first.name,
+                "kind": first.kind.rawValue,
+                "brand": first.bmsBrand?.rawValue ?? "",
+                "lampTransport": first.lampTransport?.rawValue ?? "",
+            ], forKey: "device.last.connection")
+        }
     }
 
-    private func clearConnectionArchive() {
-        UserDefaults.standard.removeObject(forKey: Self.archiveKey)
+    private func clearConnectionArchive(kind: DeviceKind? = nil) {
+        if let kind {
+            var all = UserDefaults.standard.dictionary(forKey: Self.archiveKey) as? [String: [String: String]] ?? [:]
+            all.removeValue(forKey: kind.rawValue)
+            UserDefaults.standard.set(all, forKey: Self.archiveKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.archiveKey)
+            UserDefaults.standard.removeObject(forKey: "device.last.connection")
+        }
     }
 
     static func savedConnectionName() -> String? {
-        let archive = UserDefaults.standard.dictionary(forKey: archiveKey) as? [String: String]
+        if let all = UserDefaults.standard.dictionary(forKey: archiveKey) as? [String: [String: String]],
+           let first = all.values.first,
+           let name = first["name"], !name.isEmpty {
+            return name
+        }
+        let archive = UserDefaults.standard.dictionary(forKey: "device.last.connection") as? [String: String]
         return archive?["name"].flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    /// 启动时回连上次设备：无需扫描，直接 retrievePeripherals + connect
+    /// 启动时回连上次各类设备
     func autoConnectSavedDevice() {
         ensureCentral()
-        guard central?.state == .poweredOn, connectionState == .idle, !autoConnectAttempted else { return }
-        guard let archive = UserDefaults.standard.dictionary(forKey: Self.archiveKey) as? [String: String],
-              let idString = archive["id"],
-              let id = UUID(uuidString: idString),
-              let kindRaw = archive["kind"],
-              let kind = DeviceKind(rawValue: kindRaw) else { return }
+        guard central?.state == .poweredOn, !autoConnectAttempted else { return }
         autoConnectAttempted = true
-        let name = archive["name"] ?? ""
-        let brand = archive["brand"].flatMap { BMSBrand(rawValue: $0) }
-        let lampTransport = archive["lampTransport"].flatMap { LampTransport(rawValue: $0) }
-            ?? (kind == .lamp ? LampTransport.detect(name: name) : nil)
-        let device = BLEDevice(id: id, name: name, rssi: 0, kind: kind, bmsBrand: brand, lampTransport: lampTransport)
-        log("自动连接上次设备：\(device.displayName)")
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.connect(device)
-                self.log("自动连接成功")
-            } catch {
-                self.log("自动连接失败：\(error.localizedDescription)")
+
+        var archives: [[String: String]] = []
+        if let all = UserDefaults.standard.dictionary(forKey: Self.archiveKey) as? [String: [String: String]] {
+            archives = Array(all.values)
+        } else if let one = UserDefaults.standard.dictionary(forKey: "device.last.connection") as? [String: String] {
+            archives = [one]
+        }
+        guard !archives.isEmpty else { return }
+
+        for archive in archives {
+            guard let idString = archive["id"],
+                  let id = UUID(uuidString: idString),
+                  let kindRaw = archive["kind"],
+                  let kind = DeviceKind(rawValue: kindRaw) else { continue }
+            if isConnected(kind) { continue }
+            let name = archive["name"] ?? ""
+            let brand = archive["brand"].flatMap { BMSBrand(rawValue: $0) }
+            let lampTransport = archive["lampTransport"].flatMap { LampTransport(rawValue: $0) }
+                ?? (kind == .lamp ? LampTransport.detect(name: name) : nil)
+            let device = BLEDevice(id: id, name: name, rssi: 0, kind: kind, bmsBrand: brand, lampTransport: lampTransport)
+            log("自动连接上次\(kind.shortTitle)：\(device.displayName)")
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.connect(device)
+                    self.log("自动连接\(kind.shortTitle)成功")
+                } catch {
+                    self.log("自动连接\(kind.shortTitle)失败：\(error.localizedDescription)")
+                }
             }
         }
     }
 
     // MARK: - 扫描
 
-    /// - Parameters:
-    ///   - kinds: 只保留这些类型；默认保护板 + 石栏，避免满屏无关 BLE。
-    ///   - timeout: 默认 10 秒；设备广播间隔约 100ms~1s，正常 1~2 秒内就会出现在列表。
     func startScan(kinds: Set<DeviceKind>? = nil, timeout: TimeInterval = 10) {
         ensureCentral()
         guard central.state == .poweredOn else {
@@ -228,10 +258,6 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         lastError = nil
         scanKinds = kinds ?? Set(DeviceKind.primaryKinds)
         isScanning = true
-        connectionState = .scanning
-        // 不按 UUID 限扫：部分石栏/ANT 广播不含服务 UUID；靠名称过滤即可。
-        // AllowDuplicates 必须关：开着的话同一设备的每个广播包都会触发回调，
-        // 主线程被发现回调+排序刷满，表现为「扫描很卡、列表抖动」。
         central.scanForPeripherals(withServices: nil, options: nil)
         let labels = scanKinds.map(\.shortTitle).sorted().joined(separator: "/")
         log("开始扫描（仅 \(labels)，\(Int(timeout))s）")
@@ -249,10 +275,8 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         isScanning = false
         scanTimeout?.cancel()
         scanTimeout = nil
-        if connectionState == .scanning { connectionState = .idle }
     }
 
-    /// 对扫描结果手动归类：广播名猜错时可从 UI 纠正
     func setKind(_ kind: DeviceKind, for id: UUID) {
         guard let index = discovered.firstIndex(where: { $0.id == id }) else { return }
         discovered[index].kind = kind
@@ -261,21 +285,22 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     // MARK: - 连接
 
     func connect(_ device: BLEDevice) async throws {
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        autoReconnect = true
-        try await connectCore(device)
+        try await connectCore(device, enableReconnect: true)
     }
 
-    private func connectCore(_ device: BLEDevice) async throws {
+    private func connectCore(_ device: BLEDevice, enableReconnect: Bool) async throws {
         ensureCentral()
         guard central.state == .poweredOn else { throw DeviceBLEError.bluetoothOff }
 
-        if let current = peripheral, current.identifier == device.id, connectionState == .connected {
+        // 同类已连同一台 → 直接返回
+        if let existing = sessionByKind[device.kind],
+           existing.device.id == device.id,
+           existing.connectionState == .connected {
             return
         }
-        if let current = peripheral, current.identifier != device.id, current.state != .disconnected {
-            central.cancelPeripheralConnection(current)
+        // 同类已连另一台 → 先断旧的（不同类互不影响）
+        if let existing = sessionByKind[device.kind], existing.device.id != device.id {
+            disconnectSession(existing, keepArchive: false, announce: true)
         }
 
         let cb = cbPeripherals[device.id]
@@ -283,193 +308,266 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         guard let cb else { throw DeviceBLEError.notConnected }
 
         cb.delegate = self
-        peripheral = cb
         cbPeripherals[device.id] = cb
-        connectedDevice = device
-        characteristics = [:]
-        activeNotify = nil
+        let session = Session(device: device, peripheral: cb)
+        session.autoReconnect = enableReconnect
+        session.connectionState = .connecting
+        sessionsByID[device.id] = session
+        sessionByKind[device.kind] = session
         lastError = nil
-        connectionState = .connecting
-        log("连接 \(device.displayName)")
+        publishState()
+        log("连接 \(device.kind.shortTitle)：\(device.displayName)")
 
-        connectTimeout?.cancel()
-        let timer = DispatchWorkItem { [weak self] in
-            guard let self, self.connectionState == .connecting || self.connectionState == .discovering else { return }
-            self.failConnect(DeviceBLEError.timeout)
-            if cb.state != .disconnected { self.central.cancelPeripheralConnection(cb) }
+        let timer = DispatchWorkItem { [weak self, weak session] in
+            guard let self, let session,
+                  session.connectionState == .connecting || session.connectionState == .discovering else { return }
+            self.failConnect(session, DeviceBLEError.timeout)
+            if session.peripheral.state != .disconnected {
+                self.central.cancelPeripheralConnection(session.peripheral)
+            }
         }
-        connectTimeout = timer
+        session.connectTimeout = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timer)
 
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                connectContinuation = continuation
+                session.connectContinuation = continuation
                 central.connect(cb, options: nil)
             }
         } catch {
-            connectionState = .disconnected
+            session.connectionState = .disconnected
+            publishState()
             throw error
         }
-        connectTimeout?.cancel()
-        connectTimeout = nil
+        session.connectTimeout?.cancel()
+        session.connectTimeout = nil
     }
 
-    func reconnect() async throws {
-        guard let device = connectedDevice else { throw DeviceBLEError.notConnected }
-        try await connectCore(device)
+    func reconnect(_ kind: DeviceKind) async throws {
+        guard let device = connectedDevices[kind] ?? sessionByKind[kind]?.device else {
+            throw DeviceBLEError.notConnected
+        }
+        try await connectCore(device, enableReconnect: true)
     }
 
-    /// 断开当前设备（单个断开）：停重连、断 BLE、清本次会话状态；
-    /// 保留连接记忆，下次启动仍会自动回连这台设备
+    /// 兼容：断「任意一台」→ 断全部（旧详情页按钮）；优先用 disconnect(kind:)
     func disconnect() {
-        disconnectCore(keepArchive: true)
-        log("已断开连接（保留记忆，下次启动自动回连）")
+        let kinds = Array(sessionByKind.keys)
+        for kind in kinds { disconnect(kind) }
     }
 
-    /// 清除全部蓝牙缓存并断开：断开当前设备 + 忘记连接记忆 +
-    /// 清空扫描列表/通信日志/外设缓存，下次启动不再自动回连
+    func disconnect(_ kind: DeviceKind) {
+        guard let session = sessionByKind[kind] else { return }
+        disconnectSession(session, keepArchive: true, announce: true)
+        log("已断开\(kind.shortTitle)（保留记忆，下次启动自动回连）")
+    }
+
     func disconnectAndClearAll() {
-        disconnectCore(keepArchive: false)
+        let sessions = Array(sessionByKind.values)
+        for session in sessions {
+            disconnectSession(session, keepArchive: false, announce: false)
+        }
         clearConnectionArchive()
         cbPeripherals.removeAll()
         discovered = []
         logs = []
         lastError = nil
         autoConnectAttempted = false
+        publishState()
         log("已清除全部蓝牙缓存并断开")
     }
 
-    private func disconnectCore(keepArchive: Bool) {
-        autoReconnect = false
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        cancelPendingConnect()
-        guard let p = peripheral else {
-            connectionState = .idle
-            connectedDevice = nil
-            if !keepArchive { clearConnectionArchive() }
-            return
+    private func disconnectSession(_ session: Session, keepArchive: Bool, announce: Bool) {
+        session.autoReconnect = false
+        session.reconnectTask?.cancel()
+        session.reconnectTask = nil
+        cancelPendingConnect(session)
+        let kind = session.device.kind
+        if session.peripheral.state != .disconnected {
+            central?.cancelPeripheralConnection(session.peripheral)
         }
-        if p.state != .disconnected { central.cancelPeripheralConnection(p) }
-        peripheral = nil
-        connectedDevice = nil
-        characteristics = [:]
-        activeNotify = nil
-        if !keepArchive { clearConnectionArchive() }
-        connectionState = .idle
+        sessionsByID.removeValue(forKey: session.device.id)
+        if sessionByKind[kind] === session {
+            sessionByKind.removeValue(forKey: kind)
+        }
+        session.characteristics = [:]
+        session.activeNotify = nil
+        session.connectionState = .idle
+        if !keepArchive { clearConnectionArchive(kind: kind) }
+        publishState()
+        if announce == false { /* silent */ }
     }
 
-    private func failConnect(_ error: Error) {
-        connectTimeout?.cancel()
-        connectTimeout = nil
-        let continuation = connectContinuation
-        connectContinuation = nil
+    private func failConnect(_ session: Session, _ error: Error) {
+        session.connectTimeout?.cancel()
+        session.connectTimeout = nil
+        let continuation = session.connectContinuation
+        session.connectContinuation = nil
         lastError = error.localizedDescription
         continuation?.resume(throwing: error)
     }
 
-    /// 主动断开时不把「已取消」写成错误提示
-    private func cancelPendingConnect() {
-        connectTimeout?.cancel()
-        connectTimeout = nil
-        let continuation = connectContinuation
-        connectContinuation = nil
+    private func cancelPendingConnect(_ session: Session) {
+        session.connectTimeout?.cancel()
+        session.connectTimeout = nil
+        let continuation = session.connectContinuation
+        session.connectContinuation = nil
         continuation?.resume(throwing: DeviceBLEError.cancelled)
     }
 
-    private func finishDiscovery() {
-        guard let kind = connectedDevice?.kind else {
-            failConnect(DeviceBLEError.characteristicMissing)
-            return
-        }
+    private func finishDiscovery(_ session: Session) {
+        let kind = session.device.kind
         let preferredNotify: String
         switch kind {
         case .bms:
-            preferredNotify = (connectedDevice?.bmsBrand == .yanyang)
+            preferredNotify = (session.device.bmsBrand == .yanyang)
                 ? BMSBrand.yanyang.notifyID
                 : bmsChannel.notifyID
         case .shilanLight: preferredNotify = "FFF1"
         case .charger: preferredNotify = "FFE1"
         case .dianjingMeter: preferredNotify = "FF02"
         case .lamp:
-            switch lampTransport() {
+            switch lampTransport(session) {
             case .gattFFF0: preferredNotify = "FFF1"
             case .compact: preferredNotify = "FFE1"
             case .gatt2760: preferredNotify = "00002760-08C2-11E1-9073-0E8AC72E0002"
             default: preferredNotify = "FFE2"
             }
         }
-        guard let notify = characteristics[preferredNotify]
-                ?? characteristics.values.first(where: { $0.properties.contains(.notify) }) else {
-            failConnect(DeviceBLEError.characteristicMissing)
+        guard let notify = session.characteristics[preferredNotify]
+                ?? session.characteristics.values.first(where: { $0.properties.contains(.notify) }) else {
+            failConnect(session, DeviceBLEError.characteristicMissing)
             log("特征不匹配：需要 \(preferredNotify)")
             return
         }
-        activeNotify = notify
-        notifyTimeout?.cancel()
-        let timer = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            let cont = self.notifyContinuation
-            self.notifyContinuation = nil
-            self.notifyTimeout = nil
-            if self.connectContinuation != nil { self.failConnect(DeviceBLEError.timeout) }
+        session.activeNotify = notify
+        session.notifyTimeout?.cancel()
+        let timer = DispatchWorkItem { [weak self, weak session] in
+            guard let self, let session else { return }
+            let cont = session.notifyContinuation
+            session.notifyContinuation = nil
+            session.notifyTimeout = nil
+            if session.connectContinuation != nil { self.failConnect(session, DeviceBLEError.timeout) }
             cont?.resume(throwing: DeviceBLEError.timeout)
         }
-        notifyTimeout = timer
+        session.notifyTimeout = timer
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timer)
 
-        peripheral?.setNotifyValue(true, for: notify)
-        log("订阅通知 \(Self.shortUUIDKey(notify.uuid))")
+        session.peripheral.setNotifyValue(true, for: notify)
+        log("\(kind.shortTitle) 订阅通知 \(Self.shortUUIDKey(notify.uuid))")
 
-        let write = activeWriteCharacteristic()
+        let write = activeWriteCharacteristic(session)
         if let write {
             let mode = write.properties.contains(.writeWithoutResponse) ? "无应答" : "带应答"
-            log("写入特征 \(Self.shortUUIDKey(write.uuid))（\(mode)）")
+            log("\(kind.shortTitle) 写入特征 \(Self.shortUUIDKey(write.uuid))（\(mode)）")
         } else {
-            log("写入特征 未找到")
+            log("\(kind.shortTitle) 写入特征 未找到")
         }
-        let summary = characteristics.values
+        let summary = session.characteristics.values
             .sorted { Self.shortUUIDKey($0.uuid) < Self.shortUUIDKey($1.uuid) }
             .map { "\(Self.shortUUIDKey($0.uuid))[\(propTags($0))]" }
             .joined(separator: " ")
-        log("服务特征：\(summary)")
+        log("\(kind.shortTitle) 服务特征：\(summary)")
     }
 
-    /// BMS 通道切换：先关旧通知，再订阅新特征
-    func selectBMSChannel(_ channel: BMSChannel) async throws {
-        guard let p = peripheral, p.state == .connected else { throw DeviceBLEError.notConnected }
-        if let old = activeNotify, old.uuid.uuidString.uppercased() != channel.notifyID {
-            p.setNotifyValue(false, for: old)
+    private func lampTransport(_ session: Session) -> LampTransport? {
+        if let transport = session.device.lampTransport { return transport }
+        return LampTransport.detect(name: session.device.name)
+    }
+
+    private func activeWriteCharacteristic(_ session: Session) -> CBCharacteristic? {
+        let preferred: String
+        switch session.device.kind {
+        case .bms:
+            if session.device.bmsBrand == .yanyang {
+                preferred = BMSBrand.yanyang.writeID
+            } else {
+                preferred = bmsChannel.writeID
+            }
+        case .shilanLight: preferred = "FFF2"
+        case .charger: preferred = "FFE1"
+        case .dianjingMeter: preferred = "FF01"
+        case .lamp:
+            switch lampTransport(session) {
+            case .gattFFF0: preferred = "FFF2"
+            case .gatt2760: preferred = "00002760-08C2-11E1-9073-0E8AC72E0001"
+            default: preferred = "FFE1"
+            }
         }
-        guard let notify = characteristics[channel.notifyID] else {
+        if let exact = session.characteristics[preferred] { return exact }
+        if let notify = session.activeNotify, let chars = notify.service?.characteristics {
+            let writable = chars.filter {
+                $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
+            }
+            if let sameService = writable.first(where: { Self.shortUUIDKey($0.uuid) == preferred }) { return sameService }
+            if let ffe2 = writable.first(where: { Self.shortUUIDKey($0.uuid) == "FFE2" }) { return ffe2 }
+            if let first = writable.first { return first }
+        }
+        return session.characteristics.values.first {
+            $0.properties.contains(.write) || $0.properties.contains(.writeWithoutResponse)
+        }
+    }
+
+    static func shortUUIDKey(_ uuid: CBUUID) -> String {
+        let raw = uuid.uuidString.uppercased()
+        guard raw.count == 36 else { return raw }
+        let parts = raw.split(separator: "-")
+        if parts.count == 5,
+           parts[1] == "0000", parts[2] == "1000", parts[3] == "8000",
+           parts[4] == "00805F9B34FB", parts[0].hasPrefix("0000") {
+            return String(parts[0].suffix(4))
+        }
+        return raw
+    }
+
+    private func propTags(_ c: CBCharacteristic) -> String {
+        var tags = ""
+        if c.properties.contains(.read) { tags += "读" }
+        if c.properties.contains(.write) { tags += tags.isEmpty ? "写" : " 写" }
+        if c.properties.contains(.writeWithoutResponse) { tags += " 写无应答" }
+        if c.properties.contains(.notify) { tags += " 通知" }
+        return tags.isEmpty ? "-" : tags
+    }
+
+    // MARK: - BMS 通道
+
+    func selectBMSChannel(_ channel: BMSChannel) async throws {
+        guard let session = sessionByKind[.bms], session.peripheral.state == .connected else {
+            throw DeviceBLEError.notConnected
+        }
+        if let old = session.activeNotify, old.uuid.uuidString.uppercased() != channel.notifyID {
+            session.peripheral.setNotifyValue(false, for: old)
+        }
+        guard let notify = session.characteristics[channel.notifyID] else {
             throw DeviceBLEError.characteristicMissing
         }
         bmsChannel = channel
-        activeNotify = notify
+        session.activeNotify = notify
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            notifyContinuation = continuation
-            let timer = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                let cont = self.notifyContinuation
-                self.notifyContinuation = nil
+            session.notifyContinuation = continuation
+            let timer = DispatchWorkItem { [weak session] in
+                guard let session else { return }
+                let cont = session.notifyContinuation
+                session.notifyContinuation = nil
                 cont?.resume(throwing: DeviceBLEError.timeout)
             }
-            notifyTimeout = timer
+            session.notifyTimeout = timer
             DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timer)
-            p.setNotifyValue(true, for: notify)
+            session.peripheral.setNotifyValue(true, for: notify)
         }
         log("切换到 \(channel.title)")
     }
 
     // MARK: - 写入
 
-    /// 按 iOS 当前 MTU 自动分片；无应答写入片间留 20ms，避免设备丢包
-    func write(_ data: Data, useResponse: Bool = false) async throws {
-        guard let p = peripheral, p.state == .connected else { throw DeviceBLEError.notConnected }
-        guard let characteristic = activeWriteCharacteristic() else { throw DeviceBLEError.characteristicMissing }
-
-        // 特征只支持带应答写入时必须用 .withResponse：
-        // 对仅有 .write 属性的特征发 .withoutResponse 会被 CoreBluetooth 静默丢弃（不报错、设备收不到）
+    func write(_ data: Data, kind: DeviceKind, useResponse: Bool = false) async throws {
+        guard let session = sessionByKind[kind], session.peripheral.state == .connected else {
+            throw DeviceBLEError.notConnected
+        }
+        guard let characteristic = activeWriteCharacteristic(session) else {
+            throw DeviceBLEError.characteristicMissing
+        }
+        let p = session.peripheral
         let useResponseFinal = useResponse || !characteristic.properties.contains(.writeWithoutResponse)
         let type: CBCharacteristicWriteType = useResponseFinal ? .withResponse : .withoutResponse
         let maxLength = max(20, min(512, p.maximumWriteValueLength(for: type) - 3))
@@ -480,14 +578,14 @@ final class DeviceBLEManager: NSObject, ObservableObject {
             let chunk = data.subdata(in: offset..<(offset + length))
             if useResponseFinal {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    writeContinuation = continuation
-                    let timer = DispatchWorkItem { [weak self] in
-                        guard let self else { return }
-                        let cont = self.writeContinuation
-                        self.writeContinuation = nil
+                    session.writeContinuation = continuation
+                    let timer = DispatchWorkItem { [weak session] in
+                        guard let session else { return }
+                        let cont = session.writeContinuation
+                        session.writeContinuation = nil
                         cont?.resume(throwing: DeviceBLEError.timeout)
                     }
-                    writeTimeout = timer
+                    session.writeTimeout = timer
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: timer)
                     p.writeValue(chunk, for: characteristic, type: type)
                 }
@@ -497,14 +595,23 @@ final class DeviceBLEManager: NSObject, ObservableObject {
             }
             offset += length
         }
-        log("发送 \(data.count) 字节：\(data.map { String(format: "%02X", $0) }.joined())")
+        log("\(kind.shortTitle) 发送 \(data.count) 字节：\(data.map { String(format: "%02X", $0) }.joined())")
     }
 
-    private func finishWrite(_ error: Error?) {
-        writeTimeout?.cancel()
-        writeTimeout = nil
-        let continuation = writeContinuation
-        writeContinuation = nil
+    /// 兼容旧调用：仅一台已连接时可省略 kind
+    func write(_ data: Data, useResponse: Bool = false) async throws {
+        if connectedDevices.count == 1, let kind = connectedDevices.keys.first {
+            try await write(data, kind: kind, useResponse: useResponse)
+            return
+        }
+        throw DeviceBLEError.notConnected
+    }
+
+    private func finishWrite(_ session: Session, _ error: Error?) {
+        session.writeTimeout?.cancel()
+        session.writeTimeout = nil
+        let continuation = session.writeContinuation
+        session.writeContinuation = nil
         if let error {
             continuation?.resume(throwing: error)
         } else {
@@ -514,26 +621,30 @@ final class DeviceBLEManager: NSObject, ObservableObject {
 
     // MARK: - 断线重连
 
-    private func scheduleReconnect() {
-        guard autoReconnect, let device = connectedDevice else { return }
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
+    private func scheduleReconnect(_ session: Session) {
+        guard session.autoReconnect else { return }
+        let device = session.device
+        session.reconnectTask?.cancel()
+        session.reconnectTask = Task { [weak self] in
             guard let self else { return }
             for attempt in 1...5 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard self.autoReconnect, !Task.isCancelled else { return }
-                guard self.connectionState != .connected else { return }
+                guard !Task.isCancelled else { return }
+                guard self.connectionStates[device.kind] != .connected else { return }
                 do {
-                    try await self.connectCore(device)
-                    self.log("自动重连成功")
+                    try await self.connectCore(device, enableReconnect: true)
+                    self.log("\(device.kind.shortTitle) 自动重连成功")
                     return
                 } catch {
-                    self.log("自动重连 \(attempt)/5 失败")
+                    self.log("\(device.kind.shortTitle) 自动重连 \(attempt)/5 失败")
                 }
             }
-            self.autoReconnect = false
-            self.log("自动重连已达上限")
+            self.log("\(device.kind.shortTitle) 自动重连已达上限")
         }
+    }
+
+    private func session(for peripheral: CBPeripheral) -> Session? {
+        sessionsByID[peripheral.identifier] ?? sessionByKind.values.first { $0.peripheral === peripheral }
     }
 }
 
@@ -544,7 +655,6 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
         powerState = central.state
         if central.state != .poweredOn {
             lastError = DeviceBLEError.bluetoothOff.localizedDescription
-            failConnect(DeviceBLEError.bluetoothOff)
             stopScan()
         }
     }
@@ -559,7 +669,6 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
             ?? peripheral.name
             ?? ""
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]
-        // 无名 + 无法分类 = 噪声，直接丢弃（这是扫描变慢、列表太脏的主因）
         guard let kind = DeviceKind.classify(name: name, serviceUUIDs: services) else { return }
         guard scanKinds.contains(kind) else { return }
 
@@ -577,7 +686,6 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
             old.rssi = device.rssi
             if old.name.isEmpty, !device.name.isEmpty { old.name = device.name }
             discovered[index] = old
-            // 信号变强时上浮，方便点最近的那台
             discovered.sort { $0.rssi > $1.rssi }
         } else {
             discovered.append(device)
@@ -587,9 +695,10 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard peripheral.identifier == self.peripheral?.identifier else { return }
-        connectionState = .discovering
-        characteristics = [:]
+        guard let session = session(for: peripheral) else { return }
+        session.connectionState = .discovering
+        session.characteristics = [:]
+        publishState()
         peripheral.delegate = self
         peripheral.discoverServices(nil)
     }
@@ -599,7 +708,8 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
-        failConnect(error ?? DeviceBLEError.notConnected)
+        guard let session = session(for: peripheral) else { return }
+        failConnect(session, error ?? DeviceBLEError.notConnected)
     }
 
     func centralManager(
@@ -607,14 +717,17 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
-        guard peripheral.identifier == self.peripheral?.identifier else { return }
-        let wasConnected = connectionState == .connected
-        connectionState = .disconnected
-        characteristics = [:]
-        activeNotify = nil
-        failConnect(DeviceBLEError.notConnected)
-        if wasConnected { log("设备断开\(error.map { "：\($0.localizedDescription)" } ?? "")") }
-        scheduleReconnect()
+        guard let session = session(for: peripheral) else { return }
+        let wasConnected = session.connectionState == .connected
+        session.connectionState = .disconnected
+        session.characteristics = [:]
+        session.activeNotify = nil
+        failConnect(session, DeviceBLEError.notConnected)
+        publishState()
+        if wasConnected {
+            log("\(session.device.kind.shortTitle) 断开\(error.map { "：\($0.localizedDescription)" } ?? "")")
+        }
+        scheduleReconnect(session)
     }
 }
 
@@ -622,16 +735,17 @@ extension DeviceBLEManager: CBCentralManagerDelegate {
 
 extension DeviceBLEManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let session = session(for: peripheral) else { return }
         if let error {
-            failConnect(error)
+            failConnect(session, error)
             return
         }
         let services = peripheral.services ?? []
         guard !services.isEmpty else {
-            failConnect(DeviceBLEError.characteristicMissing)
+            failConnect(session, DeviceBLEError.characteristicMissing)
             return
         }
-        pendingServices = services.count
+        session.pendingServices = services.count
         for service in services {
             peripheral.discoverCharacteristics(nil, for: service)
         }
@@ -642,16 +756,16 @@ extension DeviceBLEManager: CBPeripheralDelegate {
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
+        guard let session = session(for: peripheral) else { return }
         if let error {
-            failConnect(error)
+            failConnect(session, error)
             return
         }
         for characteristic in service.characteristics ?? [] {
-            // 归一化成短码 key：128 位暴露的 FFE1/FFE2 也能按短码命中
-            characteristics[Self.shortUUIDKey(characteristic.uuid)] = characteristic
+            session.characteristics[Self.shortUUIDKey(characteristic.uuid)] = characteristic
         }
-        pendingServices -= 1
-        if pendingServices <= 0 { finishDiscovery() }
+        session.pendingServices -= 1
+        if session.pendingServices <= 0 { finishDiscovery(session) }
     }
 
     func peripheral(
@@ -659,25 +773,26 @@ extension DeviceBLEManager: CBPeripheralDelegate {
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        // 通道切换时会先关闭旧特征；旧特征的状态回调不能误消费新特征的 continuation
-        guard let active = activeNotify, characteristic.uuid == active.uuid else { return }
-        notifyTimeout?.cancel()
-        notifyTimeout = nil
-        let continuation = notifyContinuation
-        notifyContinuation = nil
+        guard let session = session(for: peripheral) else { return }
+        guard let active = session.activeNotify, characteristic.uuid == active.uuid else { return }
+        session.notifyTimeout?.cancel()
+        session.notifyTimeout = nil
+        let continuation = session.notifyContinuation
+        session.notifyContinuation = nil
         if let error {
             lastError = error.localizedDescription
-            if connectContinuation != nil { failConnect(error) }
+            if session.connectContinuation != nil { failConnect(session, error) }
             continuation?.resume(throwing: error)
             return
         }
-        if characteristic.isNotifying, connectContinuation != nil {
-            connectionState = .connected
-            let cont = connectContinuation
-            connectContinuation = nil
+        if characteristic.isNotifying, session.connectContinuation != nil {
+            session.connectionState = .connected
+            let cont = session.connectContinuation
+            session.connectContinuation = nil
             cont?.resume()
+            publishState()
             saveConnectionArchive()
-            log("连接就绪")
+            log("\(session.device.kind.shortTitle) 连接就绪")
         }
         continuation?.resume()
     }
@@ -692,7 +807,11 @@ extension DeviceBLEManager: CBPeripheralDelegate {
             return
         }
         guard let data = characteristic.value else { return }
-        for handler in dataHandlers.values { handler(data) }
+        guard let session = session(for: peripheral) else { return }
+        let kind = session.device.kind
+        for entry in dataHandlers.values where entry.kind == kind {
+            entry.handler(data)
+        }
     }
 
     func peripheral(
@@ -700,6 +819,7 @@ extension DeviceBLEManager: CBPeripheralDelegate {
         didWriteValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        finishWrite(error)
+        guard let session = session(for: peripheral) else { return }
+        finishWrite(session, error)
     }
 }

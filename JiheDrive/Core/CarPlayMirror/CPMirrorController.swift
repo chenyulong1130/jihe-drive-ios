@@ -229,10 +229,11 @@ final class CPMirrorController: ObservableObject {
         // 但它只服务三处消费者——仪表投屏 / 画中画 / 网页预览；都不在用时
         // 别白解一路（整条 VT 解码管线跟预览抢 CPU/GPU，预览就发涩）
         receiver.onVideo = { [weak self] data, codec in
-            guard let self, codec == .h264 else { return }
+            guard let self else { return }
+            // H.264 / H.265 都进转码器：极核只要 H.264，HEVC 会在转码器里解码再重编码
             if self.castToZeeho || self.pip.isActive || self.pipWanted
                 || self.previewServer.hasActiveViewers() {
-                self.transcoder.appendAnnexB(data)
+                self.transcoder.appendAnnexB(data, codec: codec)
             }
         }
         // 本机预览帧：受接收端背压控制（积压时跳到关键帧），直接吃原始访问单元
@@ -553,14 +554,13 @@ final class CPMirrorController: ObservableObject {
                     Thread.sleep(forTimeInterval: 0.1)
                     continue
                 }
-                // 25fps 节流：仪表拉快也不超发
+                // 节流只能睡，不能 continue：0x72 已消费，必须回一帧，否则仪表黑屏。
+                let fps = max(self.transcoder.fps, 15)
                 let now = ProcessInfo.processInfo.systemUptime
-                let remaining = nextFrameTime - now
-                if remaining > 0 {
-                    Thread.sleep(forTimeInterval: min(remaining, 0.04))
-                    continue
+                if nextFrameTime > now {
+                    Thread.sleep(forTimeInterval: min(nextFrameTime - now, 0.08))
                 }
-                nextFrameTime = ProcessInfo.processInfo.systemUptime + 1.0 / 25.0
+                nextFrameTime = ProcessInfo.processInfo.systemUptime + 1.0 / fps
                 // 一次拉帧对应一次回帧：编码失败时在本次拉取内重试，别把请求吞掉。
                 var frame: Data?
                 for _ in 0..<20 {

@@ -91,10 +91,10 @@ final class CPVideoTranscoder {
 
     // MARK: - 输入：CarPlay Annex-B 访问单元
 
-    func appendAnnexB(_ accessUnit: Data) {
+    func appendAnnexB(_ accessUnit: Data, codec: CPVideoCodec = .h264) {
         decodeQueue.async { [weak self] in
             guard let self else { return }
-            self.decodeAnnexB(accessUnit)
+            self.decodeAnnexB(accessUnit, codec: codec)
         }
     }
 
@@ -220,6 +220,8 @@ final class CPVideoTranscoder {
             self.vps = nil
             self.sps = nil
             self.pps = nil
+            self.inputCodec = .h264
+            self.formatDirty = true
             self.bufferLock.lock()
             self.latestBuffer = nil
             self.bufferFresh = false
@@ -230,23 +232,35 @@ final class CPVideoTranscoder {
 
     // MARK: - 解码
 
-    private func decodeAnnexB(_ accessUnit: Data) {
+    /// 当前解码编码（CarPlay 可能给 H.264 或 H.265；输出给极核始终重编码为 H.264）
+    private var inputCodec: CPVideoCodec = .h264
+
+    private func decodeAnnexB(_ accessUnit: Data, codec: CPVideoCodec) {
+        if codec != inputCodec {
+            inputCodec = codec
+            vps = nil; sps = nil; pps = nil
+            formatDirty = true
+            if let old = decoder { VTDecompressionSessionInvalidate(old); decoder = nil }
+            MirrorLogStore.append("转码器输入编码切换为 \(codec.displayName)")
+        }
         guard let units = try? CPAnnexB.units(in: accessUnit) else { return }
         var picture: [Data] = []
         for unit in units {
-            switch codecRole(unit) {
+            switch codecRole(unit, codec: codec) {
             case .vps: if vps != unit { vps = unit; formatDirty = true }
             case .sps: if sps != unit { sps = unit; formatDirty = true }
             case .pps: if pps != unit { pps = unit; formatDirty = true }
             case nil: picture.append(unit)
             }
         }
-        guard !picture.isEmpty, sps != nil, pps != nil else { return }
+        // H.265 需要 VPS+SPS+PPS；H.264 只要 SPS+PPS
+        let paramsReady = sps != nil && pps != nil && (codec == .h264 || vps != nil)
+        guard !picture.isEmpty, paramsReady else { return }
         if decoder == nil || formatDirty {
-            guard buildDecoder() else { return }
+            guard buildDecoder(codec: codec) else { return }
         }
         guard let decoder, let format = decoderFormat else { return }
-        // Annex-B → AVCC（4 字节长度前缀）打包为 CMSampleBuffer
+        // Annex-B → AVCC/HVCC（4 字节长度前缀）打包为 CMSampleBuffer
         var avcc = Data()
         for unit in picture {
             avcc.putBE32(UInt32(unit.count))
@@ -285,23 +299,24 @@ final class CPVideoTranscoder {
 
     private enum CodecRole { case vps, sps, pps }
 
-    private func codecRole(_ unit: Data) -> CodecRole? {
-        guard let first = unit.first else { return nil }
-        switch first & 0x1f {
-        case 7: return .sps
-        case 8: return .pps
-        default: return nil
+    private func codecRole(_ unit: Data, codec: CPVideoCodec) -> CodecRole? {
+        switch codec.parameterSet(unit) {
+        case .vps: return .vps
+        case .sps: return .sps
+        case .pps: return .pps
+        case nil: return nil
         }
     }
 
-    private func buildDecoder() -> Bool {
+    private func buildDecoder(codec: CPVideoCodec) -> Bool {
         formatDirty = false
         guard let sps, let pps else { return false }
+        if codec == .h265, vps == nil { return false }
         if let old = decoder { VTDecompressionSessionInvalidate(old); self.decoder = nil }
         var format: CMVideoFormatDescription?
         var sets: [UnsafePointer<UInt8>] = []
         var sizes: [Int] = []
-        let payloads = [sps, pps]
+        let payloads: [Data] = codec == .h265 ? [vps!, sps, pps] : [sps, pps]
         for payload in payloads {
             let length = payload.count
             let pointer = UnsafeMutablePointer<UInt8>.allocate(capacity: length)
@@ -309,16 +324,28 @@ final class CPVideoTranscoder {
             sets.append(UnsafePointer(pointer))
             sizes.append(length)
         }
-        let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-            allocator: kCFAllocatorDefault,
-            parameterSetCount: sets.count,
-            parameterSetPointers: &sets,
-            parameterSetSizes: &sizes,
-            nalUnitHeaderLength: 4,
-            formatDescriptionOut: &format)
+        let status: OSStatus
+        if codec == .h265 {
+            status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                allocator: kCFAllocatorDefault,
+                parameterSetCount: sets.count,
+                parameterSetPointers: &sets,
+                parameterSetSizes: &sizes,
+                nalUnitHeaderLength: 4,
+                extensions: nil,
+                formatDescriptionOut: &format)
+        } else {
+            status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                allocator: kCFAllocatorDefault,
+                parameterSetCount: sets.count,
+                parameterSetPointers: &sets,
+                parameterSetSizes: &sizes,
+                nalUnitHeaderLength: 4,
+                formatDescriptionOut: &format)
+        }
         for pointer in sets { UnsafeMutablePointer(mutating: pointer).deallocate() }
         guard status == noErr, let format else {
-            MirrorLogStore.append("构建 H.264 解码描述失败（\(status)）")
+            MirrorLogStore.append("构建 \(codec.displayName) 解码描述失败（\(status)）")
             return false
         }
         decoderFormat = format

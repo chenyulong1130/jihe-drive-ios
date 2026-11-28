@@ -93,7 +93,7 @@ final class DianjingStore: ObservableObject {
 
     /// 连接后补读电池/设备信息/配置（对齐小程序 synchroData 的 connected 阶段）
     private func bootstrap() async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.dianjingMeter) else { return }
         let targets: [UInt8] = [
             DianjingRegister.batteryDirect,
             DianjingRegister.deviceID,
@@ -108,7 +108,7 @@ final class DianjingStore: ObservableObject {
         ]
         for target in targets {
             do {
-                try await ble.write(DianjingProtocol.readFrame(target))
+                try await ble.write(DianjingProtocol.readFrame(target), kind: .dianjingMeter)
                 try? await Task.sleep(nanoseconds: 80_000_000)
             } catch {
                 appendLog("读寄存器 \(target) 失败：\(error.localizedDescription)")
@@ -118,9 +118,9 @@ final class DianjingStore: ObservableObject {
 
     /// 轮询改为低频保活 + 周期回读当前表盘样式/配置
     private func pollOnce() async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.dianjingMeter) else { return }
         do {
-            try await ble.write(DianjingProtocol.readFrame(DianjingRegister.dialStyle))
+            try await ble.write(DianjingProtocol.readFrame(DianjingRegister.dialStyle), kind: .dianjingMeter)
         } catch {
             appendLog("读取失败：\(error.localizedDescription)")
         }
@@ -218,9 +218,9 @@ final class DianjingStore: ObservableObject {
     }
 
     private func sendSet(_ target: UInt8, content: [UInt8]) async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.dianjingMeter) else { return }
         do {
-            try await ble.write(DianjingProtocol.setFrame(target, content: content))
+            try await ble.write(DianjingProtocol.setFrame(target, content: content), kind: .dianjingMeter)
             appendLog("SET 寄存器 \(target)：\(content.map { String(format: "%02X", $0) }.joined())")
         } catch {
             appendLog("写入失败：\(error.localizedDescription)")

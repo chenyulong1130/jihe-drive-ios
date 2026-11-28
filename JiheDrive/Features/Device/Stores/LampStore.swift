@@ -24,9 +24,9 @@ final class LampStore: ObservableObject {
 
     func attach(_ ble: DeviceBLEManager) {
         self.ble = ble
-        transport = ble.connectedDevice?.lampTransport ?? LampTransport.detect(name: ble.connectedDevice?.name ?? "")
+        transport = ble.connectedDevice(for: .lamp)?.lampTransport ?? LampTransport.detect(name: ble.connectedDevice(for: .lamp)?.name ?? "")
         // 产品识别（速调试同款目录机制）：最长前缀匹配 → 产品名 + 产品 ID
-        if let name = ble.connectedDevice?.name, let matched = LampCatalog.match(for: name) {
+        if let name = ble.connectedDevice(for: .lamp)?.name, let matched = LampCatalog.match(for: name) {
             catalogProductName = matched.productName
             catalogProductId = matched.productId
             libraryModes = LampModeLibrary.modes(for: matched.productId)
@@ -58,7 +58,7 @@ final class LampStore: ObservableObject {
     // MARK: - 组帧下发
 
     private func send(parent: UInt8, command: UInt8, payload: [UInt8], genericMapped: Bool = false, label: String, channel: Int? = nil) async {
-        guard let ble, ble.isConnected else { return }
+        guard let ble, ble.isConnected(.lamp) else { return }
         guard let transport else {
             lastError = "未识别灯具通道，请在扫描列表手动按灯具打开"
             return
@@ -99,7 +99,7 @@ final class LampStore: ObservableObject {
         commandBusy = true
         defer { commandBusy = false }
         do {
-            try await ble.write(frame, useResponse: transport != .uq)
+            try await ble.write(frame, kind: .lamp, useResponse: transport != .uq)
             appendLog("\(label)：\(frame.hexString)")
         } catch {
             lastError = error.localizedDescription
