@@ -408,57 +408,84 @@ struct MirrorView: View {
         .sheetChrome()
     }
 
-    /// 画面参数卡：分辨率 / 帧率 / 外观 / 图标大小（对齐 CarWithin 参数面）
+    /// 画面参数卡：分辨率 / 帧率 / 外观 / 图标大小（对齐 CarWithin 参数面）。
+    /// 用 Menu+Picker（项目内已验证的稳定模式），不用 segmented（部分系统版本崩溃案例）。
     private var displayConfigCard: some View {
         AppleCard(padding: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("画面参数")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.label)
-                Picker("分辨率", selection: Binding(
-                    get: { CPDisplayConfig.resolution },
-                    set: { CPDisplayConfig.resolution = $0 }
-                )) {
+                displayMenuRow("分辨率", current: CPDisplayConfig.resolution.rawValue) {
                     ForEach(CPDisplayConfig.Resolution.allCases) { res in
-                        Text(res.rawValue).tag(res)
+                        Button {
+                            CPDisplayConfig.resolution = res
+                        } label: {
+                            Label(res.rawValue, systemImage: CPDisplayConfig.resolution == res ? "checkmark" : "circle")
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                Picker("帧率", selection: Binding(
-                    get: { CPDisplayConfig.fps },
-                    set: { CPDisplayConfig.fps = $0 }
-                )) {
+                displayMenuRow("帧率", current: CPDisplayConfig.fps.title) {
                     ForEach(CPDisplayConfig.FPS.allCases) { item in
-                        Text(item.title).tag(item)
+                        Button {
+                            CPDisplayConfig.fps = item
+                        } label: {
+                            Label(item.title, systemImage: CPDisplayConfig.fps == item ? "checkmark" : "circle")
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                Picker("外观", selection: Binding(
-                    get: { CPDisplayConfig.appearance },
-                    set: { newValue in
-                        CPDisplayConfig.appearance = newValue
-                        // 白天/夜间实时切换 CarPlay 界面；跟随系统需重启 CarPlay
-                        controller.applyCarPlayAppearance()
-                    }
-                )) {
+                displayMenuRow("外观", current: CPDisplayConfig.appearance.title) {
                     ForEach(CPDisplayConfig.Appearance.allCases) { item in
-                        Text(item.title).tag(item)
+                        Button {
+                            CPDisplayConfig.appearance = item
+                            // 白天/夜间实时切换 CarPlay 界面；跟随系统需重启 CarPlay
+                            controller.applyCarPlayAppearance()
+                        } label: {
+                            Label(item.title, systemImage: CPDisplayConfig.appearance == item ? "checkmark" : "circle")
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                Picker("图标大小", selection: Binding(
-                    get: { CPDisplayConfig.iconSize },
-                    set: { CPDisplayConfig.iconSize = $0 }
-                )) {
+                displayMenuRow("图标大小", current: CPDisplayConfig.iconSize.title) {
                     ForEach(CPDisplayConfig.IconSize.allCases) { item in
-                        Text(item.title).tag(item)
+                        Button {
+                            CPDisplayConfig.iconSize = item
+                        } label: {
+                            Label(item.title, systemImage: CPDisplayConfig.iconSize == item ? "checkmark" : "circle")
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
                 Text("分辨率/帧率/图标大小需停止并重新启动 CarPlay 生效；外观实时切换（回到跟随系统需重启）。触控坐标自动跟随分辨率。")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 「标题 ··· 当前值」行：点开弹菜单
+    private func displayMenuRow<Options: View>(
+        _ title: String, current: String,
+        @ViewBuilder options: () -> Options
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.label)
+            Spacer(minLength: 8)
+            Menu {
+                options()
+            } label: {
+                HStack(spacing: 4) {
+                    Text(current)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.brand)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.tertiary)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Theme.brand.opacity(0.10), in: Capsule())
             }
         }
     }
@@ -684,33 +711,33 @@ struct MirrorView: View {
                         Text("投屏参数")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(Theme.secondary)
-                        Picker("投屏帧率", selection: Binding(
-                            get: { CPDisplayConfig.zeehoFPS },
-                            set: { CPDisplayConfig.zeehoFPS = $0 }
-                        )) {
+                        displayMenuRow("帧率", current: CPDisplayConfig.zeehoFPS.title) {
                             ForEach(CPDisplayConfig.ZeehoFPS.allCases) { item in
-                                Text(item.title).tag(item)
+                                Button {
+                                    CPDisplayConfig.zeehoFPS = item
+                                } label: {
+                                    Label(item.title, systemImage: CPDisplayConfig.zeehoFPS == item ? "checkmark" : "circle")
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
-                        Picker("投屏码率", selection: Binding(
-                            get: { CPDisplayConfig.zeehoBitrate },
-                            set: { CPDisplayConfig.zeehoBitrate = $0 }
-                        )) {
+                        displayMenuRow("码率", current: CPDisplayConfig.zeehoBitrate.title) {
                             ForEach(CPDisplayConfig.ZeehoBitrate.allCases) { item in
-                                Text(item.title).tag(item)
+                                Button {
+                                    CPDisplayConfig.zeehoBitrate = item
+                                } label: {
+                                    Label(item.title, systemImage: CPDisplayConfig.zeehoBitrate == item ? "checkmark" : "circle")
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
-                        Picker("编码档位", selection: Binding(
-                            get: { CPDisplayConfig.zeehoProfile },
-                            set: { CPDisplayConfig.zeehoProfile = $0 }
-                        )) {
+                        displayMenuRow("编码档位", current: CPDisplayConfig.zeehoProfile.title) {
                             ForEach(CPDisplayConfig.ZeehoProfile.allCases) { item in
-                                Text(item.title).tag(item)
+                                Button {
+                                    CPDisplayConfig.zeehoProfile = item
+                                } label: {
+                                    Label(item.title, systemImage: CPDisplayConfig.zeehoProfile == item ? "checkmark" : "circle")
+                                }
                             }
                         }
-                        .pickerStyle(.segmented)
                         Text("自动码率 = 2.5Mbps × 帧率/25；Main 档同码率文字更清晰。修改后重启 CarPlay 生效。")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.tertiary)
