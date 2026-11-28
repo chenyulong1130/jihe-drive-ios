@@ -596,36 +596,71 @@ final class CPDisplaySurface: UIView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // pan 接管指针期间原始移动不上报（同一手指不占双槽）
+        guard !panOwnsPointer else { return }
         update(touches)
         // 移动立即上报（带变化去重）：不等 16ms 定时器节拍，少半帧指针延迟
         flushContacts()
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard !panOwnsPointer else { return }
         lift(touches)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard !panOwnsPointer else { return }
         lift(touches)
     }
 
     // MARK: - 拖动救援（页面滚动拦截 touchesCancelled 时由 Pan 手势续传）
+    //
+    // Pan 手势与页面滚动并行识别；激活后指针归属权交给 pan（固定 key），
+    // 原始 touches 路径暂停，避免同一根手指占两个 HID 槽。
+
+    /// pan 接管的指针 key（与 UITouch.hash 域不冲突的常量）
+    private static let panPointerKey = 1_000_001
+    /// pan 正在驱动指针：raw touches 的 move/end 不再上报
+    private var panOwnsPointer = false
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
-        // 与 touchesBegan 共用同一个 UITouch hash key，槽位连续不重开
-        guard let touch = gesture.touches(for: self).first else { return }
+        let location = gesture.location(in: self)
+        let rect = videoRect()
+        let key = Self.panPointerKey
         switch gesture.state {
         case .began:
-            update([touch])
+            // 归属权交接：抬起当前所有原始触点，改由 pan 指针接管
+            panOwnsPointer = true
+            let held = contacts.keys
+            liftKeys(held)
+            guard rect.contains(location) else { return }
+            let x = Double((location.x - rect.minX) / rect.width)
+            let y = Double((location.y - rect.minY) / rect.height)
+            contacts[key] = TouchState(x: min(max(x, 0), 1), y: min(max(y, 0), 1), down: true)
+            startTouchTimerIfNeeded()
             flushContacts()
         case .changed:
-            update([touch])
+            guard panOwnsPointer, rect.contains(location) else { return }
+            let x = Double((location.x - rect.minX) / rect.width)
+            let y = Double((location.y - rect.minY) / rect.height)
+            contacts[key] = TouchState(x: min(max(x, 0), 1), y: min(max(y, 0), 1), down: true)
             flushContacts()
         case .ended, .cancelled, .failed:
-            lift([touch])
+            guard panOwnsPointer else { return }
+            panOwnsPointer = false
+            contacts[key]?.down = false
+            flushContacts()
         default:
             break
         }
+    }
+
+    /// 按 key 抬起触点（pan 接管时释放原始触点占用）
+    private func liftKeys(_ keys: [Int]) {
+        for key in keys {
+            contacts[key]?.down = false
+        }
+        flushContacts()
     }
 }
 

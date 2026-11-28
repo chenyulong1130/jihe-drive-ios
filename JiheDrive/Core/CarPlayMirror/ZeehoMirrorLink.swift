@@ -56,7 +56,6 @@ final class ZeehoMirrorLink {
         let announcement: UInt16
         /// 对齐参考实现 PxcConnection：手机监听 10920(视频)/10921(媒体)/10922(控制)，
         /// 仪表回连这三个端口；10930 只用于投屏请求探测。
-        /// （此前 10710/10711 是首驱方案的端口，PXC 仪表永远不会回连。）
         static let standard = Ports(control: 10922, auxiliary: 10921, video: 10920, announcement: 10930)
     }
 
@@ -638,7 +637,6 @@ final class ZeehoMirrorLink {
         switch request.command {
         case 0x10:
             // 媒体采集配置（对齐参考 PxcConnection.captureConfiguration：
-            // 只解析 尺寸/帧率/编码器/扩展标志——身份回显校验是首驱方案逻辑，
             // 真实 PXC 仪表配置载荷可能不足 32 字节，强校验会误杀会话）
             guard request.payload.count >= 4 else { throw CPError.malformed("媒体配置载荷不足 4 字节") }
             let width = request.payload.uint16LE(0)
@@ -695,7 +693,6 @@ final class ZeehoMirrorLink {
         case 0x40:
             response = 0x41
         case 0x30:
-            // 版本查询对齐参考实现：回 [u32 3][u32 1]（此前回 5002 系首驱方案遗留）
             ZeehoMirrorFrame.appendLE(&payload, UInt32(3))
             ZeehoMirrorFrame.appendLE(&payload, UInt32(1))
             response = 0x31

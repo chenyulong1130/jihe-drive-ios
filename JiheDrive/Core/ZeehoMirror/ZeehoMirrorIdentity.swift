@@ -123,13 +123,6 @@ enum ZeehoMirrorIdentity {
         return signature as Data
     }
 
-    /// 校验仪表回显的签名（防串台：回显必须等于我们自己签出的内容）。
-    static func verifyEcho(_ identity: Identity, signature: Data, huid: String) -> Bool {
-        guard let publicKey = SecKeyCopyPublicKey(identity.key) else { return false }
-        var error: Unmanaged<CFError>?
-        return SecKeyVerifySignature(publicKey, .rsaSignatureDigestPKCS1v15Raw,
-                                     Data(huid.utf8) as CFData, signature as CFData, &error)
-    }
 
     private static func der(_ tag: UInt8, _ payload: Data) -> Data {
         var header = Data([tag])
