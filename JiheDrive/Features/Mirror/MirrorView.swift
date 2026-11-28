@@ -21,6 +21,8 @@ struct MirrorView: View {
     @State private var wifiSaved = false
     @State private var showLogs = false
     @State private var showSettings = false
+    /// 分辨率/帧率/图标大小属「重启 CarPlay 生效」参数：改动后亮出提示，关弹窗复位
+    @State private var displayNeedsRestart = false
     @State private var showStartupHint = false
     @State private var startupHintTask: Task<Void, Never>?
     @State private var exitButtonVisible = true
@@ -87,6 +89,9 @@ struct MirrorView: View {
         }
         .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
         .sheet(isPresented: $showSettings) { settingsSheet }
+        .onChange(of: showSettings) { _, shown in
+            if !shown { displayNeedsRestart = false }
+        }
         .sheet(isPresented: $showLogs) { logsSheet }
         .onChange(of: showFullscreen) { _, active in
             // 翻转状态由父级驱动：全屏 cover 的 onDisappear 在部分退出路径不回调，
@@ -534,53 +539,122 @@ struct MirrorView: View {
     }
 
     /// 画面参数卡：分辨率 / 帧率 / 外观 / 图标大小（对齐 CarWithin 参数面）。
-    /// 用 Menu+Picker（项目内已验证的稳定模式），不用 segmented（部分系统版本崩溃案例）。
+    /// chip 点选式选择器（整行均分、选中高亮、即时生效项带小注），
+    /// 不用 segmented（部分系统版本崩溃案例）。
     private var displayConfigCard: some View {
         AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 settingsIconTitle("画面参数", icon: "rectangle.ratio.16.to.9", tint: Theme.brand)
-                displayMenuRow("分辨率", current: CPDisplayConfig.resolution.rawValue) {
-                    ForEach(CPDisplayConfig.Resolution.allCases) { res in
-                        Button {
-                            CPDisplayConfig.resolution = res
-                        } label: {
-                            Label(res.rawValue, systemImage: CPDisplayConfig.resolution == res ? "checkmark" : "circle")
-                        }
-                    }
+
+                chipRow("分辨率", tint: Theme.brand,
+                        items: CPDisplayConfig.Resolution.allCases.map(\.rawValue),
+                        currentIndex: CPDisplayConfig.Resolution.allCases
+                            .firstIndex(of: CPDisplayConfig.resolution) ?? 1) { index in
+                    CPDisplayConfig.resolution = CPDisplayConfig.Resolution.allCases[index]
+                    displayNeedsRestart = true
                 }
-                displayMenuRow("帧率", current: CPDisplayConfig.fps.title) {
-                    ForEach(CPDisplayConfig.FPS.allCases) { item in
-                        Button {
-                            CPDisplayConfig.fps = item
-                        } label: {
-                            Label(item.title, systemImage: CPDisplayConfig.fps == item ? "checkmark" : "circle")
-                        }
-                    }
+                Text("当前输出 \(CPDisplayConfig.width) × \(CPDisplayConfig.height) px")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(Theme.tertiary)
+                    .padding(.top, -6)
+
+                chipRow("帧率", tint: Theme.green,
+                        items: CPDisplayConfig.FPS.allCases.map(\.title),
+                        currentIndex: CPDisplayConfig.FPS.allCases
+                            .firstIndex(of: CPDisplayConfig.fps) ?? 0) { index in
+                    CPDisplayConfig.fps = CPDisplayConfig.FPS.allCases[index]
+                    displayNeedsRestart = true
                 }
-                displayMenuRow("外观", current: CPDisplayConfig.appearance.title) {
-                    ForEach(CPDisplayConfig.Appearance.allCases) { item in
-                        Button {
-                            CPDisplayConfig.appearance = item
-                            // 白天/夜间实时切换 CarPlay 界面；跟随系统需重启 CarPlay
-                            controller.applyCarPlayAppearance()
-                        } label: {
-                            Label(item.title, systemImage: CPDisplayConfig.appearance == item ? "checkmark" : "circle")
-                        }
-                    }
+
+                chipRow("外观", tint: Theme.teal,
+                        items: CPDisplayConfig.Appearance.allCases.map(\.title),
+                        symbols: ["circle.lefthalf.filled", "sun.max.fill", "moon.fill"],
+                        currentIndex: CPDisplayConfig.Appearance.allCases
+                            .firstIndex(of: CPDisplayConfig.appearance) ?? 0) { index in
+                    CPDisplayConfig.appearance = CPDisplayConfig.Appearance.allCases[index]
+                    // 白天/夜间实时切换 CarPlay 界面；跟随系统需重启 CarPlay
+                    controller.applyCarPlayAppearance()
                 }
-                displayMenuRow("图标大小", current: CPDisplayConfig.iconSize.title) {
-                    ForEach(CPDisplayConfig.IconSize.allCases) { item in
-                        Button {
-                            CPDisplayConfig.iconSize = item
-                        } label: {
-                            Label(item.title, systemImage: CPDisplayConfig.iconSize == item ? "checkmark" : "circle")
-                        }
-                    }
+
+                chipRow("图标大小", tint: Theme.orange,
+                        items: CPDisplayConfig.IconSize.allCases.map(\.title),
+                        circleSizes: [13, 10, 8, 6],
+                        currentIndex: CPDisplayConfig.IconSize.allCases
+                            .firstIndex(of: CPDisplayConfig.iconSize) ?? 1) { index in
+                    CPDisplayConfig.iconSize = CPDisplayConfig.IconSize.allCases[index]
+                    displayNeedsRestart = true
                 }
-                Text("分辨率 / 帧率 / 图标大小需重启 CarPlay；外观可实时切换（回跟随系统需重启）。")
+                Text("图标大小 = 声明给手机的屏幕物理宽度（\(CPDisplayConfig.widthPhysicalMM) mm）")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(Theme.tertiary)
+                    .padding(.top, -6)
+
+                if displayNeedsRestart {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("画面参数已修改 · 重启 CarPlay 后生效")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.orange)
+                    .padding(10)
+                    .background(Theme.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                Text("外观可实时切换；分辨率 / 帧率 / 图标大小在重启 CarPlay 后生效。")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 「标题 + 整行 chip 组」选择器：选中项填充主题色，
+    /// 可选 symbols（SF Symbol 前缀）或 circleSizes（圆形大小预览，图标大小档用）。
+    private func chipRow(_ title: String,
+                         tint: Color,
+                         items: [String],
+                         symbols: [String]? = nil,
+                         circleSizes: [CGFloat]? = nil,
+                         currentIndex: Int,
+                         action: @escaping (Int) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.label)
+            HStack(spacing: 8) {
+                ForEach(items.indices, id: \.self) { index in
+                    let selected = index == currentIndex
+                    Button {
+                        guard index != currentIndex else { return }
+                        action(index)
+                    } label: {
+                        HStack(spacing: 5) {
+                            if let symbols, index < symbols.count {
+                                Image(systemName: symbols[index])
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            if let circleSizes, index < circleSizes.count {
+                                Circle()
+                                    .fill(selected ? Color.white.opacity(0.92) : Theme.secondary.opacity(0.45))
+                                    .frame(width: circleSizes[index], height: circleSizes[index])
+                            }
+                            Text(items[index])
+                                .font(.system(size: 12.5, weight: selected ? .bold : .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                        .foregroundStyle(selected ? Color.white : Theme.label)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(selected ? tint : Theme.surfaceAlt)
+                        )
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                }
             }
         }
     }

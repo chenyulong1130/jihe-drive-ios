@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import SwiftUI
 
 // MARK: - 设备分类
 
@@ -57,6 +58,17 @@ enum DeviceKind: String, CaseIterable, Identifiable {
 
     /// 设备页主推：保护板 + 石栏 + 充电机 + 仪表 + 灯具
     static let primaryKinds: [DeviceKind] = [.bms, .shilanLight, .charger, .dianjingMeter, .lamp]
+
+    /// 各设备类主题色（设备卡 / 扫描列表共用一套视觉语言）
+    var accent: Color {
+        switch self {
+        case .bms: return .green
+        case .shilanLight: return .teal
+        case .charger: return .orange
+        case .dianjingMeter: return .indigo
+        case .lamp: return Color(hex: 0xF59E0B)
+        }
+    }
 
     /// 石栏沿用小程序的 8 位开机密码校验，其余设备不需要
     var requiresPowerAuth: Bool {

@@ -72,8 +72,7 @@ enum CPInfo {
             "features": displayFeatureHighFidelityTouch | displayFeatureKnobs,
             "primaryInputDevice": 1,
             // 外观：0 = 自动跟随手机；白天/夜间由会话就绪后发 setNightMode 命令切换
-            "uiAppearanceMode": 0, "uiAppearanceSetting": 0,
-            "mapAppearanceMode": 0, "mapAppearanceSetting": 0,
+            // （注意：字典字面量 key 重复会触发 Swift 运行时崩溃，此前构建 203 即因此闪退）
             "uiAppearanceMode": 0, "uiAppearanceSetting": 0,
             "mapAppearanceMode": 0, "mapAppearanceSetting": 0,
             "viewAreas": [view], "initialViewArea": 0,

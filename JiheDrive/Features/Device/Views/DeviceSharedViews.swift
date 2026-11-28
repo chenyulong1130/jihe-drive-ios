@@ -218,61 +218,33 @@ struct DeviceScanSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        filterChip(nil, title: "全部")
-                        ForEach(DeviceKind.allCases) { kind in
-                            filterChip(kind, title: kind.shortTitle)
-                        }
-                    }
-                    .padding(.horizontal, Theme.page)
-                    .padding(.vertical, 10)
-                }
-
-                if ble.isScanning {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("正在搜索附近设备 · 10 秒后自动停止")
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 12) {
+                    scanStatusBar
+                    if let error = ble.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(Theme.footnote)
-                            .foregroundStyle(Theme.secondary)
+                            .foregroundStyle(Theme.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(Theme.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.page)
-                    .padding(.bottom, 8)
-                }
+                    filterChips
 
-                if let error = ble.lastError {
-                    Text(error)
-                        .font(Theme.footnote)
-                        .foregroundStyle(Theme.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, Theme.page)
-                        .padding(.bottom, 8)
-                }
-
-                List {
                     if visibleDevices.isEmpty {
-                        VStack(spacing: 10) {
-                            Image(systemName: "bluetooth")
-                                .font(.system(size: 32))
-                                .foregroundStyle(Theme.tertiary)
-                            Text(ble.isScanning ? "正在搜索…" : "没有发现设备，请点击右上角重新扫描")
-                                .font(Theme.footnote)
-                                .foregroundStyle(Theme.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 60)
-                        .listRowBackground(Color.clear)
+                        emptyState
                     } else {
-                        ForEach(visibleDevices) { device in
-                            deviceRow(device)
-                                .listRowBackground(Theme.surface)
+                        VStack(spacing: 10) {
+                            ForEach(Array(visibleDevices.enumerated()), id: \.element.id) { index, device in
+                                deviceCard(device)
+                                    .staggerIn(min(index, 6))
+                            }
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
+                .padding(.horizontal, Theme.page)
+                .padding(.top, 6)
+                .padding(.bottom, 28)
             }
             .background(Theme.groupedBackground)
             .navigationTitle("连接设备")
@@ -300,46 +272,126 @@ struct DeviceScanSheet: View {
         }
     }
 
-    private func filterChip(_ kind: DeviceKind?, title: String) -> some View {
+    // MARK: 扫描状态条
+
+    private var scanStatusBar: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(ble.isScanning ? Theme.brand.opacity(0.14) : Theme.surfaceAlt)
+                if ble.isScanning {
+                    ProgressView()
+                        .tint(Theme.brand)
+                } else {
+                    Image(systemName: "bluetooth")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                }
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(ble.isScanning ? "正在搜索附近设备" : "扫描已暂停")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(ble.isScanning ? Theme.brand : Theme.secondary)
+                Text(ble.isScanning
+                     ? "约 10 秒后自动停止，可随时手动重扫"
+                     : "点右上角重新扫描")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            if !visibleDevices.isEmpty {
+                Text("\(visibleDevices.count) 台")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.brand)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Theme.brand.opacity(0.10), in: Capsule())
+            }
+        }
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: 分类过滤 chips
+
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                filterChip(nil, title: "全部", icon: "circle.grid.2x2.fill", tint: Theme.brand)
+                ForEach(DeviceKind.allCases) { kind in
+                    filterChip(kind, title: kind.shortTitle, icon: kind.icon, tint: kind.accent)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func filterChip(_ kind: DeviceKind?, title: String, icon: String, tint: Color) -> some View {
         let selected = activeFilter == kind
         return Button {
             withAnimation(.easeOut(duration: 0.18)) { activeFilter = kind }
         } label: {
-            Text(title)
-                .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color.white : Theme.label)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(selected ? Theme.brand : Theme.surface, in: Capsule())
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+            }
+            .foregroundStyle(selected ? Color.white : Theme.label)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .background(selected ? tint : Theme.surface, in: Capsule())
         }
         .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
     }
 
-    private func deviceRow(_ device: BLEDevice) -> some View {
-        let isConnecting = connectingID == device.id
-        return HStack(spacing: 12) {
-            Image(systemName: device.kind.icon)
-                .font(.system(size: 20))
-                .foregroundStyle(Theme.brand)
-                .frame(width: 32)
+    // MARK: 设备卡
 
-            VStack(alignment: .leading, spacing: 3) {
+    private func deviceCard(_ device: BLEDevice) -> some View {
+        let isConnecting = connectingID == device.id
+        let accent = device.kind.accent
+        return HStack(spacing: 12) {
+            // 类别徽标：与设备页卡片同一套渐变视觉
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.24), accent.opacity(0.08)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                Image(systemName: device.kind.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 4) {
                 // 扫描行标题 = 广播名（不改用户的蓝牙名）；分类收进下面一行
                 Text(device.displayName)
                     .font(Theme.headline)
                     .foregroundStyle(Theme.label)
+                    .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(device.kind.title)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(accent.opacity(0.12), in: Capsule())
                     if isConnecting {
-                        Text("· 连接中…")
+                        Label("连接中…", systemImage: "circle.dotted")
+                    } else {
+                        signalMeter(rssi: device.rssi)
                     }
                 }
-                .font(Theme.caption)
-                .foregroundStyle(isConnecting ? Theme.brand : Theme.secondary)
-                .lineLimit(1)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isConnecting ? accent : Theme.secondary)
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 6)
 
             Menu {
                 ForEach(DeviceKind.allCases) { kind in
@@ -351,8 +403,11 @@ struct DeviceScanSheet: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 18))
                     .foregroundStyle(Theme.secondary)
+                    .frame(width: 30, height: 30)
             }
+            .opacity(isConnecting ? 0.35 : 1)
 
             Button {
                 guard connectingID == nil else { return }
@@ -375,16 +430,83 @@ struct DeviceScanSheet: View {
                     Text("连接")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
+                        .padding(.horizontal, 15)
                         .padding(.vertical, 7)
-                        .background(Theme.brand, in: Capsule())
+                        .background(
+                            Capsule().fill(
+                                LinearGradient(
+                                    colors: [accent, accent.opacity(0.75)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                        )
                 }
             }
             .buttonStyle(PressableStyle(scale: 0.94, brightness: 0))
             .disabled(connectingID != nil && !isConnecting)
         }
-        .padding(.vertical, 4)
+        .padding(12)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .opacity(connectingID == nil || isConnecting ? 1 : 0.45)
+    }
+
+    // MARK: 信号强度（3 格，按 RSSI 分档着色）
+
+    @ViewBuilder
+    private func signalMeter(rssi: Int) -> some View {
+        let bars = rssi >= -63 ? 3 : (rssi >= -76 ? 2 : 1)
+        let tint: Color = bars == 3 ? Theme.green : (bars == 2 ? Theme.orange : Theme.red)
+        HStack(spacing: 4) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint.opacity(0.8))
+            HStack(alignment: .bottom, spacing: 1.5) {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(index < bars ? tint : Theme.separator.opacity(0.5))
+                        .frame(width: 3, height: CGFloat(4 + index * 3))
+                }
+            }
+            Text("\(rssi)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.tertiary)
+        }
+    }
+
+    // MARK: 空态
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Theme.brand.opacity(0.16), Theme.brand.opacity(0.05)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                Image(systemName: ble.isScanning ? "iphone.radiowaves.left.and.right" : "bluetooth.slash")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(Theme.brand)
+            }
+            .frame(width: 72, height: 72)
+
+            VStack(spacing: 5) {
+                Text(ble.isScanning ? "正在搜索附近的车辆设备…" : "没有发现设备")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label)
+                Text(ble.isScanning
+                     ? "请确认设备已上电并在附近，首次搜索可能需要几秒"
+                     : "点右上角重新扫描，或确认设备已上电")
+                    .font(Theme.footnote)
+                    .foregroundStyle(Theme.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 52)
+        .padding(.horizontal, 20)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

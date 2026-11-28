@@ -212,7 +212,7 @@ struct DeviceTabView: View {
     private func deviceCard(_ kind: DeviceKind) -> some View {
         let connected = ble.isConnected(kind)
         let device = ble.connectedDevice(for: kind)
-        let accent = accentColor(for: kind)
+        let accent = kind.accent
         return AppleCard(padding: 14, onTap: {
             if connected {
                 path.append(kind)
@@ -319,10 +319,20 @@ struct DeviceTabView: View {
                 summaryTile(value: rt?.parsed == true ? "运行" : "等待", unit: "", label: "实时帧", color: rt?.parsed == true ? Theme.green : Theme.secondary)
             })
         case .dianjingMeter:
+            // 实时配置摘要：显示模式（单显/轮切）· 表盘颜色/模式 · 轮换速度 · 背光亮度
+            let mode = dianjingStore.autoStyleState == 2 ? "轮切" : "单显"
+            let theme = dianjingThemeTitle(dianjingStore.dialStyle)
+            let rotation = dianjingStore.autoStyleTime > 0 ? "\(dianjingStore.autoStyleTime)s" : "--"
+            let backlightIndex = max(0, min(2, dianjingStore.backlight - 1))
             return AnyView(HStack(spacing: 8) {
-                summaryTile(value: dianjingStore.dialStyle.isEmpty ? "--" : dianjingStore.dialStyle, unit: "", label: "表盘", color: Theme.brand)
-                summaryTile(value: "\(dianjingStore.batterySeries)", unit: "串", label: "电池", color: Theme.green)
-                summaryTile(value: dianjingStore.batteryFullVoltage > 0 ? String(format: "%.1f", dianjingStore.batteryFullVoltage) : "--", unit: "V", label: "满电电压", color: Color(hex: 0x0EA5E9))
+                summaryTile(value: mode, unit: "", label: "显示模式",
+                            color: dianjingStore.autoStyleState == 2 ? Theme.teal : Theme.brand)
+                summaryTile(value: dianjingStore.dialStyle.isEmpty ? "--" : dianjingStore.dialStyle,
+                            unit: "", label: theme.isEmpty ? "颜色/模式" : theme, color: .indigo)
+                summaryTile(value: rotation, unit: "", label: "轮换速度",
+                            color: dianjingStore.autoStyleState == 2 ? Theme.green : Theme.secondary)
+                summaryTile(value: ["低", "中", "高"][backlightIndex], unit: "", label: "背光亮度",
+                            color: Theme.orange)
             })
         case .lamp:
             // 灯具：显示目录识别产品与模式库数量，点击卡片进详情调节
@@ -337,6 +347,16 @@ struct DeviceTabView: View {
     private func fmt1(_ value: Double?) -> String {
         guard let value else { return "--" }
         return String(format: "%.1f", value)
+    }
+
+    /// 点睛表盘样式 ID → 主题名（对齐 DianjingDetailView.styleGroups 分组）
+    private func dianjingThemeTitle(_ style: String) -> String {
+        let table = ["A01": "样式1", "A02": "样式2", "A03": "样式3", "A04": "样式4",
+                     "B01": "单体电压", "B02": "电池信息", "B03": "电池健康",
+                     "C01": "里程", "D01": "温度", "E01": "胎压"]
+        let id = style.uppercased()
+        for (key, title) in table where id.contains(key) { return title }
+        return ""
     }
 
     /// 列表记忆格点击：已连接石栏设备时直接下发移动，不进详情页；
@@ -432,16 +452,6 @@ struct DeviceTabView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("完成") { showBLELogs = false } }
             }
-        }
-    }
-
-    private func accentColor(for kind: DeviceKind) -> Color {
-        switch kind {
-        case .bms: return .green
-        case .shilanLight: return .teal
-        case .charger: return .orange
-        case .dianjingMeter: return .indigo
-        case .lamp: return Color(hex: 0xF59E0B)
         }
     }
 
