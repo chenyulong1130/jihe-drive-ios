@@ -1,10 +1,9 @@
 import Foundation
 
-/// 极核仪表 PXC 投屏协议的帧编解码。
+/// 极核仪表 PXC 投屏协议的帧编解码（对齐 CarWithin 参考实现）。
 /// 控制通道（TCP 10922）：16 字节头 = u32 命令 + u32 长度 + u32 命令⊕长度 + u32 标识符。
-/// 媒体通道（TCP 10711）：8 字节头 = u16 命令 + u16 长度 + u32 token。
-/// 视频通道（TCP 10710）：仪表逐帧拉取（u16 命令 0x72），手机回
-/// [首帧 8 字节零前缀][u32 长度][H.264 Annex-B 访问单元]。
+/// 媒体通道（TCP 10921，视频通道 10920 同协议）：8 字节头 = u16 命令 + u16 长度 + u32 token。
+/// 视频流：手机回 [u32 长度][H.264 Annex-B 访问单元]，仪表逐帧用 0x72 拉取。
 enum ZeehoMirrorFrame {
 
     struct Control {
@@ -85,13 +84,12 @@ enum ZeehoMirrorFrame {
 
     // MARK: - 视频帧
 
-    /// 首帧多带 8 字节零前缀（协议规定），之后每帧 = u32 长度 + H.264 访问单元。
-    static func encodeVideo(_ accessUnit: Data, isFirstFrame: Bool) throws -> Data {
+    /// 每帧 = u32 长度 + H.264 访问单元（对齐参考实现 sendH264，无首帧前缀）。
+    static func encodeVideo(_ accessUnit: Data) throws -> Data {
         guard accessUnit.count > 4, accessUnit.count <= 8 * 1_024 * 1_024 else {
             throw FrameError.invalid("H.264 帧长度")
         }
-        var data = Data(capacity: (isFirstFrame ? 8 : 0) + 4 + accessUnit.count)
-        if isFirstFrame { data.append(contentsOf: [UInt8](repeating: 0, count: 8)) }
+        var data = Data(capacity: 4 + accessUnit.count)
         appendLE(&data, UInt32(accessUnit.count))
         data.append(accessUnit)
         return data

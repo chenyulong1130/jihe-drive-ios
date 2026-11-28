@@ -50,6 +50,9 @@ struct CPPreviewView: View {
     var fullscreen: Bool = false
     /// true 时取消订阅（全屏呈现期间卡片预览停喂数据，同一帧不再双路解码）
     var paused: Bool = false
+    /// false = 纯展示（不向 CarPlay 回传触摸，点击走 onTap）；
+    /// 卡片预览传 false，全屏操作面传 true
+    var interactive: Bool = true
     /// 单击手势（UIKit 识别器实现，不经 SwiftUI 手势层——手势层会让触控下发变涩）
     var onTap: (() -> Void)? = nil
 
@@ -58,7 +61,7 @@ struct CPPreviewView: View {
             hub: controller.frameHub,
             paused: paused,
             onTap: onTap,
-            onTouches: { controller.touches($0) },
+            onTouches: interactive ? { controller.touches($0) } : { _ in },
             onKeyframeNeeded: { controller.requestKeyFrame() })
             .clipped()
     }

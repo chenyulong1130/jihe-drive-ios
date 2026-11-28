@@ -88,6 +88,8 @@ final class CPVideoTranscoder {
     // 缩放走 GPU：软渲染下每帧整幅 CI 缩放会吃掉几十毫秒，直接导致录屏掉帧发卡。
     private lazy var compositor = CIContext(options: [.cacheIntermediates: false])
     private var lastCodecFailure: TimeInterval = -1000
+    /// BMS 叠画合成目标缓冲（尺寸不变时逐帧复用，避免 1080P@60 逐帧分配）
+    private var overlayBuffer: CVPixelBuffer?
 
     // MARK: - 输入：CarPlay Annex-B 访问单元
 
@@ -228,18 +230,24 @@ final class CPVideoTranscoder {
     }
 
     /// 把 BMS 叠画烧进像素缓冲（无叠画或失败时返回 nil，调用方用原缓冲）。
+    /// 目标缓冲复用上一次的分配（1080P@60 逐帧新建缓冲会产生可观分配开销）。
     private func bufferWithBMSOverlay(_ image: CVPixelBuffer) -> CVPixelBuffer? {
         let snap = BMSOverlayBurnIn.shared.currentSnapshot()
         guard snap != nil else { return nil }
         let w = CVPixelBufferGetWidth(image)
         let h = CVPixelBufferGetHeight(image)
-        var buffer: CVPixelBuffer?
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault, w, h,
-            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-            [kCVPixelBufferIOSurfacePropertiesKey: [:] ] as CFDictionary,
-            &buffer)
-        guard status == kCVReturnSuccess, let buffer else { return nil }
+        if overlayBuffer == nil || CVPixelBufferGetWidth(overlayBuffer!) != w
+            || CVPixelBufferGetHeight(overlayBuffer!) != h {
+            var buffer: CVPixelBuffer?
+            let status = CVPixelBufferCreate(
+                kCFAllocatorDefault, w, h,
+                kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                [kCVPixelBufferIOSurfacePropertiesKey: [:] ] as CFDictionary,
+                &buffer)
+            guard status == kCVReturnSuccess, let buffer else { return nil }
+            overlayBuffer = buffer
+        }
+        guard let buffer = overlayBuffer else { return nil }
         let base = CIImage(cvPixelBuffer: image)
         let composed = BMSOverlayBurnIn.composite(
             base: base,

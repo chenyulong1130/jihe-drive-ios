@@ -41,8 +41,8 @@ struct MirrorView: View {
                 LargeTitle(
                     "CarPlay",
                     subtitle: controller.hasVideo
-                        ? "画面已就绪 · 点按/滑动画面直接操作"
-                        : "启动后画面在上方，直接触控操作"
+                        ? "画面已就绪 · 点画面进全屏操作，直接点按/滑动"
+                        : "启动后画面在上方，点画面进全屏直接操作"
                 ) {
                     HStack(spacing: 10) {
                         circleIcon("gearshape.fill", label: "CarPlay 设置") { showSettings = true }
@@ -118,7 +118,7 @@ struct MirrorView: View {
         if controller.hasVideo {
             ZStack(alignment: .topTrailing) {
                 // 全屏呈现期间卡片停喂数据：同一帧不再两路解码（点全屏卡住的根因之一）
-                CPPreviewView(controller: controller, paused: showFullscreen) {
+                CPPreviewView(controller: controller, paused: showFullscreen, interactive: false) {
                     showFullscreen = true
                 }
                 .aspectRatio(streamAspect, contentMode: .fit)

@@ -2,9 +2,10 @@ import Foundation
 import UIKit
 import Network
 
-/// 极核仪表 PXC 投屏会话（档案驱动，支持极核各尺寸仪表）。
-/// 手机监听 10922(控制)/10711(媒体)/10710(视频)，主动连仪表 10930 发起投屏请求；
-/// 仪表回连后完成 RSA 身份协商，随后逐帧拉取 H.264。
+/// 极核仪表 PXC 投屏会话（2026-11-28 按 CarWithin 参考实现全面对齐）。
+/// 手机监听 10922(控制)/10921(媒体)/10920(视频)，主动连仪表 10930 发起投屏请求；
+/// 仪表回连后完成 RSA 身份协商，媒体通道下发采集配置（0x10→0x11）与开流（0x70→0x71），
+/// 随后在媒体/视频通道上用 0x72 逐帧"拉"H.264，手机回 [u32 长度][Annex-B 帧]。
 /// 显示差异收敛在 DisplayProfile：媒体配置阶段仪表会上报实际面板尺寸，
 /// 会话按协商结果回 0x11 并把输出尺寸暴露给上层（转码器按此重编码）。
 final class ZeehoMirrorLink {
@@ -54,7 +55,10 @@ final class ZeehoMirrorLink {
         let auxiliary: UInt16
         let video: UInt16
         let announcement: UInt16
-        static let standard = Ports(control: 10922, auxiliary: 10711, video: 10710, announcement: 10930)
+        /// 对齐参考实现 PxcConnection：手机监听 10920(视频)/10921(媒体)/10922(控制)，
+        /// 仪表回连这三个端口；10930 只用于投屏请求探测。
+        /// （此前 10710/10711 是首驱方案的端口，PXC 仪表永远不会回连。）
+        static let standard = Ports(control: 10922, auxiliary: 10921, video: 10920, announcement: 10930)
     }
 
     struct PhoneProfile {
@@ -104,7 +108,6 @@ final class ZeehoMirrorLink {
     private var controlChannel: ZeehoMirrorChannel?
     private var auxiliaryChannel: ZeehoMirrorChannel?
     private var videoChannel: ZeehoMirrorChannel?
-    private var reverseControlChannel: ZeehoMirrorChannel?
     private var heartbeat: DispatchSourceTimer?
     private var identity: ZeehoMirrorIdentity.Identity?
     private var huid: String?
@@ -115,6 +118,9 @@ final class ZeehoMirrorLink {
     private var targetIP: String = ""
     private var localIP: String = ""
     private var failure: Error?
+    /// 仪表逐帧拉取（0x72）信号量：媒体/视频通道的读取循环各 producer，
+    /// 喂帧循环 waitForFrameRequest() 消费。start/stop 时清空残留。
+    private let frameRequestSemaphore = DispatchSemaphore(value: 0)
 
     var onState: ((State) -> Void)?
     var onLog: ((String) -> Void)?
@@ -136,8 +142,7 @@ final class ZeehoMirrorLink {
 
     // MARK: - 生命周期
 
-    /// 启动投屏会话。`startVideoFeeder` 在媒体协商完成后被调用（后台队列），
-    /// 实现需在收到拉帧请求时回调 `onFrameRequest`。
+    /// 启动投屏会话。媒体协商完成后喂帧循环以 waitForFrameRequest() 等待仪表拉帧。
     func start(localIP: String, targetIP: String) {
         stop()
         self.localIP = localIP
@@ -146,6 +151,7 @@ final class ZeehoMirrorLink {
         negotiatedName = Self.DisplayProfile.zeeho62.name
         closed = false
         failure = nil
+        while frameRequestSemaphore.wait(timeout: .now()) == .success {}
         currentState = .listening
         report("正在监听仪表回连端口…")
         queue.async { [weak self] in self?.runSession() }
@@ -156,13 +162,6 @@ final class ZeehoMirrorLink {
             guard let self else { return }
             guard !self.closed else { return }
             self.closed = true
-            // 极核要求显式通知停止投屏
-            if let reverse = self.reverseControlChannel,
-               let payload = try? ZeehoMirrorFrame.json(["control": 0]),
-               let control = try? ZeehoMirrorFrame.encodeControl(command: 0x20590,
-                                                                 identifier: UInt32.max, payload: payload) {
-                try? self.awaitWrite(reverse, control)
-            }
             heartbeat?.cancel()
             heartbeat = nil
             controlListener?.stop()
@@ -171,14 +170,12 @@ final class ZeehoMirrorLink {
             controlChannel?.close()
             auxiliaryChannel?.close()
             videoChannel?.close()
-            reverseControlChannel?.close()
             controlListener = nil
             auxiliaryListener = nil
             videoListener = nil
             controlChannel = nil
             auxiliaryChannel = nil
             videoChannel = nil
-            reverseControlChannel = nil
             self.huid = nil
             self.signedHUID = nil
             self.configured = false
@@ -212,14 +209,12 @@ final class ZeehoMirrorLink {
         controlChannel?.close()
         auxiliaryChannel?.close()
         videoChannel?.close()
-        reverseControlChannel?.close()
         controlListener = nil
         auxiliaryListener = nil
         videoListener = nil
         controlChannel = nil
         auxiliaryChannel = nil
         videoChannel = nil
-        reverseControlChannel = nil
     }
 
     private func report(_ message: String) {
@@ -427,12 +422,12 @@ final class ZeehoMirrorLink {
         }
     }
 
-    private func awaitRead(_ channel: ZeehoMirrorChannel, count: Int, timeout: TimeInterval) throws -> Data {
+    private func awaitRead(_ channel: ZeehoMirrorChannel, count: Int, waitForFirstByte: Bool = false) throws -> Data {
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<Data, Error>?
         Task.detached {
             do {
-                let data = try await channel.readExactly(count, timeout: timeout)
+                let data = try await channel.readExactly(count, waitForFirstByte: waitForFirstByte)
                 result = .success(data)
             } catch {
                 result = .failure(error)
@@ -476,28 +471,39 @@ final class ZeehoMirrorLink {
         log("仪表已回连 TCP\(port)")
         switch port {
         case Ports.standard.video:
+            // 参考实现对媒体/视频两个端口跑同一套媒体协议读取：
+            // 0x72 拉帧请求可能出现在任一通道（抓包里 10920 逐帧拉取）
             if videoChannel == nil {
                 videoChannel = channel
+                handleAuxiliary(channel)
             } else {
                 channel.close()
             }
         case Ports.standard.auxiliary:
-            auxiliaryChannel = channel
-            handleAuxiliary(channel)
+            if auxiliaryChannel == nil {
+                auxiliaryChannel = channel
+                handleAuxiliary(channel)
+            } else {
+                channel.close()
+            }
         default:
-            controlChannel = channel
-            handleControl(channel)
+            if controlChannel == nil {
+                controlChannel = channel
+                handleControl(channel)
+            } else {
+                channel.close()
+            }
         }
     }
 
-    /// 控制通道：协商命令处理。
+    /// 控制通道：协商命令处理。头部首字节长等（会话建立后通道可长时间静默）。
     private func handleControl(_ channel: ZeehoMirrorChannel) {
         Task.detached { [weak self] in
             guard let self else { return }
             do {
-                while true {
+                while self.isClosed == false {
                     let request = try ZeehoMirrorFrame.decodeControl { count in
-                        try self.awaitRead(channel, count: count, timeout: 5)
+                        try self.awaitRead(channel, count: count, waitForFirstByte: true)
                     }
                     try await self.dispatchControl(request, channel: channel)
                 }
@@ -515,7 +521,17 @@ final class ZeehoMirrorLink {
         case 0x10690, 0x10780:
             break // 仪表上报 FTP 速率/日志，仅确认收到
         case 0x103e0:
-            log("仪表请求序列号校验，等待其继续媒体协商")
+            // SN 校验：回执后按参考实现主动回 0x201c0 校验结果
+            let object = try? ZeehoMirrorFrame.object(request.payload)
+            let sn = (object?["sn"]).map { "\($0)" } ?? ""
+            log("仪表请求序列号校验（sn=\(sn)）")
+            try await replyControl(request, channel: channel, payload: Data())
+            let result: [String: Any] = ["isOk": true, "errCode": 0, "errMsg": "",
+                                         "id": sn, "client_set": "easy_conn"]
+            try await channel.write(try ZeehoMirrorFrame.encodeControl(
+                command: 0x201c0, payload: try ZeehoMirrorFrame.json(result)))
+            log("SN 校验通过，已回 0x201c0")
+            return
         case 0x10010:
             let object = try ZeehoMirrorFrame.object(request.payload)
             guard let name = object["HUName"] as? String, !name.isEmpty, name.utf8.count <= 128,
@@ -527,7 +543,7 @@ final class ZeehoMirrorLink {
             payload = try ZeehoMirrorFrame.json([
                 "pxcVersion": "1.0.2",
                 "phoneUUID": identity.phoneID,
-                "phoneBrand": "iPhone",
+                "phoneBrand": "Apple",
                 "phoneModel": "iPhone",
                 "phoneOsVersion": UIDevice.current.systemVersion,
                 "phoneOs": "iOS",
@@ -536,10 +552,10 @@ final class ZeehoMirrorLink {
                 "token": 0,
                 "pubkey": try ZeehoMirrorIdentity.publicKeyDER(identity).base64EncodedString(),
                 "encryptedHUID": signature.base64EncodedString(),
-                "bluetoothName": "",
+                "bluetoothName": "JiheDrive",
                 "supportH264IFrame": true,
-                "supportFunction": 128,
-                "mirrorRequestReconnect": true,
+                "supportFunction": 0,
+                "appVersionFingerPrint": "jihedrive",
             ])
             try await replyControl(request, channel: channel, payload: payload)
             self.huid = huid
@@ -566,37 +582,6 @@ final class ZeehoMirrorLink {
             return
         }
         try await replyControl(request, channel: channel, payload: payload)
-        if request.command == 0x20000 && reverseControlChannel == nil {
-            // 会话建立后的主动配置序列
-            try await sendControl(channel, command: 0x204c0, identifier: 1,
-                            object: ["state": 0, "msg": ""])
-            let phone = PhoneProfile.current()
-            try await sendControl(channel, command: 0x20020, identifier: 2,
-                            object: display(mode: 2, phone: phone))
-            try await sendControl(channel, command: 0x20030, identifier: 3,
-                            object: display(mode: 1, phone: phone))
-            try await channel.write(try ZeehoMirrorFrame.encodeControl(command: 0x20050, identifier: 4))
-            try await sendControl(channel, command: 0x205a0, identifier: 5,
-                            object: ["isMaskVisible": false])
-            // 极核专属：通知仪表开始投屏
-            try await sendControl(channel, command: 0x20590, identifier: 6,
-                            object: ["control": 1])
-            reverseControlChannel = channel
-            log("已发送开始投屏通知")
-            startHeartbeat(channel)
-        }
-    }
-
-    private func display(mode: Int, phone: PhoneProfile) -> [String: Any] {
-        let portrait = mode == 2
-        return [
-            "displayRotation": 0,
-            "width": portrait ? min(phone.width, phone.height) : phone.width,
-            "height": portrait ? max(phone.width, phone.height) : phone.height,
-            "enableAccessibility": false,
-            "enableAOAHid": false,
-            "mode": mode,
-        ]
     }
 
     private func replyControl(_ request: ZeehoMirrorFrame.Control, channel: ZeehoMirrorChannel,
@@ -613,32 +598,14 @@ final class ZeehoMirrorLink {
                                                                    identifier: identifier, payload: payload))
     }
 
-    private func startHeartbeat(_ channel: ZeehoMirrorChannel) {
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        var identifier: UInt32 = 7
-        timer.schedule(deadline: .now() + 2, repeating: 2)
-        timer.setEventHandler { [weak self, weak channel] in
-            guard let self, let channel else { return }
-            do {
-                try self.awaitWrite(channel, try ZeehoMirrorFrame.encodeControl(command: 0x70000000,
-                                                                                identifier: identifier))
-                identifier &+= 1
-            } catch {
-                self.fail(error)
-            }
-        }
-        heartbeat = timer
-        timer.resume()
-    }
-
-    /// 媒体通道：媒体配置（签名回显校验）与启动。
+    /// 媒体通道（10921，视频通道 10920 同协议）：媒体配置、开流与逐帧拉取。
     private func handleAuxiliary(_ channel: ZeehoMirrorChannel) {
         Task.detached { [weak self] in
             guard let self else { return }
             do {
-                while true {
+                while self.isClosed == false {
                     let request = try ZeehoMirrorFrame.decodeAuxiliary { count in
-                        try self.awaitRead(channel, count: count, timeout: 5)
+                        try self.awaitRead(channel, count: count, waitForFirstByte: true)
                     }
                     try await self.dispatchAuxiliary(request, channel: channel)
                 }
@@ -653,7 +620,7 @@ final class ZeehoMirrorLink {
         let response: UInt16
         switch request.command {
         case 0x10:
-            guard request.payload.count >= 32 else { throw CPError.malformed("媒体配置载荷不足 32 字节") }
+            guard request.payload.count >= 4 else { throw CPError.malformed("媒体配置载荷不足 4 字节") }
             let width = request.payload.uint16LE(0)
             let height = request.payload.uint16LE(2)
             guard ZeehoMirrorLink.acceptable(width: Int(width), height: Int(height)) else {
@@ -691,9 +658,14 @@ final class ZeehoMirrorLink {
                 output = (Self.even(Int(width)), Self.even(Int(height)))
                 name = "极核仪表 \(Self.even(Int(width)))×\(Self.even(Int(height)))"
             }
-            ZeehoMirrorFrame.appendLE(&payload, UInt32(2)) // codec = H.264
+            // 响应格式对齐参考 PxcConnection：[编码器 u32][宽 u16][高 u16][扩展标志 u8]
+            // （此前漏了扩展标志字节、编码器字段写死 codec，仪表可能解析失败）
+            let encoder: UInt32 = request.payload.count >= 12 ? request.payload.uint32LE(8) : 2
+            let ext: UInt8 = request.payload.count >= 30 ? request.payload[request.payload.startIndex + 29] : 0
+            ZeehoMirrorFrame.appendLE(&payload, encoder == 0 ? UInt32(2) : encoder)
             ZeehoMirrorFrame.appendLE(&payload, UInt16(output.width))
             ZeehoMirrorFrame.appendLE(&payload, UInt16(output.height))
+            payload.append(ext)
             response = 0x11
             configured = true
             outputSize = output
@@ -703,16 +675,23 @@ final class ZeehoMirrorLink {
             guard configured else { throw CPError.rejected("仪表在配置完成前请求媒体启动") }
             try await channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: 0x71, token: request.token))
             mediaStarted = true
+            log("仪表要求开流，已回 0x71（等待仪表逐帧拉取）")
+            return
+        case 0x72:
+            // 逐帧拉取请求：仅给喂帧循环发信号，不回包（对齐参考实现）
+            frameRequestSemaphore.signal()
             return
         case 0x40:
             response = 0x41
         case 0x30:
-            response = 0x31
-            ZeehoMirrorFrame.appendLE(&payload, UInt32(5002))
+            // 版本查询对齐参考实现：回 [u32 3][u32 1]（此前回 5002 系首驱方案遗留）
+            ZeehoMirrorFrame.appendLE(&payload, UInt32(3))
             ZeehoMirrorFrame.appendLE(&payload, UInt32(1))
+            response = 0x31
         case 0x60:
+            // 扩展采集配置：参考实现回 {"state": 0}
+            payload = try ZeehoMirrorFrame.json(["state": 0])
             response = 0x61
-            payload = try ZeehoMirrorFrame.json(["supportFunction": 0])
         case 0x20:
             return // 仪表反控触摸：不执行
         default:
@@ -725,32 +704,24 @@ final class ZeehoMirrorLink {
 
     // MARK: - 视频发送（供上层喂帧）
 
-    /// 等待仪表的一次拉帧请求（0x72），随后应发送一帧。在后台队列阻塞调用。
-    /// 返回 false 表示会话已关闭。
+    /// 等待仪表的一次拉帧请求（0x72，可能来自媒体或视频通道），随后应发送一帧。
+    /// 在后台队列阻塞调用；返回 false 表示超时或会话已关闭。
     func waitForFrameRequest() -> Bool {
         guard let videoChannel, isClosed == false else { return false }
-        do {
-            let request = try awaitRead(videoChannel, count: 8, timeout: 5)
-            let command = request.uint16LE(0)
-            let length = Int(request.uint16LE(2))
-            guard command == 0x72, length == 0 else {
-                throw CPError.malformed("视频通道收到 0x\(String(command, radix: 16))（\(length) 字节），预期空载荷 0x72")
-            }
-            return true
-        } catch {
-            // 通道空闲超时不算致命（仪表静止时可能暂停拉帧）
-            if isClosed == false {
-                log("等待拉帧请求：\(error.localizedDescription)")
-            }
-            return false
-        }
+        let result = frameSemaphoreWait(timeout: 10)
+        return result && isClosed == false
     }
 
-    /// 发送一帧 H.264 访问单元（Annex-B）。首帧自动带 8 字节前缀。
-    func sendVideoFrame(_ accessUnit: Data, isFirstFrame: Bool) {
+    private func frameSemaphoreWait(timeout: TimeInterval) -> Bool {
+        frameRequestSemaphore.wait(timeout: .now() + timeout) == .success
+    }
+
+    /// 发送一帧 H.264 访问单元（Annex-B）。对齐参考实现：每帧 [u32 长度][访问单元]，
+    /// 无首帧前缀（此前首帧多写 8 字节零头会让仪表解码失败）。
+    func sendVideoFrame(_ accessUnit: Data) {
         guard let videoChannel, isClosed == false else { return }
         do {
-            let packet = try ZeehoMirrorFrame.encodeVideo(accessUnit, isFirstFrame: isFirstFrame)
+            let packet = try ZeehoMirrorFrame.encodeVideo(accessUnit)
             try awaitWrite(videoChannel, packet)
             if currentState != .streaming {
                 currentState = .streaming

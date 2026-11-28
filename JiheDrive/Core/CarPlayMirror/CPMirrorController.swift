@@ -572,7 +572,7 @@ final class CPMirrorController: ObservableObject {
                     self.requestKeyFrame()
                     continue
                 }
-                link.sendVideoFrame(frame, isFirstFrame: first)
+                link.sendVideoFrame(frame)
                 sentFrames += 1
                 if sentFrames % 125 == 0 {
                     self.appendLog("已向仪表持续送帧 \(sentFrames) 帧")
@@ -664,8 +664,11 @@ final class CPMirrorController: ObservableObject {
 
     private let slotLock = NSLock()
     private var slots: [TouchSlot?] = [nil, nil] // CarPlay 触控描述符 2 槽
+    /// 会话内首条触控只记一次日志（远程排查「点不动」时确认 HID 已回传）
+    private var didLogFirstTouch = false
 
     /// 预览区触摸回调（归一化 0…1 坐标）→ 槽位管理 → HID 报告回传。
+    /// 坐标换算对齐参考实现：×(尺寸-1) 并取整，落点精确到最末像素。
     func touches(_ points: [(id: Int, x: Double, y: Double, down: Bool)]) {
         guard phase.isRunning else { return }
         var report: [CPInfo.TouchContact] = []
@@ -678,8 +681,8 @@ final class CPMirrorController: ObservableObject {
             }
         }
         for point in points {
-            let x = UInt16(min(max(point.x, 0), 1) * Double(CPDisplayConfig.width))
-            let y = UInt16(min(max(point.y, 0), 1) * Double(CPDisplayConfig.height))
+            let x = UInt16(clamping: Int((min(max(point.x, 0), 1) * Double(max(CPDisplayConfig.width - 1, 0))).rounded()))
+            let y = UInt16(clamping: Int((min(max(point.y, 0), 1) * Double(max(CPDisplayConfig.height - 1, 0))).rounded()))
             if let index = slots.firstIndex(where: { $0?.id == point.id }) {
                 slots[index] = TouchSlot(id: point.id, x: x, y: y)
             } else if let free = slots.firstIndex(where: { $0 == nil }) {
@@ -692,6 +695,10 @@ final class CPMirrorController: ObservableObject {
             }
         }
         slotLock.unlock()
+        if !didLogFirstTouch, report.contains(where: { $0.down }) {
+            didLogFirstTouch = true
+            appendLog("已回传首条触控 HID 报告（\(CPDisplayConfig.width)×\(CPDisplayConfig.height) 坐标系）")
+        }
         receiver?.touches(report)
     }
 
