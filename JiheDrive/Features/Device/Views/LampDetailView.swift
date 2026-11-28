@@ -58,68 +58,74 @@ struct LampDetailView: View {
     ]
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 8) {
-                headerRow
-                productCard
-                colorCard
-                levelSliderCard(icon: "sun.max.fill", title: "灯光亮度", value: $brightness,
-                                caption: "0–255；设备回报值会自动同步到滑块", kind: .brightness)
-                levelSliderCard(icon: "forward.end.fill", title: "模式速度", value: $speed,
-                                caption: "0–255；设备回报值会自动同步到滑块", kind: .speed)
-                modeCard
-                commandStatusBar
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 48)
-        }
-        .background(Theme.groupedBackground)
-        .navigationTitle("速牛灯具")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    showDiagnostics = true
-                } label: {
-                    Image(systemName: "waveform.path.ecg")
+        withEchoSync(
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 8) {
+                    headerRow
+                    productCard
+                    colorCard
+                    levelSliderCard(icon: "sun.max.fill", title: "灯光亮度", value: $brightness,
+                                    caption: "0–255；设备回报值会自动同步到滑块", kind: .brightness)
+                    levelSliderCard(icon: "forward.end.fill", title: "模式速度", value: $speed,
+                                    caption: "0–255；设备回报值会自动同步到滑块", kind: .speed)
+                    modeCard
+                    commandStatusBar
                 }
-                .accessibilityLabel("诊断")
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 48)
             }
-        }
-        .onAppear {
-            store.attach(ble)
-        }
-        .onDisappear {
-            store.deactivate()
-        }
-        // 设备回显：灯具回报的状态自动同步到滑块 / 色轮 / 模式高亮
-        .onChange(of: store.deviceBrightness) { _, value in
-            guard let value, !brightnessDragging else { return }
-            brightness = Double(value) / 255.0
-        }
-        .onChange(of: store.deviceSpeed) { _, value in
-            guard let value, !speedDragging else { return }
-            speed = Double(value) / 255.0
-        }
-        .onChange(of: store.deviceColor) { _, color in
-            guard let color, !colorDragging else { return }
-            let ui = UIColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
-                             blue: CGFloat(color.b) / 255, alpha: 1)
-            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-            hue = Double(h * 360)
-            saturation = Double(s)
-        }
-        .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
-        .overlay(alignment: .bottom) {
-            if let toast {
-                ToastView(text: toast)
-                    .padding(.bottom, 28)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            .background(Theme.groupedBackground)
+            .navigationTitle("速牛灯具")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showDiagnostics = true
+                    } label: {
+                        Image(systemName: "waveform.path.ecg")
+                    }
+                    .accessibilityLabel("诊断")
+                }
             }
-        }
-        .animation(Motion.quick, value: toast)
+            .onAppear {
+                store.attach(ble)
+            }
+            .onDisappear {
+                store.deactivate()
+            }
+            .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
+            .overlay(alignment: .bottom) {
+                if let toast {
+                    ToastView(text: toast)
+                        .padding(.bottom, 28)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(Motion.quick, value: toast)
+        )
+    }
+
+    /// 设备回显：灯具回报的状态自动同步到滑块 / 色轮（拆出 body，降低表达式复杂度）
+    private func withEchoSync(_ view: some View) -> some View {
+        view
+            .onChange(of: store.deviceBrightness) { _, value in
+                guard let value, !brightnessDragging else { return }
+                brightness = Double(value) / 255.0
+            }
+            .onChange(of: store.deviceSpeed) { _, value in
+                guard let value, !speedDragging else { return }
+                speed = Double(value) / 255.0
+            }
+            .onChange(of: store.deviceColor) { _, color in
+                guard let color, !colorDragging else { return }
+                let ui = UIColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
+                                 blue: CGFloat(color.b) / 255, alpha: 1)
+                var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+                hue = Double(h * 360)
+                saturation = Double(s)
+            }
     }
 
     private func showToast(_ text: String) {
@@ -313,7 +319,12 @@ struct LampDetailView: View {
     /// 松手即下发（拖动期间 300ms 节流合并），不再挤在半行里难操作
     private func levelSliderCard(icon: String, title: String, value: Binding<Double>,
                                  caption: String, kind: LevelKind) -> some View {
-        let deviceValue = kind == .brightness ? store.deviceBrightness : store.deviceSpeed
+        let deviceValue: Int?
+        if kind == .brightness {
+            deviceValue = store.deviceBrightness
+        } else {
+            deviceValue = store.deviceSpeed
+        }
         return AppleCard(padding: 14) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
