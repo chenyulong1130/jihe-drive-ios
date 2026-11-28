@@ -53,6 +53,9 @@ struct CPPreviewView: View {
     /// false = 纯展示（不向 CarPlay 回传触摸，点击走 onTap）；
     /// 卡片预览传 false，全屏操作面传 true
     var interactive: Bool = true
+    /// true = 画面铺满容器（等比放大裁切溢出），触控按裁切后可视区换算；
+    /// false = 等比缩放留黑边（aspect fit）
+    var fillsScreen: Bool = false
     /// 单击手势（UIKit 识别器实现，不经 SwiftUI 手势层——手势层会让触控下发变涩）
     var onTap: (() -> Void)? = nil
 
@@ -62,7 +65,8 @@ struct CPPreviewView: View {
             paused: paused,
             onTap: onTap,
             onTouches: interactive ? { controller.touches($0) } : { _ in },
-            onKeyframeNeeded: { controller.requestKeyFrame() })
+            onKeyframeNeeded: { controller.requestKeyFrame() },
+            fillsScreen: fillsScreen)
             .clipped()
     }
 }
@@ -73,12 +77,14 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
     var onTap: (() -> Void)? = nil
     let onTouches: ([(id: Int, x: Double, y: Double, down: Bool)]) -> Void
     let onKeyframeNeeded: () -> Void
+    var fillsScreen: Bool = false
 
     func makeUIView(context: Context) -> CPDisplaySurface {
         let view = CPDisplaySurface()
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
         view.onTap = onTap
+        view.fillsScreen = fillsScreen
         context.coordinator.hub = hub
         context.coordinator.paused = paused
         if !paused {
@@ -93,6 +99,7 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
         view.onTouches = onTouches
         view.onKeyframeNeeded = onKeyframeNeeded
         view.onTap = onTap
+        view.fillsScreen = fillsScreen
         if paused != context.coordinator.paused {
             context.coordinator.paused = paused
             // reset 一律排进解码队列：状态/层只在该队列访问，主线程不动
@@ -181,6 +188,14 @@ final class CPDisplaySurface: UIView {
     var onKeyframeNeeded: (() -> Void)?
     var onDecodeError: ((String) -> Void)?
     var onTap: (() -> Void)?
+    /// true = 画面铺满容器（裁切溢出），显示层与触控换算都按 aspect fill；
+    /// false = 等比缩放留黑边（默认）
+    var fillsScreen: Bool = false {
+        didSet {
+            guard fillsScreen != oldValue else { return }
+            displayLayer.videoGravity = fillsScreen ? .resizeAspectFill : .resizeAspect
+        }
+    }
     /// 帧解析/解码队列（层与状态只在此队列访问，主线程只管触摸）
     let decodeQueue = DispatchQueue(label: "cp.preview.decode")
 
@@ -437,6 +452,21 @@ final class CPDisplaySurface: UIView {
             let size = CMVideoFormatDescriptionGetDimensions(format)
             if size.width > 0, size.height > 0 {
                 ratio = CGFloat(size.width) / CGFloat(size.height)
+            }
+        }
+        // fillsScreen = aspect fill（画面铺满、裁切溢出）；默认 aspect fit（留黑边）
+        let viewRatio = boundsSize.width / boundsSize.height
+        if fillsScreen, viewRatio > 0, viewRatio != ratio {
+            if viewRatio > ratio {
+                // 容器更宽：铺满宽度，高度溢出上下裁切
+                let width = boundsSize.width
+                let height = width / ratio
+                return CGRect(x: 0, y: (boundsSize.height - height) / 2, width: width, height: height)
+            } else {
+                // 容器更高：铺满高度，宽度溢出左右裁切
+                let height = boundsSize.height
+                let width = height * ratio
+                return CGRect(x: (boundsSize.width - width) / 2, y: 0, width: width, height: height)
             }
         }
         return AVMakeRect(aspectRatio: CGSize(width: ratio, height: 1), insideRect: bounds)

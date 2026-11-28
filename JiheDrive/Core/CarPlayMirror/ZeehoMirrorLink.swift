@@ -422,12 +422,14 @@ final class ZeehoMirrorLink {
         }
     }
 
-    private func awaitRead(_ channel: ZeehoMirrorChannel, count: Int, waitForFirstByte: Bool = false) throws -> Data {
+    private func awaitRead(_ channel: ZeehoMirrorChannel, count: Int,
+                           timeout: TimeInterval = 5, waitForFirstByte: Bool = false) throws -> Data {
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<Data, Error>?
         Task.detached {
             do {
-                let data = try await channel.readExactly(count, waitForFirstByte: waitForFirstByte)
+                let data = try await channel.readExactly(count, timeout: timeout,
+                                                         waitForFirstByte: waitForFirstByte)
                 result = .success(data)
             } catch {
                 result = .failure(error)

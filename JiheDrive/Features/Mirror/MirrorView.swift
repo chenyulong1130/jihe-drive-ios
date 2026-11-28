@@ -97,6 +97,8 @@ struct MirrorView: View {
             // 翻转状态由父级驱动：全屏 cover 的 onDisappear 在部分退出路径不回调，
             // 曾导致退全屏后方向卡死在横屏
             setFullscreenLandscape(active)
+            // 退全屏时卡片预览刚恢复订阅，主动要一个关键帧，避免预览黑屏到下一自然 IDR
+            if !active { controller.requestKeyFrame() }
         }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
@@ -110,17 +112,15 @@ struct MirrorView: View {
         CGFloat(CPDisplayConfig.width) / CGFloat(CPDisplayConfig.height)
     }
 
-    /// 出画前是同尺寸占位框，出画后画面直接可点/可滑（同手机小窗）；
-    /// 全屏与画中画收进画面右上角浮层，不再单独占一行按钮。
+    /// 出画前是同尺寸占位框；出画后卡片只作展示（点击不再误触全屏），
+    /// 全屏 / 画中画入口在画面下方的操作行，全屏内才是直接触控的操作面。
     @ViewBuilder
     private var previewSection: some View {
+        VStack(spacing: 10) {
         Group {
         if controller.hasVideo {
-            ZStack(alignment: .topTrailing) {
-                // 全屏呈现期间卡片停喂数据：同一帧不再两路解码（点全屏卡住的根因之一）
-                CPPreviewView(controller: controller, paused: showFullscreen, interactive: false) {
-                    showFullscreen = true
-                }
+            // 全屏呈现期间卡片停喂数据：同一帧不再两路解码
+            CPPreviewView(controller: controller, paused: showFullscreen, interactive: false)
                 .aspectRatio(streamAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -145,15 +145,15 @@ struct MirrorView: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    previewOverlayIcon("pip.enter", label: "画中画") {
-                        _ = controller.startPictureInPicture()
-                    }
-                    previewOverlayIcon("arrow.up.left.and.arrow.down.right", label: "全屏") {
-                        showFullscreen = true
-                    }
+            // 全屏 / 画中画操作行（入口不放在画面上，避免误触）
+            HStack(spacing: 10) {
+                previewActionButton(icon: "arrow.up.left.and.arrow.down.right",
+                                    title: "全屏操作", tint: Theme.brand) {
+                    showFullscreen = true
                 }
-                .padding(10)
+                previewActionButton(icon: "pip.enter", title: "画中画", tint: Theme.teal) {
+                    _ = controller.startPictureInPicture()
+                }
             }
         } else {
             // 启动前占位：与出画后的预览同比例，流程视觉不断档
@@ -172,7 +172,7 @@ struct MirrorView: View {
                         Text(controller.phase.isRunning ? "正在连接，画面就绪后显示在这里" : "启动后画面显示在这里")
                             .font(Theme.footnote)
                             .foregroundStyle(Theme.secondary)
-                        Text("出画后点按 / 滑动画面即可直接操作")
+                        Text("出画后点「全屏操作」即可直接触控")
                             .font(Theme.caption)
                             .foregroundStyle(Theme.tertiary)
                     }
@@ -181,20 +181,21 @@ struct MirrorView: View {
         }
         // 主页面 16pt 边距内再外扩 8pt：预览栏更宽更大
         .padding(.horizontal, -8)
+        }
     }
 
-    /// 预览右上角的半透明浮层小圆钮
-    private func previewOverlayIcon(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+    /// 预览下方操作行的宽按钮
+    private func previewActionButton(icon: String, title: String, tint: Color,
+                                     action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.black.opacity(0.5)))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+            Label(title, systemImage: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
-        .accessibilityLabel(label)
+        .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
     }
 
     // MARK: - Wi-Fi 预设
@@ -1378,11 +1379,12 @@ struct MirrorView: View {
     private var fullscreenView: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            CPPreviewView(controller: controller, fullscreen: true) {
+            // 画面铺满全屏（上下/左右裁切对齐CarPlay主屏），触控坐标按裁切后区域换算
+            CPPreviewView(controller: controller, fullscreen: true, fillsScreen: true) {
                 reviveFullscreenExit()
             }
-            .aspectRatio(streamAspect, contentMode: .fit)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
             .overlay {
                 GeometryReader { geo in
                     if bmsOverlayEnabled {

@@ -669,18 +669,23 @@ final class CPMirrorController: ObservableObject {
 
     /// 预览区触摸回调（归一化 0…1 坐标）→ 槽位管理 → HID 报告回传。
     /// 坐标换算对齐参考实现：×(尺寸-1) 并取整，落点精确到最末像素。
+    ///
+    /// ⚠️ 抬起语义对齐参考 TouchSlots：down=false 的点视同「不在集合中」，
+    /// 槽位判抬起并回一次 down=false。此前把抬起点又写回槽位并按 down:true
+    /// 上报——手指永不抬起，两个槽位各卡死一次后 CarPlay 彻底不再响应触摸。
     func touches(_ points: [(id: Int, x: Double, y: Double, down: Bool)]) {
         guard phase.isRunning else { return }
+        let active = points.filter { $0.down }
         var report: [CPInfo.TouchContact] = []
         slotLock.lock()
-        // 抬起：槽内 id 不在本次集合中
+        // 抬起：槽内 id 不在本次按下集合中
         for index in 0..<slots.count {
-            if let slot = slots[index], !points.contains(where: { $0.id == slot.id }) {
+            if let slot = slots[index], !active.contains(where: { $0.id == slot.id }) {
                 report.append(CPInfo.TouchContact(slot: index, x: slot.x, y: slot.y, down: false))
                 slots[index] = nil
             }
         }
-        for point in points {
+        for point in active {
             let x = UInt16(clamping: Int((min(max(point.x, 0), 1) * Double(max(CPDisplayConfig.width - 1, 0))).rounded()))
             let y = UInt16(clamping: Int((min(max(point.y, 0), 1) * Double(max(CPDisplayConfig.height - 1, 0))).rounded()))
             if let index = slots.firstIndex(where: { $0?.id == point.id }) {
