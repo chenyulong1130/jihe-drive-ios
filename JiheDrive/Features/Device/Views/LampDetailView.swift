@@ -19,6 +19,10 @@ struct LampDetailView: View {
     /// 发送合并标记：拖动期间只排一拍，到点发最新值（不反复取消/新建 Task，避免 UI 抖动）
     @State private var colorSendScheduled = false
     @State private var levelSendScheduled = false
+    /// 正在拖动的控件：设备回显不回拉本地滑块，避免打架
+    @State private var colorDragging = false
+    @State private var brightnessDragging = false
+    @State private var speedDragging = false
 
     private enum LevelKind { case brightness, speed }
 
@@ -59,10 +63,10 @@ struct LampDetailView: View {
                 headerRow
                 productCard
                 colorCard
-                levelSliderCard(icon: "sun.max.fill", value: $brightness,
-                                caption: "灯光亮度（0–255），写入值不代表设备当前亮度", kind: .brightness)
-                levelSliderCard(icon: "forward.end.fill", value: $speed,
-                                caption: "模式速度（0–255），写入值不代表设备当前速度", kind: .speed)
+                levelSliderCard(icon: "sun.max.fill", title: "灯光亮度", value: $brightness,
+                                caption: "0–255；设备回报值会自动同步到滑块", kind: .brightness)
+                levelSliderCard(icon: "forward.end.fill", title: "模式速度", value: $speed,
+                                caption: "0–255；设备回报值会自动同步到滑块", kind: .speed)
                 modeCard
                 commandStatusBar
             }
@@ -88,6 +92,24 @@ struct LampDetailView: View {
         }
         .onDisappear {
             store.deactivate()
+        }
+        // 设备回显：灯具回报的状态自动同步到滑块 / 色轮 / 模式高亮
+        .onChange(of: store.deviceBrightness) { _, value in
+            guard let value, !brightnessDragging else { return }
+            brightness = Double(value) / 255.0
+        }
+        .onChange(of: store.deviceSpeed) { _, value in
+            guard let value, !speedDragging else { return }
+            speed = Double(value) / 255.0
+        }
+        .onChange(of: store.deviceColor) { _, color in
+            guard let color, !colorDragging else { return }
+            let ui = UIColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
+                             blue: CGFloat(color.b) / 255, alpha: 1)
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+            hue = Double(h * 360)
+            saturation = Double(s)
         }
         .sheet(isPresented: $showDiagnostics) { diagnosticsSheet }
         .overlay(alignment: .bottom) {
@@ -277,40 +299,73 @@ struct LampDetailView: View {
                         if newHue < 0 { newHue += 360 }
                         hue = newHue
                         saturation = min(1, distance / radius)
+                        colorDragging = true
                         scheduleColorSend()
                     }
+                    .onEnded { _ in colorDragging = false }
             )
         }
     }
 
     // MARK: - 亮度 / 速度滑条卡
 
-    /// 亮度/速度滑条：标题收进 ⓘ 图标（点按弹出说明），滑条通栏好拖
-    private func levelSliderCard(icon: String, value: Binding<Double>,
+    /// 亮度/速度滑条：标题 + 设备回报徽标一行，滑条通栏好拖；
+    /// 松手即下发（拖动期间 300ms 节流合并），不再挤在半行里难操作
+    private func levelSliderCard(icon: String, title: String, value: Binding<Double>,
                                  caption: String, kind: LevelKind) -> some View {
-        AppleCard(padding: 14) {
-            HStack(spacing: 12) {
-                Button {
-                    showToast(caption)
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(width: 24)
+        let deviceValue = kind == .brightness ? store.deviceBrightness : store.deviceSpeed
+        return AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.brand)
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                    Spacer(minLength: 8)
+                    if let deviceValue {
+                        Text("设备 \(deviceValue)")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(Theme.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Theme.green.opacity(0.10), in: Capsule())
+                    }
+                    Button {
+                        showToast(caption)
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(caption)
+
+                    Text("\(Int(value.wrappedValue * 255))")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.label)
+                        .monospacedDigit()
+                        .frame(width: 42, alignment: .trailing)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(caption)
 
-                Slider(value: value, in: 0...1)
-                    .tint(Theme.brand)
-                    .disabled(!connected)
-                    .onChange(of: value.wrappedValue) { _, _ in scheduleLevelSend(kind) }
+                Slider(value: value, in: 0...1) { editing in
+                    switch kind {
+                    case .brightness: brightnessDragging = editing
+                    case .speed: speedDragging = editing
+                    }
+                    if !editing { scheduleLevelSend(kind, immediate: true) }
+                }
+                .tint(Theme.brand)
+                .disabled(!connected)
+                .onChange(of: value.wrappedValue) { _, _ in
+                    guard kind == .brightness ? brightnessDragging : speedDragging else { return }
+                    scheduleLevelSend(kind)
+                }
 
-                Text("\(Int(value.wrappedValue * 255))")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.label)
-                    .monospacedDigit()
-                    .frame(width: 40, alignment: .trailing)
+                Text(caption)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.tertiary)
             }
         }
     }
@@ -383,9 +438,10 @@ struct LampDetailView: View {
         }
     }
 
-    /// 模式格：名称 + 编号，点按即下发
+    /// 模式格：名称 + 编号，点按即下发；设备回报的当前模式号也会高亮
     private func libraryModeTile(_ mode: LampLibraryMode) -> some View {
         let selected = appliedModeId == mode.id
+            || (store.deviceMode != nil && mode.number == store.deviceMode)
         return Button {
             appliedModeId = mode.id
             Task {
@@ -460,8 +516,19 @@ struct LampDetailView: View {
         }
     }
 
-    /// 亮度/速度：300ms 一拍，只发对应通道
-    private func scheduleLevelSend(_ kind: LevelKind) {
+    /// 亮度/速度：拖动期间 300ms 一拍；松手立即发最终值
+    private func scheduleLevelSend(_ kind: LevelKind, immediate: Bool = false) {
+        guard connected else { return }
+        if immediate {
+            levelSendScheduled = false
+            switch kind {
+            case .brightness:
+                Task { await store.setGeneric(LampProtocol.GenericCommand.brightness, value: Int(brightness * 255)) }
+            case .speed:
+                Task { await store.setGeneric(LampProtocol.GenericCommand.modeSpeed, value: Int(speed * 255)) }
+            }
+            return
+        }
         guard !levelSendScheduled else { return }
         levelSendScheduled = true
         Task {

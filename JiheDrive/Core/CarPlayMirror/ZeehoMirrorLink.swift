@@ -266,19 +266,35 @@ final class ZeehoMirrorLink {
                 announcement = try awaitConnect(host: address, port: Ports.standard.announcement, name: "仪表公告通道")
             }
             defer { announcement.close() }
+            // 投屏探测（对齐参考实现：phoneType 用 Android + 失败重试 3 次）
             let request = try ZeehoMirrorFrame.encodeControl(
                 command: 0x70000010,
                 payload: try ZeehoMirrorFrame.json([
-                    "phoneType": "iOS",
+                    "phoneType": "Android",
                     "packageName": Bundle.main.bundleIdentifier ?? "com.qianxu.jihedrive",
                 ]))
-            try awaitWrite(announcement, request)
-            let reply = try ZeehoMirrorFrame.decodeControl { count in
-                try awaitRead(announcement, count: count, timeout: 3)
+            var accepted = false
+            var lastProbeError: Error?
+            for attempt in 1...3 {
+                do {
+                    try awaitWrite(announcement, request)
+                    let reply = try ZeehoMirrorFrame.decodeControl { count in
+                        try awaitRead(announcement, count: count, timeout: 4)
+                    }
+                    guard reply.command == 0x70000011,
+                          let status = try? ZeehoMirrorFrame.object(reply.payload)["status"] as? Bool, status else {
+                        throw CPError.rejected("仪表未接受 iOS 投屏请求（0x\(String(reply.command, radix: 16))）")
+                    }
+                    accepted = true
+                    break
+                } catch {
+                    lastProbeError = error
+                    log("投屏探测第 \(attempt) 次失败：\(error.localizedDescription)")
+                    if attempt < 3 { Thread.sleep(forTimeInterval: 1.2) }
+                }
             }
-            guard reply.command == 0x70000011,
-                  let status = try? ZeehoMirrorFrame.object(reply.payload)["status"] as? Bool, status else {
-                throw CPError.rejected("仪表未接受 iOS 投屏请求（0x\(String(reply.command, radix: 16))）")
+            guard accepted else {
+                throw lastProbeError ?? CPError.timeout("仪表未响应投屏探测")
             }
             currentState = .negotiating
             log("仪表已接受请求，等待其回连与协商…")

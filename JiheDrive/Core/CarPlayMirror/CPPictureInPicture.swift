@@ -11,8 +11,28 @@ import UIKit
 final class CPVideoSurface: NSObject {
     let displayLayer = AVSampleBufferDisplayLayer()
     private(set) var lastFrame = -1
+    /// AVPictureInPictureController 要求显示层挂在窗口内的视图上，
+    /// 否则 isPictureInPicturePossible 永远为 false（画中画「未实现」的根因）。
+    /// 这里把层挂到一个屏幕外的 2×2 宿主视图上。
+    private var hostView: UIView?
 
     var hasPicture: Bool { lastFrame >= 0 }
+
+    /// 把显示层挂到 key window 的屏外宿主视图（主线程调用）。
+    func attachToWindowIfNeeded() {
+        guard hostView == nil else { return }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.first(where: { $0.activationState == .foregroundActive })?.keyWindow
+            ?? scenes.first?.keyWindow
+            ?? scenes.flatMap({ $0.windows }).first
+        guard let window else { return }
+        let host = UIView(frame: CGRect(x: -4, y: -4, width: 2, height: 2))
+        host.isUserInteractionEnabled = false
+        host.layer.addSublayer(displayLayer)
+        displayLayer.frame = CGRect(x: 0, y: 0, width: 2, height: 2)
+        window.addSubview(host)
+        hostView = host
+    }
 
     func enqueue(pixelBuffer: CVPixelBuffer, frame: Int) {
         guard frame != lastFrame else { return }
@@ -79,10 +99,16 @@ final class CPPictureInPicture: NSObject, AVPictureInPictureSampleBufferPlayback
 
     /// 有解码画面后开始持续喂数（画中画就绪的前提）。
     func startFeed() {
-        guard displayLink == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(tick))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
+        if displayLink == nil {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                // 显示层必须已挂在窗口上，PiP 才可能启动
+                self.surface.attachToWindowIfNeeded()
+                let link = CADisplayLink(target: self, selector: #selector(self.tick))
+                link.add(to: .main, forMode: .common)
+                self.displayLink = link
+            }
+        }
     }
 
     func stopFeed() {
@@ -99,7 +125,14 @@ final class CPPictureInPicture: NSObject, AVPictureInPictureSampleBufferPlayback
     func start() -> Bool {
         guard let controller else { return false }
         prepareAudioSession()
-        guard controller.isPictureInPicturePossible else { return false }
+        if !controller.isPictureInPicturePossible {
+            // 等喂数让 PiP 变为可用（最多 2 秒；display link 在主 RunLoop 持续出帧）
+            let deadline = Date().addingTimeInterval(2)
+            while !controller.isPictureInPicturePossible, Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            }
+            guard controller.isPictureInPicturePossible else { return false }
+        }
         controller.startPictureInPicture()
         return true
     }

@@ -15,6 +15,17 @@ final class LampStore: ObservableObject {
     @Published private(set) var lastError = ""
     @Published private(set) var logs: [String] = []
     @Published var customCommandHex = ""
+    // MARK: 设备回显状态（从灯具回包 TLV 解析；未上报时为 nil）
+    /// 设备回报的 RGB 颜色
+    @Published private(set) var deviceColor: (r: Int, g: Int, b: Int)?
+    /// 设备回报的亮度（0–255）
+    @Published private(set) var deviceBrightness: Int?
+    /// 设备回报的模式速度（0–255）
+    @Published private(set) var deviceSpeed: Int?
+    /// 设备回报的当前灯效模式号（1–106）
+    @Published private(set) var deviceMode: Int?
+    /// 最近一次下发被设备确认的命令（回显"已生效"徽标用）
+    @Published private(set) var lastAckedCommand: UInt8?
 
     private let decoder = LampFrameDecoder()
     private weak var ble: DeviceBLEManager?
@@ -161,9 +172,39 @@ final class LampStore: ObservableObject {
             switch frame.kind {
             case .standard(_, let serial, let fields):
                 appendLog("回包 serial=\(serial)：\(fields.map { "0x\(String(format: "%02X", $0.command))(\($0.data.count)B)" }.joined(separator: " "))")
+                for field in fields { applyEcho(command: field.command, data: field.data) }
             case .compact(let command, let payload):
                 appendLog("紧凑回包 0x\(String(format: "%02X", command))：\(payload.map { String(format: "%02X", $0) }.joined())")
+                applyEcho(command: command, data: payload)
             }
+        }
+    }
+
+    /// 回包 TLV → 设备状态回显：颜色(02)/亮度(03)/速度(04)/模式(08 或原命令 85)
+    private func applyEcho(command: UInt8, data: [UInt8]) {
+        switch command {
+        case 0x02, 0x80 where data.count >= 3:
+            if data.count >= 3 {
+                deviceColor = (Int(data[0]), Int(data[1]), Int(data[2]))
+                lastAckedCommand = command
+            }
+        case 0x03, 0x81 where data.count >= 1:
+            if data.count >= 1 {
+                deviceBrightness = Int(data[0])
+                lastAckedCommand = command
+            }
+        case 0x04, 0x82 where data.count >= 1:
+            if data.count >= 1 {
+                deviceSpeed = Int(data[0])
+                lastAckedCommand = command
+            }
+        case 0x08, 0x85 where data.count >= 1:
+            if data.count >= 1 {
+                deviceMode = Int(data[0])
+                lastAckedCommand = command
+            }
+        default:
+            break
         }
     }
 

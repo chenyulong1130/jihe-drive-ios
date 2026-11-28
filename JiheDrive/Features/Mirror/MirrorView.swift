@@ -28,6 +28,8 @@ struct MirrorView: View {
     @State private var exitButtonVisible = true
     @State private var exitFadeTask: Task<Void, Never>?
     @State private var showVehicleInfo = false
+    /// 全屏是否横屏（用户点旋转按钮自选，不自动翻转）
+    @State private var fullscreenLandscape = false
 
     // BMS 叠画（本地状态驱动 UI；写入 UserDefaults 持久化）
     @State private var bmsOverlayEnabled = BMSOverlayConfig.enabled
@@ -94,11 +96,13 @@ struct MirrorView: View {
         }
         .sheet(isPresented: $showLogs) { logsSheet }
         .onChange(of: showFullscreen) { _, active in
-            // 翻转状态由父级驱动：全屏 cover 的 onDisappear 在部分退出路径不回调，
-            // 曾导致退全屏后方向卡死在横屏
-            setFullscreenLandscape(active)
+            // 翻转由用户在全屏里点旋转按钮自选，这里只负责退出时恢复竖屏；
             // 退全屏时卡片预览刚恢复订阅，主动要一个关键帧，避免预览黑屏到下一自然 IDR
-            if !active { controller.requestKeyFrame() }
+            if !active {
+                fullscreenLandscape = false
+                setFullscreenLandscape(false)
+                controller.requestKeyFrame()
+            }
         }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView
@@ -120,7 +124,8 @@ struct MirrorView: View {
         Group {
         if controller.hasVideo {
             // 全屏呈现期间卡片停喂数据：同一帧不再两路解码
-            CPPreviewView(controller: controller, paused: showFullscreen, interactive: false)
+            // 卡片触摸直接转发 CarPlay（点击不再误触全屏，全屏走下方按钮）
+            CPPreviewView(controller: controller, paused: showFullscreen, interactive: true)
                 .aspectRatio(streamAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -1379,12 +1384,11 @@ struct MirrorView: View {
     private var fullscreenView: some View {
         ZStack(alignment: .topLeading) {
             Color.black.ignoresSafeArea()
-            // 画面铺满全屏（上下/左右裁切对齐CarPlay主屏），触控坐标按裁切后区域换算
-            CPPreviewView(controller: controller, fullscreen: true, fillsScreen: true) {
+            // 等比缩放完整显示（不裁切上下/左右），翻转与否由用户点旋转按钮决定
+            CPPreviewView(controller: controller, fullscreen: true) {
                 reviveFullscreenExit()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
             .overlay {
                 GeometryReader { geo in
                     if bmsOverlayEnabled {
@@ -1403,25 +1407,44 @@ struct MirrorView: View {
             }
 
             if exitButtonVisible {
-                Button {
-                    showFullscreen = false
-                } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color.black.opacity(0.55)))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
-                        .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                HStack(spacing: 10) {
+                    // 翻转由用户自选：点按切换横竖屏（不强制、不自动）
+                    Button {
+                        fullscreenLandscape.toggle()
+                        setFullscreenLandscape(fullscreenLandscape)
+                    } label: {
+                        Image(systemName: fullscreenLandscape
+                              ? "rectangle.landscape.rotate" : "rectangle.portrait.rotate")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color.black.opacity(0.55)))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
+                    .accessibilityLabel("旋转画面")
+
+                    Button {
+                        showFullscreen = false
+                    } label: {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color.black.opacity(0.55)))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
                 }
-                .buttonStyle(PressableStyle(scale: 0.92, brightness: 0))
                 .padding(16)
                 .transition(.opacity)
             }
         }
         .onAppear {
             reviveFullscreenExit()
-            // 父级 onChange(showFullscreen) 统一驱动旋转，这里不再重复设置方向
+            // 翻转不自动：进全屏保持当前方向，用户点旋转按钮自选
         }
         .onDisappear {
             exitFadeTask?.cancel()
