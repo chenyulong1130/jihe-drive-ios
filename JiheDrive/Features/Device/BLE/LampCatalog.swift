@@ -122,11 +122,12 @@ enum LampModeLibrary {
               let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let raw = root["products"] as? [String: Any] else { return nil }
+        // 瘦身版结构：products.{productId} = { name, modes: [{ name, no, groupName, modeId }] }
         var result: [Int: [LampLibraryMode]] = [:]
         for (key, entry) in raw {
             guard let productId = Int(key),
                   let product = entry as? [String: Any],
-                  let modes = product["offlineModes"] as? [[String: Any]] else { continue }
+                  let modes = product["modes"] as? [[String: Any]] else { continue }
             result[productId] = modes.compactMap { item in
                 let no = (item["no"] as? String) ?? ""
                 guard !no.isEmpty else { return nil }
@@ -135,7 +136,7 @@ enum LampModeLibrary {
                     name: (item["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "模式 \(no)",
                     groupName: (item["groupName"] as? String) ?? "",
                     modeId: (item["modeId"] as? NSNumber)?.intValue,
-                    canUse: (item["canUse"] as? NSNumber)?.boolValue ?? true)
+                    canUse: true)
             }
         }
         cache = result

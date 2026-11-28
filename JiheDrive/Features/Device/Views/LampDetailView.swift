@@ -16,9 +16,11 @@ struct LampDetailView: View {
     @State private var appliedModeId: String?
     @State private var toast: String?
     @State private var copyToast = false
-    /// 发送节流：拖动色轮/滑条时合并下发，避免命令积压
-    @State private var colorSendTask: Task<Void, Never>?
-    @State private var levelSendTask: Task<Void, Never>?
+    /// 发送合并标记：拖动期间只排一拍，到点发最新值（不反复取消/新建 Task，避免 UI 抖动）
+    @State private var colorSendScheduled = false
+    @State private var levelSendScheduled = false
+
+    private enum LevelKind { case brightness, speed }
 
     private var connected: Bool { ble.isConnected }
 
@@ -57,13 +59,13 @@ struct LampDetailView: View {
                 headerRow
                 productCard
                 colorCard
-                levelSliderCard(title: "亮度调节", value: $brightness,
-                                caption: "写入值，不代表设备当前亮度", icon: "sun.max.fill") {
-                    debouncedSendLevel()
+                levelSliderCard(title: "亮度调节", icon: "sun.max.fill", value: $brightness,
+                                caption: "写入值，不代表设备当前亮度") {
+                    scheduleLevelSend(.brightness)
                 }
-                levelSliderCard(title: "速度调节", value: $speed,
-                                caption: "写入值，不代表设备当前速度", icon: "forward.end.fill") {
-                    debouncedSendLevel()
+                levelSliderCard(title: "速度调节", icon: "forward.end.fill", value: $speed,
+                                caption: "写入值，不代表设备当前速度") {
+                    scheduleLevelSend(.speed)
                 }
                 modeCard
                 commandStatusBar
@@ -164,19 +166,14 @@ struct LampDetailView: View {
         }
     }
 
-    // MARK: - 颜色调节（HSV 色轮 + 预设）
+    // MARK: - 颜色调节（紧凑色轮 + 实时色块）
 
     private var colorCard: some View {
         AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     sectionHeader("颜色调节", icon: "paintpalette.fill", color: Theme.brand)
                     Spacer()
-                    Circle()
-                        .fill(currentColor)
-                        .frame(width: 20, height: 20)
-                        .overlay(Circle().strokeBorder(.white, lineWidth: 2))
-                        .shadow(color: currentColor.opacity(0.45), radius: 6)
                     Text("#\(hexText)")
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundStyle(Theme.label)
@@ -185,22 +182,44 @@ struct LampDetailView: View {
                         .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
 
-                hsvWheel
+                // 左色轮右色块：色轮不再撑满整卡
+                HStack(alignment: .center, spacing: 16) {
+                    hsvWheel
+                        .frame(width: 168, height: 168)
 
+                    VStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(currentColor)
+                            .frame(width: 84, height: 84)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(.white, lineWidth: 3)
+                            )
+                            .shadow(color: currentColor.opacity(0.5), radius: 10)
+                        Text(saturation < 0.06 ? "白色" : "R\(rgb.r) G\(rgb.g) B\(rgb.b)")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+
+                // 预设色板
                 HStack(spacing: 0) {
                     ForEach(presets.indices, id: \.self) { index in
                         let preset = presets[index]
                         let selected = abs(hue - preset.hue) < 2 && abs(saturation - preset.sat) < 0.03
                         Circle()
                             .fill(preset.color)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 30, height: 30)
                             .overlay(Circle().strokeBorder(selected ? Theme.label : .white, lineWidth: selected ? 3 : 2))
-                            .shadow(color: preset.color.opacity(selected ? 0.55 : 0.25), radius: selected ? 10 : 5)
+                            .shadow(color: preset.color.opacity(selected ? 0.55 : 0.25), radius: selected ? 9 : 4)
                             .frame(maxWidth: .infinity)
                             .onTapGesture {
                                 hue = preset.hue
                                 saturation = preset.sat
-                                debouncedSendColor()
+                                scheduleColorSend()
                             }
                     }
                 }
@@ -211,9 +230,9 @@ struct LampDetailView: View {
     /// HSV 色轮：锥形渐变（色相）+ 径向白化（饱和度），拖动取色
     private var hsvWheel: some View {
         GeometryReader { geo in
-            let size = min(geo.size.width, 280)
+            let size = min(geo.size.width, geo.size.height)
             let center = size / 2
-            let radius = center - 8
+            let radius = center - 6
             let angleRad = hue * .pi / 180
             let dotR = saturation * (radius - 4)
             ZStack {
@@ -228,7 +247,7 @@ struct LampDetailView: View {
                             endAngle: .degrees(360)
                         )
                     )
-                    .frame(width: size - 16, height: size - 16)
+                    .frame(width: size - 12, height: size - 12)
                 Circle()
                     .fill(
                         RadialGradient(
@@ -238,18 +257,18 @@ struct LampDetailView: View {
                             endRadius: radius
                         )
                     )
-                    .frame(width: size - 16, height: size - 16)
+                    .frame(width: size - 12, height: size - 12)
                 Circle()
-                    .strokeBorder(.black.opacity(0.2), lineWidth: 1.2)
-                    .frame(width: size - 16, height: size - 16)
+                    .strokeBorder(.black.opacity(0.2), lineWidth: 1)
+                    .frame(width: size - 12, height: size - 12)
                 Circle()
                     .fill(.white)
-                    .frame(width: 20, height: 20)
-                    .shadow(color: .black.opacity(0.3), radius: 5)
-                    .overlay(Circle().fill(currentColor).frame(width: 15, height: 15))
+                    .frame(width: 18, height: 18)
+                    .shadow(color: .black.opacity(0.3), radius: 4)
+                    .overlay(Circle().fill(currentColor).frame(width: 13, height: 13))
                     .position(x: center + cos(angleRad) * dotR, y: center + sin(angleRad) * dotR)
             }
-            .frame(width: geo.size.width, height: geo.size.width)
+            .frame(width: geo.size.width, height: geo.size.height)
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -262,17 +281,16 @@ struct LampDetailView: View {
                         if newHue < 0 { newHue += 360 }
                         hue = newHue
                         saturation = min(1, distance / radius)
-                        debouncedSendColor()
+                        scheduleColorSend()
                     }
             )
         }
-        .frame(height: 280)
     }
 
     // MARK: - 亮度 / 速度滑条卡
 
-    private func levelSliderCard(title: String, value: Binding<Double>,
-                                 caption: String, icon: String,
+    private func levelSliderCard(title: String, icon: String, value: Binding<Double>,
+                                 caption: String,
                                  onChange: @escaping () -> Void) -> some View {
         AppleCard(padding: 14) {
             VStack(alignment: .leading, spacing: 8) {
@@ -419,27 +437,35 @@ struct LampDetailView: View {
         .background(Theme.surfaceAlt, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
-    // MARK: - 发送节流
+    // MARK: - 发送合并（拖动期间 250-300ms 一拍，到点发最新值）
 
-    /// 颜色：250ms 合并（通用命令直发）
-    private func debouncedSendColor() {
-        colorSendTask?.cancel()
-        colorSendTask = Task {
+    /// 颜色：拖动色轮/预设期间 250ms 一拍
+    private func scheduleColorSend() {
+        guard !colorSendScheduled else { return }
+        colorSendScheduled = true
+        Task {
             try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else { return }
+            colorSendScheduled = false
+            guard connected else { return }
             let c = rgb
             await store.setColor(red: c.r, green: c.g, blue: c.b)
         }
     }
 
-    /// 亮度/速度：400ms 合并（通用命令直发）
-    private func debouncedSendLevel() {
-        levelSendTask?.cancel()
-        levelSendTask = Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard !Task.isCancelled else { return }
-            await store.setGeneric(LampProtocol.GenericCommand.brightness, value: Int(brightness * 255))
-            await store.setGeneric(LampProtocol.GenericCommand.modeSpeed, value: Int(speed * 255))
+    /// 亮度/速度：300ms 一拍，只发对应通道
+    private func scheduleLevelSend(_ kind: LevelKind) {
+        guard !levelSendScheduled else { return }
+        levelSendScheduled = true
+        Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            levelSendScheduled = false
+            guard connected else { return }
+            switch kind {
+            case .brightness:
+                await store.setGeneric(LampProtocol.GenericCommand.brightness, value: Int(brightness * 255))
+            case .speed:
+                await store.setGeneric(LampProtocol.GenericCommand.modeSpeed, value: Int(speed * 255))
+            }
         }
     }
 
