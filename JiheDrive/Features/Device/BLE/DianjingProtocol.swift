@@ -28,6 +28,8 @@ enum DianjingRegister {
     static let backlight: UInt8 = 2
     /// 表盘样式：SET 3 字节 ASCII（A01~A04/B01~B03/C01/D01/E01）
     static let dialStyle: UInt8 = 4
+    /// 样式自动轮切：单屏/轮切 + 轮切时间 + 参与主题名（34 字节）
+    static let autoStyleSwitch: UInt8 = 7
     /// 电量显示三选一：1=电量格 2=容量 3=电压
     static let batteryDisplayMode: UInt8 = 6
     /// 磁控开关：1=开 2=关

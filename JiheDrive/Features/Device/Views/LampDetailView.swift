@@ -59,14 +59,10 @@ struct LampDetailView: View {
                 headerRow
                 productCard
                 colorCard
-                levelSliderCard(title: "亮度调节", icon: "sun.max.fill", value: $brightness,
-                                caption: "写入值，不代表设备当前亮度") {
-                    scheduleLevelSend(.brightness)
-                }
-                levelSliderCard(title: "速度调节", icon: "forward.end.fill", value: $speed,
-                                caption: "写入值，不代表设备当前速度") {
-                    scheduleLevelSend(.speed)
-                }
+                levelSliderCard(icon: "sun.max.fill", value: $brightness,
+                                caption: "灯光亮度（0–255），写入值不代表设备当前亮度", kind: .brightness)
+                levelSliderCard(icon: "forward.end.fill", value: $speed,
+                                caption: "模式速度（0–255），写入值不代表设备当前速度", kind: .speed)
                 modeCard
                 commandStatusBar
             }
@@ -289,26 +285,32 @@ struct LampDetailView: View {
 
     // MARK: - 亮度 / 速度滑条卡
 
-    private func levelSliderCard(title: String, icon: String, value: Binding<Double>,
-                                 caption: String,
-                                 onChange: @escaping () -> Void) -> some View {
+    /// 亮度/速度滑条：标题收进 ⓘ 图标（点按弹出说明），滑条通栏好拖
+    private func levelSliderCard(icon: String, value: Binding<Double>,
+                                 caption: String, kind: LevelKind) -> some View {
         AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                sectionHeader(title, icon: icon, color: Theme.brand)
-                HStack(spacing: 10) {
-                    Slider(value: value, in: 0...1)
-                        .tint(Theme.brand)
-                        .disabled(!connected)
-                        .onChange(of: value.wrappedValue) { _, _ in onChange() }
-                    Text("\(Int(value.wrappedValue * 255))")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.label)
-                        .monospacedDigit()
-                        .frame(width: 40, alignment: .trailing)
+            HStack(spacing: 12) {
+                Button {
+                    showToast(caption)
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(width: 24)
                 }
-                Text(caption)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.tertiary)
+                .buttonStyle(.plain)
+                .accessibilityLabel(caption)
+
+                Slider(value: value, in: 0...1)
+                    .tint(Theme.brand)
+                    .disabled(!connected)
+                    .onChange(of: value.wrappedValue) { _, _ in scheduleLevelSend(kind) }
+
+                Text("\(Int(value.wrappedValue * 255))")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.label)
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
             }
         }
     }
@@ -388,19 +390,25 @@ struct LampDetailView: View {
             appliedModeId = mode.id
             Task {
                 await store.applyLibraryMode(mode)
-                showToast("\(mode.name) 已下发")
+                showToast(store.lastError.isEmpty
+                          ? "已下发「\(mode.displayName)」"
+                          : "下发失败：\(store.lastError)")
             }
         } label: {
             VStack(alignment: .leading, spacing: 3) {
-                Text(mode.name)
+                Text(mode.displayName)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(selected ? Theme.brand : Theme.label)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text("编号 \(mode.no)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(selected ? Theme.brand : Theme.tertiary)
+                HStack(spacing: 4) {
+                    Text("编号 \(mode.no)")
+                    Text(mode.groupTitle)
+                        .font(.system(size: 10, weight: .semibold, design: .default))
+                }
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(selected ? Theme.brand : Theme.tertiary)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)

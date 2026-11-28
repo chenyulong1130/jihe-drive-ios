@@ -13,6 +13,13 @@ final class DianjingStore: ObservableObject {
     // MARK: 配置项（连接时补读，SET 后本地乐观更新）
     /// 当前表盘样式（A01~A04/B01~B03/C01/D01/E01）
     @Published private(set) var dialStyle = ""
+    // MARK: 样式自动轮切（寄存器 7）
+    /// 1=单屏显示 2=轮切显示
+    @Published private(set) var autoStyleState: Int = 1
+    /// 轮切间隔（秒）
+    @Published private(set) var autoStyleTime: Int = 0
+    /// 参与轮切的主题 ID（A01…E01）
+    @Published private(set) var autoStyleStyles: [String] = []
     /// 电量显示模式：1=电量格 2=容量 3=电压
     @Published private(set) var batteryDisplayMode: Int = 1
     /// 时间格式：1=24h 2=12h
@@ -98,6 +105,7 @@ final class DianjingStore: ObservableObject {
             DianjingRegister.batteryDirect,
             DianjingRegister.deviceID,
             DianjingRegister.dialStyle,
+            DianjingRegister.autoStyleSwitch,
             DianjingRegister.batteryDisplayMode,
             DianjingRegister.timeFormat,
             DianjingRegister.backlight,
@@ -137,7 +145,27 @@ final class DianjingStore: ObservableObject {
             case DianjingRegister.deviceID:
                 deviceID = DianjingProtocol.ascii(frame.data)
             case DianjingRegister.dialStyle:
-                dialStyle = DianjingProtocol.ascii(frame.data)
+                // 清洗尾部空白/不可见字符，否则选中主题无法高亮
+                let raw = DianjingProtocol.ascii(frame.data)
+                dialStyle = raw.filter { $0.isLetter || $0.isNumber }.uppercased()
+            case DianjingRegister.autoStyleSwitch:
+                // 布局（对齐点睛小程序）：[状态, 主题数, 时间低, 时间高, 主题名ASCII×3字节…]
+                let d = frame.data
+                if d.count >= 4 {
+                    autoStyleState = Int(d[0])
+                    let count = Int(d[1])
+                    autoStyleTime = Int(d[2]) | (Int(d[3]) << 8)
+                    var styles: [String] = []
+                    var pos = 4
+                    for _ in 0..<min(count, 10) where pos + 3 <= d.count {
+                        if let name = String(bytes: d[pos..<pos + 3], encoding: .ascii)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                            styles.append(name)
+                        }
+                        pos += 3
+                    }
+                    autoStyleStyles = styles
+                }
             case DianjingRegister.batteryDisplayMode:
                 batteryDisplayMode = Int(frame.data.first ?? 1)
             case DianjingRegister.timeFormat:
@@ -174,6 +202,25 @@ final class DianjingStore: ObservableObject {
         guard bytes.count == 3 else { return }
         await sendSet(DianjingRegister.dialStyle, content: bytes)
         dialStyle = id.uppercased()
+    }
+
+    /// 样式自动轮切（寄存器 7，对齐点睛小程序字节布局）：
+    /// [状态, 主题数, 时间低, 时间高, 主题名ASCII×3字节×N 补零到30]
+    /// - Parameter state: 1=单屏显示 2=轮切显示
+    func setAutoStyleSwitch(state: Int, time: Int, styles: [String]) async {
+        var bytes: [UInt8] = [UInt8(max(1, min(2, state))), UInt8(min(10, styles.count))]
+        let t = min(65_535, max(0, time))
+        bytes += [UInt8(t & 0xFF), UInt8((t >> 8) & 0xFF)]
+        var packed: [UInt8] = []
+        for style in styles.prefix(10) {
+            packed += Array(style.uppercased().utf8.prefix(3))
+        }
+        while packed.count < 30 { packed.append(0) }
+        bytes += packed
+        await sendSet(DianjingRegister.autoStyleSwitch, content: bytes)
+        autoStyleState = min(2, max(1, state))
+        autoStyleTime = t
+        autoStyleStyles = Array(styles.prefix(10))
     }
 
     /// 电量显示三选一：1=电量格 2=容量 3=电压

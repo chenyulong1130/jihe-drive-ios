@@ -116,9 +116,23 @@ final class DeviceBLEManager: NSObject, ObservableObject {
 
     func log(_ text: String) {
         let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        logs.append("\(stamp) \(text)")
-        if logs.count > 80 { logs.removeFirst(logs.count - 80) }
+        let line = "\(stamp) \(text)"
+        // 埋点可任意线程；@Published 必须回主线程，否则与 SwiftUI AttributeGraph 交叉等锁会卡死
+        // （CarPlay 后台 scene-update 10s → 0x8BADF00D）
         MainThreadHangMonitor.note("BLE \(text)")
+        mutatePublished {
+            self.logs.append(line)
+            if self.logs.count > 80 { self.logs.removeFirst(self.logs.count - 80) }
+        }
+    }
+
+    /// 所有 @Published 写入走这里：已在主线程则同步执行，否则 async，避免持 Combine 锁等主线程。
+    private func mutatePublished(_ body: @escaping () -> Void) {
+        if Thread.isMainThread {
+            body()
+        } else {
+            DispatchQueue.main.async(execute: body)
+        }
     }
 
     func registerDataHandler(_ key: String, kind: DeviceKind, handler: @escaping (Data) -> Void) {
@@ -144,6 +158,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
     }
 
     private func publishState() {
+        // 先在当前线程快照会话，再回主线程写 @Published，避免后台 Task 与主线程抢 Combine 锁
         var devices: [DeviceKind: BLEDevice] = [:]
         var states: [DeviceKind: ConnectionState] = [:]
         for (kind, session) in sessionByKind {
@@ -152,9 +167,11 @@ final class DeviceBLEManager: NSObject, ObservableObject {
                 devices[kind] = session.device
             }
         }
-        connectedDevices = devices
-        connectionStates = states
-        objectWillChange.send()
+        mutatePublished {
+            self.connectedDevices = devices
+            self.connectionStates = states
+            self.objectWillChange.send()
+        }
     }
 
     // MARK: - 连接记忆（每类一台）
@@ -232,7 +249,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
                 ?? (kind == .lamp ? LampTransport.detect(name: name) : nil)
             let device = BLEDevice(id: id, name: name, rssi: 0, kind: kind, bmsBrand: brand, lampTransport: lampTransport)
             log("自动连接上次\(kind.shortTitle)：\(device.displayName)")
-            Task { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 do {
                     try await self.connect(device)
@@ -625,7 +642,7 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         guard session.autoReconnect else { return }
         let device = session.device
         session.reconnectTask?.cancel()
-        session.reconnectTask = Task { [weak self] in
+        session.reconnectTask = Task { @MainActor [weak self] in
             guard let self else { return }
             for attempt in 1...5 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

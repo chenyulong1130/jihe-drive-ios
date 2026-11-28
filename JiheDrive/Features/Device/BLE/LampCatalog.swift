@@ -78,6 +78,32 @@ struct LampLibraryMode: Identifiable {
         return nil
     }
 
+    /// 常用灯效英文词 → 中文（云端模式名为英文）
+    private static let wordMap: [(String, String)] = [
+        ("Rainbow", "彩虹"), ("Colorful", "七彩"), ("Gradient", "渐变"), ("Breathing", "呼吸"),
+        ("Flash", "闪光"), ("Strobe", "频闪"), ("Wave", "波浪"), ("Chase", "追逐"),
+        ("Flow", "流动"), ("Blink", "眨闪"), ("Static", "常亮"), ("Solid", "纯色"),
+        ("Meteor", "流星"), ("Star", "星空"), ("Fire", "火焰"), ("Water", "水波"),
+        ("Heart", "心跳"), ("Music", "音乐"), ("Running", "跑马"), ("Scan", "扫描"),
+        ("Sweep", "扫光"), ("Pulse", "脉冲"), ("Twinkle", "闪亮"), ("Spark", "火花"),
+        ("Comet", "彗星"), ("Snake", "蛇形"), ("Double", "双"), ("Triple", "三"),
+        ("White", "白"), ("Red", "红"), ("Blue", "蓝"), ("Green", "绿"),
+        ("Yellow", "黄"), ("Purple", "紫"), ("Cyan", "青"), ("Orange", "橙"),
+        ("Pink", "粉"), ("Left", "左"), ("Right", "右"), ("Center", "中心"),
+    ]
+
+    /// 中文名：逐词替换常用灯效词；整串命中后去掉词间空格
+    var displayName: String {
+        var text = name
+        for (en, zh) in Self.wordMap where text.contains(en) {
+            text = text.replacingOccurrences(of: en, with: zh)
+        }
+        if text.unicodeScalars.contains(where: { $0.properties.isIdeographic }) {
+            text = text.replacingOccurrences(of: " ", with: "")
+        }
+        return text
+    }
+
     /// 分组名 → 本 App 的通道（行车/开机/转向/急刹）；其余分组不附加通道 TLV
     var channel: LampChannel? {
         switch groupName.lowercased() {
