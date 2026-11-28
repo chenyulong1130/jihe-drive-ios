@@ -75,7 +75,7 @@ final class MotorStore: ObservableObject {
         }
     }
 
-    private func send(_ command: [UInt8], timeout: Double = 2.0) async {
+    private func send(_ command: [UInt8], timeout: Double = 2.0, moving: Bool = false) async {
         guard let ble, ble.isConnected(.shilanLight) else {
             status = "请先连接设备"
             return
@@ -84,8 +84,18 @@ final class MotorStore: ObservableObject {
         let frame = MotorProtocol.frame(command)
         appendLog("发送 \(frame.hexString)")
         do {
-            try await ble.write(frame, kind: .shilanLight)
-            if timeout != 1.0 {
+            // 对齐小程序 writeBLECharacteristicValue：带响应写入。
+            // 此前默认 writeWithoutResponse，部分电机固件会静默丢帧 → 「指令无应答」。
+            try await ble.write(frame, kind: .shilanLight, useResponse: true)
+            if moving {
+                // 移动/自检/归位类：电机走完行程才有 .moved 反馈，等待窗口加长，
+                // 超时提示中性化（不作为错误阻断后续操作）
+                scheduleTimeout(seconds: timeout) { [weak self] in
+                    guard let self, self.busy else { return }
+                    self.busy = false
+                    self.status = "未收到到位反馈（电机可能仍在移动）"
+                }
+            } else if timeout != 1.0 {
                 scheduleTimeout(seconds: timeout) { [weak self] in
                     guard let self else { return }
                     if self.busy {
@@ -170,7 +180,9 @@ final class MotorStore: ObservableObject {
         let logical = reverse ? 100 - value : value
         let span = Double(max(0, params.maxPercent - params.minPercent))
         let absolute = Int(round(Double(params.minPercent) + span * logical / 100.0))
-        Task { await send([7, 2, 1, UInt8(min(100, max(0, absolute))), UInt8(Int(value)), UInt8(flag)]) }
+        // 移动类：8 秒等待窗口（电机走完行程才回 .moved），不再 2 秒就报「指令无应答」
+        Task { await send([7, 2, 1, UInt8(min(100, max(0, absolute))), UInt8(Int(value)), UInt8(flag)],
+                          timeout: 8.0, moving: true) }
     }
 
     func setSpeed(_ level: Double) {
@@ -178,15 +190,16 @@ final class MotorStore: ObservableObject {
     }
 
     func setSelfTest(enabled: Bool) {
-        Task { await send([7, 2, 3, UInt8(enabled ? 1 : 0), UInt8(workingMode), UInt8(params.selfModeDir)]) }
+        Task { await send([7, 2, 3, UInt8(enabled ? 1 : 0), UInt8(workingMode), UInt8(params.selfModeDir)],
+                          timeout: 12.0, moving: true) }
     }
 
     func softZero() {
-        Task { await send([4, 2, 4]) }
+        Task { await send([4, 2, 4], timeout: 8.0, moving: true) }
     }
 
     func hardZero() {
-        Task { await send([5, 2, 5, UInt8(params.homingDir)]) }
+        Task { await send([5, 2, 5, UInt8(params.homingDir)], timeout: 12.0, moving: true) }
     }
 
     func setReverse(_ enabled: Bool) {
