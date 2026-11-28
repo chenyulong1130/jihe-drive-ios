@@ -45,7 +45,13 @@ enum CPDisplayConfig {
         case dark = 2
 
         var id: Int { rawValue }
-        var title: String { ["跟随系统", "白天", "夜间"][rawValue] }
+        var title: String {
+            switch self {
+            case .system: return "跟随系统"
+            case .light: return "白天"
+            case .dark: return "夜间"
+            }
+        }
     }
 
     /// CarPlay 主屏图标大小 = 声明的屏幕物理宽度（mm 越大图标越小）
@@ -56,7 +62,15 @@ enum CPDisplayConfig {
         case tiny = 300
 
         var id: Int { rawValue }
-        var title: String { ["大", "默认", "较小", "最小"][rawValue] }
+        /// 注意：rawValue 是毫米数（125/200/250/300），绝不能当数组下标用
+        var title: String {
+            switch self {
+            case .large: return "大"
+            case .normal: return "默认"
+            case .small: return "较小"
+            case .tiny: return "最小"
+            }
+        }
     }
 
     private static func string(_ key: String) -> String? {
