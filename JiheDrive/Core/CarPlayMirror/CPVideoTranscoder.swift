@@ -187,11 +187,17 @@ final class CPVideoTranscoder {
     }
 
     /// 预览用：取最新解码帧（buffer 与递增帧号；帧号用于预览层去重）。
+    /// 若开启 BMS 叠画，返回合成后的缓冲副本（画中画也能看到叠画）。
     func snapshotForDisplay() -> (buffer: CVPixelBuffer, frame: Int)? {
         bufferLock.lock()
-        defer { bufferLock.unlock() }
-        guard let buffer = latestBuffer else { return nil }
-        return (buffer, frameCounter)
+        let source = latestBuffer
+        let frame = frameCounter
+        bufferLock.unlock()
+        guard let source else { return nil }
+        if let composed = bufferWithBMSOverlay(source) {
+            return (composed, frame)
+        }
+        return (source, frame)
     }
 
     /// 可操作预览窗口用：最新解码帧转 JPEG（内嵌预览页的 MJPEG 流）。
@@ -200,8 +206,18 @@ final class CPVideoTranscoder {
         let image = latestBuffer
         bufferLock.unlock()
         guard let image else { return nil }
-        let ciImage = CIImage(cvPixelBuffer: image)
-        guard let cgImage = compositor.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        var ciImage = CIImage(cvPixelBuffer: image)
+        let snap = BMSOverlayBurnIn.shared.currentSnapshot()
+        if snap != nil {
+            ciImage = BMSOverlayBurnIn.composite(
+                base: ciImage,
+                canvasWidth: ciImage.extent.width,
+                canvasHeight: ciImage.extent.height,
+                snapshot: snap
+            )
+        }
+        let extent = ciImage.extent.integral
+        guard let cgImage = compositor.createCGImage(ciImage, from: extent) else { return nil }
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             output as CFMutableData, "public.jpeg" as CFString, 1, nil) else { return nil }
@@ -209,6 +225,33 @@ final class CPVideoTranscoder {
                                    [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return output as Data
+    }
+
+    /// 把 BMS 叠画烧进像素缓冲（无叠画或失败时返回 nil，调用方用原缓冲）。
+    private func bufferWithBMSOverlay(_ image: CVPixelBuffer) -> CVPixelBuffer? {
+        let snap = BMSOverlayBurnIn.shared.currentSnapshot()
+        guard snap != nil else { return nil }
+        let w = CVPixelBufferGetWidth(image)
+        let h = CVPixelBufferGetHeight(image)
+        var buffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault, w, h,
+            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            [kCVPixelBufferIOSurfacePropertiesKey: [:] ] as CFDictionary,
+            &buffer)
+        guard status == kCVReturnSuccess, let buffer else { return nil }
+        let base = CIImage(cvPixelBuffer: image)
+        let composed = BMSOverlayBurnIn.composite(
+            base: base,
+            canvasWidth: CGFloat(w),
+            canvasHeight: CGFloat(h),
+            snapshot: snap)
+        compositor.render(
+            composed,
+            to: buffer,
+            bounds: CGRect(x: 0, y: 0, width: w, height: h),
+            colorSpace: CGColorSpaceCreateDeviceRGB())
+        return buffer
     }
 
     func invalidate() {
@@ -434,7 +477,11 @@ final class CPVideoTranscoder {
     private func fittedBuffer(_ image: CVPixelBuffer) throws -> CVPixelBuffer {
         let sourceWidth = CVPixelBufferGetWidth(image)
         let sourceHeight = CVPixelBufferGetHeight(image)
-        if sourceWidth == width, sourceHeight == height { return image }
+        let snap = BMSOverlayBurnIn.shared.currentSnapshot()
+        // 尺寸已匹配且无叠画：直接复用原缓冲，避免多余 GPU 拷贝
+        if sourceWidth == width, sourceHeight == height, snap == nil {
+            return image
+        }
         var buffer: CVPixelBuffer?
         let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height,
                                          kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -445,27 +492,40 @@ final class CPVideoTranscoder {
         }
         let source = CIImage(cvPixelBuffer: image)
         let transformed: CIImage
-        switch scaleMode {
-        case .fit:
-            let scale = min(CGFloat(width) / source.extent.width,
-                            CGFloat(height) / source.extent.height)
-            let scaled = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            transformed = scaled.transformed(by: CGAffineTransform(
-                translationX: (CGFloat(width) - scaled.extent.width) / 2,
-                y: (CGFloat(height) - scaled.extent.height) / 2))
-        case .crop:
-            // 居中裁出与仪表同比例的横幅窗口再缩放（竖屏导航信息区）
-            let targetRatio = CGFloat(width) / CGFloat(height)
-            let cropHeight = min(CGFloat(sourceHeight), CGFloat(sourceWidth) / targetRatio)
-            let cropWidth = cropHeight * targetRatio
-            let originX = (source.extent.width - cropWidth) / 2
-            let originY = (source.extent.height - cropHeight) / 2
-            let cropped = source.cropped(to: CGRect(x: originX, y: originY,
-                                                    width: cropWidth, height: cropHeight))
-            let scale = CGFloat(width) / cropWidth
-            transformed = cropped.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        if sourceWidth == width, sourceHeight == height {
+            transformed = source
+        } else {
+            switch scaleMode {
+            case .fit:
+                let scale = min(CGFloat(width) / source.extent.width,
+                                CGFloat(height) / source.extent.height)
+                let scaled = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                transformed = scaled.transformed(by: CGAffineTransform(
+                    translationX: (CGFloat(width) - scaled.extent.width) / 2,
+                    y: (CGFloat(height) - scaled.extent.height) / 2))
+            case .crop:
+                // 居中裁出与仪表同比例的横幅窗口再缩放（竖屏导航信息区）
+                let targetRatio = CGFloat(width) / CGFloat(height)
+                let cropHeight = min(CGFloat(sourceHeight), CGFloat(sourceWidth) / targetRatio)
+                let cropWidth = cropHeight * targetRatio
+                let originX = (source.extent.width - cropWidth) / 2
+                let originY = (source.extent.height - cropHeight) / 2
+                let cropped = source.cropped(to: CGRect(x: originX, y: originY,
+                                                        width: cropWidth, height: cropHeight))
+                let scale = CGFloat(width) / cropWidth
+                transformed = cropped.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            }
         }
-        compositor.render(transformed.composited(over: CIImage(color: .black)),
+        var composed = transformed.composited(over: CIImage(color: .black))
+        // 极核投屏：叠画烧进编码帧，仪表端直接看到 BMS HUD
+        if snap != nil {
+            composed = BMSOverlayBurnIn.composite(
+                base: composed,
+                canvasWidth: CGFloat(width),
+                canvasHeight: CGFloat(height),
+                snapshot: snap)
+        }
+        compositor.render(composed,
                           to: buffer,
                           bounds: CGRect(x: 0, y: 0, width: width, height: height),
                           colorSpace: CGColorSpaceCreateDeviceRGB())

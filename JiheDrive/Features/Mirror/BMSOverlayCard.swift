@@ -38,7 +38,10 @@ struct BMSOverlayCard: View {
         .padding(size.padding)
         .background {
             RoundedRectangle(cornerRadius: compactChrome ? 12 : 16, style: .continuous)
-                .fill(.ultraThinMaterial)
+                // 投屏烧录用实色：ImageRenderer 对 material 常渲成灰块
+                .fill(compactChrome
+                      ? AnyShapeStyle(Color(red: 0.06, green: 0.09, blue: 0.14).opacity(0.92))
+                      : AnyShapeStyle(.ultraThinMaterial))
                 .overlay(
                     RoundedRectangle(cornerRadius: compactChrome ? 12 : 16, style: .continuous)
                         .strokeBorder(
@@ -183,8 +186,7 @@ struct BMSOverlayCard: View {
 // MARK: - 投屏烧录（JPEG / 极核 / 画中画）
 
 /// 把叠画卡片渲成位图，供转码器合成进输出帧。
-@MainActor
-final class BMSOverlayBurnIn {
+final class BMSOverlayBurnIn: @unchecked Sendable {
     static let shared = BMSOverlayBurnIn()
 
     private var cachedKey = ""
@@ -199,6 +201,7 @@ final class BMSOverlayBurnIn {
         let marginRatio: CGFloat
     }
 
+    @MainActor
     func refresh(
         realtime: BMSRealtime?,
         connected: Bool,
@@ -256,13 +259,10 @@ final class BMSOverlayBurnIn {
     }
 
     /// 转码线程安全读取。
-    nonisolated func currentSnapshot() -> Snapshot? {
-        // NSLock 保护；CGImage 只读引用跨线程安全
-        let lock = MainActor.assumeIsolated { self.lock }
+    func currentSnapshot() -> Snapshot? {
         lock.lock()
-        let snap = MainActor.assumeIsolated { lockedSnapshot }
-        lock.unlock()
-        return snap
+        defer { lock.unlock() }
+        return lockedSnapshot
     }
 }
 

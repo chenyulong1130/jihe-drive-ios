@@ -2,6 +2,9 @@ import Foundation
 
 @MainActor
 final class BMSStore: ObservableObject {
+    /// 设备页与 CarPlay 叠画共用同一实例，避免双 handler / 双轮询。
+    static let shared = BMSStore()
+
     @Published private(set) var realtime: BMSRealtime?
     @Published private(set) var brand: BMSBrand = .ant
     @Published private(set) var channel: BMSChannel = .ffe1

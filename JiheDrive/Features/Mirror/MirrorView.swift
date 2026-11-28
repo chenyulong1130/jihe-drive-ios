@@ -7,6 +7,8 @@ struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
     @StateObject private var store = MirrorStore()
     @StateObject private var controller = CPMirrorController()
+    @ObservedObject private var bmsStore = BMSStore.shared
+    @ObservedObject private var ble = DeviceBLEManager.shared
 
     @State private var checks: [CPMirrorDiagnostics.CheckResult] = []
     @State private var runningChecks = false
@@ -24,6 +26,12 @@ struct MirrorView: View {
     @State private var exitButtonVisible = true
     @State private var exitFadeTask: Task<Void, Never>?
     @State private var showVehicleInfo = false
+
+    // BMS 叠画（本地状态驱动 UI；写入 UserDefaults 持久化）
+    @State private var bmsOverlayEnabled = BMSOverlayConfig.enabled
+    @State private var bmsOverlayPosition = BMSOverlayConfig.position
+    @State private var bmsOverlaySize = BMSOverlayConfig.size
+    @State private var bmsOverlayFields = BMSOverlayConfig.fields
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -53,7 +61,16 @@ struct MirrorView: View {
         .onAppear {
             // 只做本地检查；蓝牙/定位/本地网络权限一律延迟到真正需要时
             store.recheckIdentity()
+            refreshBMSOverlayBurnIn()
         }
+        .onChange(of: bmsStore.realtime?.soc) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsStore.realtime?.totalVoltage) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsStore.realtime?.current) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsStore.realtime?.power) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsOverlayEnabled) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsOverlayPosition) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsOverlaySize) { _, _ in refreshBMSOverlayBurnIn() }
+        .onChange(of: bmsOverlayFields) { _, _ in refreshBMSOverlayBurnIn() }
         .onChange(of: controller.phase) { _, phase in
             handlePhase(phase)
         }
@@ -106,6 +123,22 @@ struct MirrorView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
+                .overlay {
+                    GeometryReader { geo in
+                        if bmsOverlayEnabled {
+                            BMSOverlayCard(
+                                realtime: bmsStore.realtime,
+                                connected: ble.isConnected(.bms),
+                                size: bmsOverlaySize,
+                                fields: bmsOverlayFields
+                            )
+                            .frame(width: geo.size.width * bmsOverlaySize.widthRatio)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: bmsOverlayPosition.alignment)
+                            .padding(10)
+                            .allowsHitTesting(false)
+                        }
+                    }
+                }
 
                 HStack(spacing: 8) {
                     previewOverlayIcon("pip.enter", label: "画中画") {
@@ -386,36 +419,126 @@ struct MirrorView: View {
         }
     }
 
-    /// 设置弹窗：Wi-Fi 预设 + 输出设置两卡合一
+    /// 设置弹窗：分区图标卡 + BMS 叠画实时预览，比参考 App 的表格设置更有层次。
     private var settingsSheet: some View {
         SheetShell(
             title: "CarPlay 设置",
-            subtitle: "Wi-Fi 预设与输出",
+            subtitle: "画面 · Wi-Fi · 叠画 · 输出",
             onClose: { showSettings = false }
         ) {
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 12) {
-                    wifiSetupCard
+                VStack(spacing: 16) {
+                    settingsHeroBanner
+                    settingsSectionLabel("画面", icon: "display", tint: Theme.brand)
                     displayConfigCard
+                    settingsSectionLabel("BMS 叠画", icon: "bolt.batteryblock.fill", tint: Theme.green)
+                    bmsOverlaySettingsCard
+                    settingsSectionLabel("网络", icon: "wifi", tint: Theme.teal)
+                    wifiSetupCard
+                    settingsSectionLabel("输出", icon: "tv.and.hifispeaker.fill", tint: Theme.orange)
                     outputSettingsCard
                 }
                 .padding(.horizontal, Theme.page)
                 .padding(.top, 4)
-                .padding(.bottom, 28)
+                .padding(.bottom, 36)
             }
             .background(Theme.groupedBackground)
         }
         .sheetChrome()
     }
 
+    private func settingsSectionLabel(_ title: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(tint))
+            Text(title.uppercased())
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(Theme.secondary)
+                .tracking(0.6)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 2)
+        .padding(.top, 4)
+    }
+
+    /// 顶部氛围条：当前分辨率 / 叠画状态一览
+    private var settingsHeroBanner: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(hex: 0x0B1220),
+                            Color(hex: 0x16324A),
+                            Theme.brand.opacity(0.55)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            // 假预览比例窗
+            HStack(alignment: .bottom, spacing: 14) {
+                ZStack(alignment: bmsOverlayPosition.alignment) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                        .overlay(
+                            Image(systemName: "car.side.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.22))
+                        )
+                    if bmsOverlayEnabled {
+                        BMSOverlayCard(
+                            realtime: bmsStore.realtime,
+                            connected: ble.isConnected(.bms),
+                            size: .compact,
+                            fields: bmsOverlayFields,
+                            compactChrome: true
+                        )
+                        .scaleEffect(0.72, anchor: bmsOverlayPosition.alignment)
+                        .padding(6)
+                    }
+                }
+                .frame(width: 168, height: 168 / streamAspect)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("实时预览布局")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("\(CPDisplayConfig.resolution.rawValue) · \(CPDisplayConfig.fps.title)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.7))
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(bmsOverlayEnabled ? Theme.green : Color.white.opacity(0.35))
+                            .frame(width: 7, height: 7)
+                        Text(bmsOverlayEnabled ? "BMS 叠画已开 · \(bmsOverlayPosition.title)" : "BMS 叠画关闭")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.bottom, 2)
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 132)
+    }
+
     /// 画面参数卡：分辨率 / 帧率 / 外观 / 图标大小（对齐 CarWithin 参数面）。
     /// 用 Menu+Picker（项目内已验证的稳定模式），不用 segmented（部分系统版本崩溃案例）。
     private var displayConfigCard: some View {
         AppleCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("画面参数")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Theme.label)
+            VStack(alignment: .leading, spacing: 12) {
+                settingsIconTitle("画面参数", icon: "rectangle.ratio.16.to.9", tint: Theme.brand)
                 displayMenuRow("分辨率", current: CPDisplayConfig.resolution.rawValue) {
                     ForEach(CPDisplayConfig.Resolution.allCases) { res in
                         Button {
@@ -454,10 +577,160 @@ struct MirrorView: View {
                         }
                     }
                 }
-                Text("分辨率/帧率/图标大小需停止并重新启动 CarPlay 生效；外观实时切换（回到跟随系统需重启）。触控坐标自动跟随分辨率。")
+                Text("分辨率 / 帧率 / 图标大小需重启 CarPlay；外观可实时切换（回跟随系统需重启）。")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func settingsIconTitle(_ title: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint))
+            Text(title)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Theme.label)
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// BMS 叠画：开关 + 四角位置 + 尺寸 + 字段（预览与投屏同步）。
+    private var bmsOverlaySettingsCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.green))
+                    Text("叠到预览 / 投屏")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Theme.label)
+                    Spacer(minLength: 8)
+                    Toggle("", isOn: $bmsOverlayEnabled)
+                        .labelsHidden()
+                        .tint(Theme.green)
+                        .onChange(of: bmsOverlayEnabled) { _, value in
+                            BMSOverlayConfig.enabled = value
+                        }
+                }
+
+                Text(bmsOverlayEnabled
+                     ? "开启后本机预览、全屏、画中画与极核投屏都会叠 BMS 数据。"
+                     : "关闭时画面保持纯净 CarPlay；打开即可在角落看电量。")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if bmsOverlayEnabled {
+                    Text("位置")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Theme.secondary)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(BMSOverlayConfig.Position.allCases) { pos in
+                            Button {
+                                bmsOverlayPosition = pos
+                                BMSOverlayConfig.position = pos
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: pos.icon)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text(pos.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(bmsOverlayPosition == pos ? .white : Theme.label)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(bmsOverlayPosition == pos ? Theme.green : Theme.surfaceAlt)
+                                )
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+                        }
+                    }
+
+                    Text("尺寸")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Theme.secondary)
+                    HStack(spacing: 8) {
+                        ForEach(BMSOverlayConfig.Size.allCases) { item in
+                            Button {
+                                bmsOverlaySize = item
+                                BMSOverlayConfig.size = item
+                            } label: {
+                                Text(item.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(bmsOverlaySize == item ? .white : Theme.label)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 34)
+                                    .background(
+                                        Capsule().fill(bmsOverlaySize == item ? Theme.brand : Theme.surfaceAlt)
+                                    )
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                        }
+                    }
+
+                    Text("显示字段")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Theme.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                        ForEach(BMSOverlayConfig.Field.allCases) { field in
+                            let on = bmsOverlayFields.contains(field)
+                            Button {
+                                var next = bmsOverlayFields
+                                if on {
+                                    guard next.count > 1 else { return }
+                                    next.remove(field)
+                                } else {
+                                    next.insert(field)
+                                }
+                                bmsOverlayFields = next
+                                BMSOverlayConfig.fields = next
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: field.icon)
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text(field.title)
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundStyle(on ? Theme.brand : Theme.secondary)
+                                .padding(.horizontal, 10)
+                                .frame(height: 32)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(on ? Theme.brand.opacity(0.12) : Theme.surfaceAlt)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .strokeBorder(on ? Theme.brand.opacity(0.35) : Color.clear, lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
+                        }
+                    }
+
+                    if !ble.isConnected(.bms) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                                .foregroundStyle(Theme.orange)
+                            Text("尚未连接保护板：叠画会显示占位，连接后自动刷新。")
+                                .font(Theme.caption)
+                                .foregroundStyle(Theme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10)
+                        .background(Theme.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
             }
         }
     }
@@ -497,12 +770,13 @@ struct MirrorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
                     Image(systemName: "wifi")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
-                        .frame(width: 24)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.teal))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Wi-Fi 预设")
-                            .font(Theme.headline)
+                            .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(Theme.label)
                         Text(store.currentSSID.map { "已检测：\($0)" }
                               ?? (store.locationDenied
@@ -666,12 +940,13 @@ struct MirrorView: View {
         AppleCard(padding: 16) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.brand)
-                        .frame(width: 24)
+                    Image(systemName: "tv.and.hifispeaker.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.orange))
                     Text("输出设置")
-                        .font(Theme.headline)
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Theme.label)
                     Spacer(minLength: 0)
                     if store.castToZeeho {
@@ -907,6 +1182,17 @@ struct MirrorView: View {
         return "请先连上 Wi-Fi/仪表热点，并点右上角「Wi-Fi 预设」填写名称与密码，否则 iPhone 无法回连控制端口。"
     }
 
+    private func refreshBMSOverlayBurnIn() {
+        BMSOverlayBurnIn.shared.refresh(
+            realtime: bmsStore.realtime,
+            connected: ble.isConnected(.bms),
+            enabled: bmsOverlayEnabled,
+            position: bmsOverlayPosition,
+            size: bmsOverlaySize,
+            fields: bmsOverlayFields
+        )
+    }
+
     /// 启动阶段计时：5 秒还没出画面才显示提示；出画/停止后清除
     private func handlePhase(_ phase: CPMirrorController.Phase) {
         switch phase {
@@ -998,6 +1284,22 @@ struct MirrorView: View {
             }
             .aspectRatio(streamAspect, contentMode: .fit)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                GeometryReader { geo in
+                    if bmsOverlayEnabled {
+                        BMSOverlayCard(
+                            realtime: bmsStore.realtime,
+                            connected: ble.isConnected(.bms),
+                            size: bmsOverlaySize,
+                            fields: bmsOverlayFields
+                        )
+                        .frame(width: geo.size.width * bmsOverlaySize.widthRatio)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: bmsOverlayPosition.alignment)
+                        .padding(16)
+                        .allowsHitTesting(false)
+                    }
+                }
+            }
 
             if exitButtonVisible {
                 Button {

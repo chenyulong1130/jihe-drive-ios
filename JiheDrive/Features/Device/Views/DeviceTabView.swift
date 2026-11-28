@@ -8,7 +8,7 @@ struct DeviceTabView: View {
 
     @StateObject private var ble = DeviceBLEManager.shared
     @StateObject private var session = DeviceSession.shared
-    @StateObject private var bmsStore = BMSStore()
+    @ObservedObject private var bmsStore = BMSStore.shared
     @StateObject private var headlightStore = MotorStore()
     @StateObject private var chargerStore = ChargerStore()
     @StateObject private var dianjingStore = DianjingStore()
