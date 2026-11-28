@@ -17,7 +17,7 @@ final class LampStore: ObservableObject {
     @Published var customCommandHex = ""
     // MARK: 设备回显状态（从灯具回包 TLV 解析；未上报时为 nil）
     /// 设备回报的 RGB 颜色
-    @Published private(set) var deviceColor: (r: Int, g: Int, b: Int)?
+    @Published private(set) var deviceColor: LampRGBState?
     /// 设备回报的亮度（0–255）
     @Published private(set) var deviceBrightness: Int?
     /// 设备回报的模式速度（0–255）
@@ -185,7 +185,7 @@ final class LampStore: ObservableObject {
         switch command {
         case 0x02, 0x80 where data.count >= 3:
             if data.count >= 3 {
-                deviceColor = (Int(data[0]), Int(data[1]), Int(data[2]))
+                deviceColor = LampRGBState(r: Int(data[0]), g: Int(data[1]), b: Int(data[2]))
                 lastAckedCommand = command
             }
         case 0x03, 0x81 where data.count >= 1:
@@ -212,4 +212,15 @@ final class LampStore: ObservableObject {
         logs.append(text)
         if logs.count > 60 { logs.removeFirst(logs.count - 60) }
     }
+}
+
+// MARK: - 回显数据模型
+
+/// 灯具 RGB 回显（结构体满足 onChange 的 Equatable 约束，元组不满足）
+struct LampRGBState: Equatable {
+    let r: Int
+    let g: Int
+    let b: Int
+
+    var hexText: String { String(format: "%02X%02X%02X", r, g, b) }
 }

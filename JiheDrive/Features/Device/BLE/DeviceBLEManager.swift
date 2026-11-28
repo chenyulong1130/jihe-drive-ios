@@ -157,8 +157,16 @@ final class DeviceBLEManager: NSObject, ObservableObject {
         dataHandlers.removeValue(forKey: key)
     }
 
+    /// publishState 合并：BLE 回调密集时（记忆设备搜不到重连/断连风暴）
+    /// 每次调用都各发 3 次 objectWillChange 会让主线程在 Combine 锁上排队
+    /// 直至 watchdog SIGKILL（表现为卡骨架屏后闪退）。这里按主线程一拍合并：
+    /// 快照存 pending，已在主线程排队的更新直接覆盖，一次 drain 只发一次。
+    private let publishStateLock = NSLock()
+    private var publishStatePending = false
+    private var pendingConnectedDevices: [DeviceKind: BLEDevice] = [:]
+    private var pendingConnectionStates: [DeviceKind: ConnectionState] = [:]
+
     private func publishState() {
-        // 先在当前线程快照会话，再回主线程写 @Published，避免后台 Task 与主线程抢 Combine 锁
         var devices: [DeviceKind: BLEDevice] = [:]
         var states: [DeviceKind: ConnectionState] = [:]
         for (kind, session) in sessionByKind {
@@ -167,10 +175,24 @@ final class DeviceBLEManager: NSObject, ObservableObject {
                 devices[kind] = session.device
             }
         }
-        mutatePublished {
+        publishStateLock.lock()
+        pendingConnectedDevices = devices
+        pendingConnectionStates = states
+        let shouldSchedule = !publishStatePending
+        publishStatePending = true
+        publishStateLock.unlock()
+        guard shouldSchedule else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.publishStateLock.lock()
+            let devices = self.pendingConnectedDevices
+            let states = self.pendingConnectionStates
+            self.publishStatePending = false
+            self.publishStateLock.unlock()
+            // @Published setter 自带 objectWillChange；不再手动叠加 send
+            // （手动 send 曾把每次发布放大成 3 次，锁竞争是卡死根因）
             self.connectedDevices = devices
             self.connectionStates = states
-            self.objectWillChange.send()
         }
     }
 

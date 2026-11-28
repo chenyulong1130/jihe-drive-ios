@@ -118,14 +118,19 @@ struct LampDetailView: View {
                 speed = Double(value) / 255.0
             }
             .onChange(of: store.deviceColor) { _, color in
-                guard let color, !colorDragging else { return }
-                let ui = UIColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
-                                 blue: CGFloat(color.b) / 255, alpha: 1)
-                var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-                ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-                hue = Double(h * 360)
-                saturation = Double(s)
+                syncDeviceColorEcho(color)
             }
+    }
+
+    /// 灯具回报 RGB → 同步色轮（拆成独立方法避免 onChange 链类型检查超时）
+    private func syncDeviceColorEcho(_ color: LampRGBState?) {
+        guard let color, !colorDragging else { return }
+        let ui = UIColor(red: CGFloat(color.r) / 255, green: CGFloat(color.g) / 255,
+                         blue: CGFloat(color.b) / 255, alpha: 1)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ui.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        hue = Double(h * 360)
+        saturation = Double(s)
     }
 
     private func showToast(_ text: String) {
