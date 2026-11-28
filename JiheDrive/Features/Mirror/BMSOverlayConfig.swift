@@ -54,12 +54,12 @@ enum BMSOverlayConfig {
             case .large: return "放大"
             }
         }
-        /// 叠画卡片相对预览宽度的比例
+        /// 叠画卡片相对预览宽度的比例（2026-11-28 调小：投到车机时少挡画面）
         var widthRatio: CGFloat {
             switch self {
-            case .compact: return 0.38
-            case .regular: return 0.46
-            case .large: return 0.56
+            case .compact: return 0.30
+            case .regular: return 0.38
+            case .large: return 0.46
             }
         }
         var padding: CGFloat {

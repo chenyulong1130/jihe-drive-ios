@@ -131,13 +131,22 @@ final class LampStore: ObservableObject {
     }
 
     /// 应用模式库中的一条模式（每产品独立数据）：模式号走通用命令，
-    /// 分组映射到通道 TLV（行车/开机/转向/急刹），其余分组不带通道
+    /// 分组映射到通道 TLV（开机/转向/急刹）。UQ 通道的行车组直发命令——
+    /// UQ 实测分区帧（wireCommand 01）灯具不响应，而直发命令帧与
+    /// 颜色/亮度同构（已验证可用），行车又是默认通道；其他通道保持分区帧。
     func applyLibraryMode(_ mode: LampLibraryMode) async {
         guard let number = mode.number, number > 0, number <= 0x6A else {
             lastError = "模式号 \(mode.no) 超出设备支持范围（1–106）"
             return
         }
-        await setMode(number, channel: mode.channel?.rawValue)
+        let channel = mode.channel
+        let wireChannel: Int?
+        if transport == .uq, channel == .driving {
+            wireChannel = nil
+        } else {
+            wireChannel = channel?.rawValue
+        }
+        await setMode(number, channel: wireChannel)
     }
 
     /// 调试面板：按当前通道组帧发送任意 HEX 载荷

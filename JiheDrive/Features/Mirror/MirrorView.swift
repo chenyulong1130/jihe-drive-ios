@@ -837,7 +837,7 @@ struct MirrorView: View {
         }
     }
 
-    // MARK: - Wi-Fi 预设卡片（内联，输入后防抖自动保存）
+    // MARK: - Wi-Fi 预设卡片（防抖自动保存 + 显式保存按钮 + 记忆状态）
 
     private var wifiSetupCard: some View {
         AppleCard(padding: 16) {
@@ -860,11 +860,6 @@ struct MirrorView: View {
                             .foregroundStyle(Theme.secondary)
                     }
                     Spacer(minLength: 0)
-                    if wifiSaved {
-                        Label("已保存", systemImage: "checkmark.circle.fill")
-                            .font(Theme.caption.weight(.semibold))
-                            .foregroundStyle(Theme.green)
-                    }
                     Button { store.detectSSID() } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 14, weight: .semibold))
@@ -887,20 +882,52 @@ struct MirrorView: View {
                     .textInputAutocapitalization(.never)
                     .onChange(of: store.wifiPassword) { _, _ in scheduleWifiSave() }
 
-                // 只保存预设（CarPlay 会话用），不会替你去连接热点——
-                // 加入仪表热点请在系统设置完成
-                HStack(spacing: 8) {
-                    Image(systemName: wifiSaved ? "checkmark.circle.fill" : "square.and.arrow.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(wifiSaved ? Theme.green : Theme.secondary)
-                    Text(wifiSaved ? "已保存，启动 CarPlay 时自动使用"
-                                   : "填写后自动保存（仅保存，不会替你连接热点）")
-                        .font(Theme.caption)
-                        .foregroundStyle(Theme.secondary)
-                    Spacer()
+                // 记忆状态行 + 显式保存按钮：
+                // 名称/密码持久化（密码按 SSID 存钥匙串），启动 CarPlay 自动使用
+                HStack(spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: hasRememberedWiFi
+                              ? "checkmark.seal.fill" : "square.and.arrow.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(hasRememberedWiFi ? Theme.green : Theme.secondary)
+                        Text(hasRememberedWiFi
+                             ? "已记忆「\(store.resolvedSSID)」\(store.rememberedPassword ? "· 含密码" : "")"
+                             : wifiSaved ? "已保存" : "尚未记忆")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(hasRememberedWiFi ? Theme.green : Theme.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Button {
+                        wifiSaveTask?.cancel()
+                        store.commitWiFi()
+                        withAnimation(.easeOut(duration: 0.2)) { wifiSaved = true }
+                        Task {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            await MainActor.run { wifiSaved = false }
+                        }
+                    } label: {
+                        Label("保存", systemImage: "square.and.arrow.down")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .frame(height: 32)
+                            .background(Theme.teal, in: Capsule())
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.95, brightness: 0))
                 }
+                Text("保存后下次启动自动带出；加入仪表热点请在系统设置完成。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
             }
         }
+    }
+
+    /// 名称与密码是否都已持久化（名称在 UserDefaults，密码按 SSID 存钥匙串）
+    private var hasRememberedWiFi: Bool {
+        !store.resolvedSSID.isEmpty
+            && UserDefaults.standard.string(forKey: "cp.wifi.ssid") == store.resolvedSSID
+            && (store.rememberedPassword || MirrorStore.savedPassword(for: store.resolvedSSID) != nil)
     }
 
     // MARK: - 启动卡（自检并入进度：点启动立即响应）
@@ -1122,56 +1149,54 @@ struct MirrorView: View {
                         }
                     }
 
-                    HStack(spacing: 10) {
-                        Image(systemName: "car.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.brand)
-                            .frame(width: 24)
-                        Text("仪表车型")
-                            .font(Theme.footnote.weight(.medium))
-                            .foregroundStyle(Theme.label)
-                        Spacer(minLength: 8)
-                        Menu {
+                    // 目标车辆：芯片点选（自动适配 + 车型档案），选择即记忆并热切换
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "car.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.brand)
+                            Text("目标车辆")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Theme.secondary)
+                            Spacer(minLength: 0)
+                            if controller.zeehoModelID != "auto" {
+                                Label("已记忆", systemImage: "checkmark.seal.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Theme.green)
+                            }
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                             ForEach(CPMirrorController.zeehoModels, id: \.id) { model in
+                                let selected = controller.zeehoModelID == model.id
                                 Button {
                                     controller.setZeehoModel(model.id)
                                 } label: {
-                                    if controller.zeehoModelID == model.id {
-                                        Label(model.name, systemImage: "checkmark")
-                                    } else {
-                                        Text(model.name)
-                                    }
+                                    Text(model.name)
+                                        .font(.system(size: 12.5, weight: selected ? .bold : .semibold))
+                                        .foregroundStyle(selected ? Color.white : Theme.label)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 34)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .fill(selected ? Theme.brand : Theme.surfaceAlt)
+                                        )
                                 }
+                                .buttonStyle(PressableStyle(scale: 0.96, brightness: 0))
                             }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Text(controller.zeehoModelName)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .lineLimit(1)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                            .foregroundStyle(Theme.label)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Theme.surfaceAlt, in: Capsule())
                         }
-                    }
-
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(controller.zeehoSpecText)
-                                .font(Theme.caption.weight(.semibold))
-                                .foregroundStyle(Theme.label)
+                        HStack(spacing: 6) {
+                            Image(systemName: "gauge.with.needle")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.secondary)
                             Text(controller.zeehoModelID == "auto"
                                  ? "投屏规格随仪表协商自动适配"
                                  : "已选 \(controller.zeehoModelName) · 规格按所选车型协商，异常时回退自适应")
                                 .font(Theme.caption)
                                 .foregroundStyle(Theme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Spacer(minLength: 0)
-                        StatusPill(text: controller.zeehoStatus,
-                                   color: controller.zeehoStatus == "投屏中" ? Theme.green : Theme.secondary)
                     }
                 }
             }
