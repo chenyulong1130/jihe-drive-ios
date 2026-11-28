@@ -141,6 +141,12 @@ struct PreviewUIViewRepresentable: UIViewRepresentable {
                     }
                 }
             }
+            // 兜底偶发黑屏：订阅后 0.8 秒仍没出过画面，主动再要一次关键帧
+            // （覆盖关键帧请求被吞、显示层未就绪等单次恢复失败的场景）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self, weak view] in
+                guard let self, self.token != nil, let view, !view.hasDisplayedFrame else { return }
+                view.onKeyframeNeeded?()
+            }
         }
 
         func unsubscribe() {
@@ -207,6 +213,8 @@ final class CPDisplaySurface: UIView {
     private var awaitingKeyframe = false
     private var lastRecovery: TimeInterval = -.infinity
     private var checkingDisplaySince: TimeInterval?
+    /// 本轮订阅后是否成功送出过画面（订阅后 0.8s 无画面就再要关键帧的判据）
+    private(set) var hasDisplayedFrame = false
     private var needsRecovery: Bool {
         displayLayer.requiresFlushToResumeDecoding || displayLayer.status == .failed
     }
@@ -230,12 +238,23 @@ final class CPDisplaySurface: UIView {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.cancelsTouchesInView = false
         addGestureRecognizer(tap)
+        // 拖动救援手势：卡片在 SwiftUI ScrollView 里，垂直拖动会被页面滚动
+        // 拦截并 touchesCancelled——同手势与滚动并行识别，拖动继续转发 CarPlay
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.cancelsTouchesInView = false
+        pan.delegate = self
+        addGestureRecognizer(pan)
         NotificationCenter.default.addObserver(
             self, selector: #selector(decodeFailed(_:)),
             name: .AVSampleBufferDisplayLayerFailedToDecode, object: displayLayer)
         NotificationCenter.default.addObserver(
             self, selector: #selector(recoveryFlagChanged),
             name: .AVSampleBufferDisplayLayerRequiresFlushToResumeDecodingDidChange, object: displayLayer)
+    }
+
+    /// 与页面滚动手势并行识别：卡片拖动不再被滚动吃掉
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
@@ -285,6 +304,7 @@ final class CPDisplaySurface: UIView {
         awaitingKeyframe = false
         checkingDisplaySince = nil
         lastRecovery = -.infinity
+        hasDisplayedFrame = false
         displayLayer.flushAndRemoveImage()
         format = nil
         parameters = nil
@@ -408,6 +428,7 @@ final class CPDisplaySurface: UIView {
         }
         pending.append((sample, bytes.count))
         pendingBytes += bytes.count
+        hasDisplayedFrame = true
         if !requesting {
             requesting = true
             displayLayer.requestMediaDataWhenReady(on: decodeQueue) { [weak self] in self?.drain() }
@@ -586,5 +607,32 @@ final class CPDisplaySurface: UIView {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         lift(touches)
+    }
+
+    // MARK: - 拖动救援（页面滚动拦截 touchesCancelled 时由 Pan 手势续传）
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        // 与 touchesBegan 共用同一个 UITouch hash key，槽位连续不重开
+        guard let touch = gesture.touches(for: self).first else { return }
+        switch gesture.state {
+        case .began:
+            update([touch])
+            flushContacts()
+        case .changed:
+            update([touch])
+            flushContacts()
+        case .ended, .cancelled, .failed:
+            lift([touch])
+        default:
+            break
+        }
+    }
+}
+
+extension CPDisplaySurface: UIGestureRecognizerDelegate {
+    /// 允许与页面滚动并行识别；也允许与自己的 tap 识别器并行
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 }

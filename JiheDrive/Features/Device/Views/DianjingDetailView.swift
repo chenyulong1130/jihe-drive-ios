@@ -22,7 +22,6 @@ struct DianjingDetailView: View {
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 8) {
-                headerRow
                 styleCard
             }
             .padding(.horizontal, 14)
@@ -68,24 +67,7 @@ struct DianjingDetailView: View {
         .sheet(isPresented: $showConfigSheet) { configSheet }
     }
 
-    // MARK: - Header
-
-    private var headerRow: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(ble.connectedDevice?.displayName ?? "仪表")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(Theme.label)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            StatusPill(
-                text: connected ? "已连接" : "未连接",
-                color: connected ? Theme.green : Theme.secondary,
-                pulsing: connected
-            )
-        }
-    }
-
-    // MARK: - 表盘主题（单显单选 / 轮切多选，点选即下发）
+    // MARK: - 表盘主题（单显单选 / 轮切多选，点选即下发；状态收进卡头，无大标题行）
 
     /// 样式分组与名称，真值来自点睛小程序 setting-style/style.js
     private let styleGroups: [(name: String, styles: [(id: String, title: String)])] = [
@@ -106,12 +88,12 @@ struct DianjingDetailView: View {
     private var styleCard: some View {
         AppleCard(padding: 14) {
             VStack(alignment: .leading, spacing: 12) {
-                // 标题行：表盘主题 + 当前表盘徽标
-                HStack {
+                // 卡头：主题 + 当前表盘徽标 + 连接状态（不再单独占一行大标题）
+                HStack(spacing: 8) {
                     Text("表盘主题")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Theme.label)
-                    Spacer()
+                    Spacer(minLength: 8)
                     if !store.dialStyle.isEmpty {
                         Text("当前 \(store.dialStyle)")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -120,6 +102,11 @@ struct DianjingDetailView: View {
                             .padding(.vertical, 5)
                             .background(Theme.brand.opacity(0.1), in: Capsule())
                     }
+                    StatusPill(
+                        text: connected ? "已连接" : "未连接",
+                        color: connected ? Theme.green : Theme.secondary,
+                        pulsing: connected
+                    )
                 }
 
                 // 显示方式：单显（单选）/ 轮切（多选），点 chip 即下发寄存器 7

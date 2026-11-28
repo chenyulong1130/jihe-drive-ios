@@ -5,6 +5,7 @@ import WebKit
 /// 启动立即进进度（自检是第 0 步），Wi-Fi 与输出设置内联成卡片，无流程弹窗。
 struct MirrorView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = MirrorStore()
     @StateObject private var controller = CPMirrorController()
     @ObservedObject private var bmsStore = BMSStore.shared
@@ -103,6 +104,15 @@ struct MirrorView: View {
                 setFullscreenLandscape(false)
                 controller.requestKeyFrame()
             }
+        }
+        // 回后台自动切画中画：画面已出且画中画未激活时才启动（已开启
+        // canStartPictureInPictureAutomaticallyFromInline，无需用户手势）
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .background,
+                  controller.hasVideo,
+                  !controller.isPictureInPictureActive,
+                  !showFullscreen else { return }
+            _ = controller.startPictureInPicture()
         }
         .fullScreenCover(isPresented: $showFullscreen) {
             fullscreenView

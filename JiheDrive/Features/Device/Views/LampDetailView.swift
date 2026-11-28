@@ -61,7 +61,6 @@ struct LampDetailView: View {
         withEchoSync(
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 8) {
-                    headerRow
                     productCard
                     colorCard
                     levelSliderCard(icon: "sun.max.fill", title: "灯光亮度", value: $brightness,
@@ -141,22 +140,7 @@ struct LampDetailView: View {
         }
     }
 
-    // MARK: - Header / 产品卡
-
-    private var headerRow: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(ble.connectedDevice(for: .lamp)?.displayName ?? "灯具")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(Theme.label)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            StatusPill(
-                text: connected ? "已连接" : "未连接",
-                color: connected ? Theme.green : Theme.secondary,
-                pulsing: connected
-            )
-        }
-    }
+    // MARK: - 产品卡（产品 + 通道 + 状态 + 断开；无大标题行）
 
     /// 产品卡：目录识别出的产品名（未命中显示通用 RGB）+ 通道 + 断开
     private var productCard: some View {
@@ -179,6 +163,11 @@ struct LampDetailView: View {
                     .foregroundStyle(Theme.secondary)
                 }
                 Spacer(minLength: 8)
+                StatusPill(
+                    text: connected ? "已连接" : "未连接",
+                    color: connected ? Theme.green : Theme.secondary,
+                    pulsing: connected
+                )
                 Button {
                     ble.disconnect(.lamp)
                 } label: {

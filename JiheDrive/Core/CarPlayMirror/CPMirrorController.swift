@@ -722,6 +722,9 @@ final class CPMirrorController: ObservableObject {
         return started
     }
 
+    /// 画中画是否已激活（回后台自动启动前先查重）。
+    var isPictureInPictureActive: Bool { pip.isActive }
+
     /// 显示层/转码器需要重新同步时，请系统立即编码一个关键帧。
     func requestKeyFrame() { receiver?.requestKeyFrame() }
 

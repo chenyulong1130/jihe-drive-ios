@@ -298,7 +298,9 @@ struct HeadlightDetailView: View {
             }
         )
         .tint(accent)
-        .disabled(!store.paramsLoaded || store.busy)
+        // 只要求参数已读：电机移动中(busy)不再禁用滑块——移动要数秒，
+        // 按旧逻辑每次拖完滑块都会被禁用约 2 秒，表现为「滑块滑不动」
+        .disabled(!store.paramsLoaded)
     }
 
     /// 记忆位置区：替代固定快捷档位，内容来自用户保存（本地持久化）

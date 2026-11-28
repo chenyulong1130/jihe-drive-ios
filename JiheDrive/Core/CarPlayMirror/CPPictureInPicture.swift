@@ -93,6 +93,8 @@ final class CPPictureInPicture: NSObject, AVPictureInPictureSampleBufferPlayback
             playbackDelegate: self)
         let controller = AVPictureInPictureController(contentSource: source)
         controller.requiresLinearPlayback = true
+        // 允许回后台时自动从内联画面切画中画（无需用户手势）
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.delegate = self
         self.controller = controller
     }

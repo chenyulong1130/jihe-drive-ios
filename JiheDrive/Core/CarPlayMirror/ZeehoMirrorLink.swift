@@ -37,13 +37,12 @@ final class ZeehoMirrorLink {
     /// 上报命中的是另一个已知档案时以仪表上报为准（已实测的路径不冒进）。
     var preferredProfile: DisplayProfile?
 
-    /// 仪表上报的尺寸是否可接受（对齐参考实现 1.0.5 的档案边界）。
-    /// AE2 档案：240–1920 × 240–1080；SE+ 档案：宽≥高、偶数尺寸（编码器 4:2:0 要求）。
+    /// 仪表上报的尺寸是否可接受（对齐参考 PxcConnection.captureConfiguration：
+    /// 只做范围校验 240–1920 × 240–1080；宽高比/奇数在输出端取偶对齐，不再额外设限——
+    /// AE5 等仪表上报的尺寸在此前「宽≥高 + 偶数」门槛下会被误拒）。
     static func acceptable(width: Int, height: Int) -> Bool {
         if knownProfiles.contains(where: { $0.width == width && $0.height == height }) { return true }
         return (240...1920).contains(width) && (240...1080).contains(height)
-            && width >= height
-            && width.isMultiple(of: 2) && height.isMultiple(of: 2)
     }
 
     /// 编码器 4:2:0 需要偶数尺寸：向下取整到偶数。
@@ -638,19 +637,14 @@ final class ZeehoMirrorLink {
         let response: UInt16
         switch request.command {
         case 0x10:
+            // 媒体采集配置（对齐参考 PxcConnection.captureConfiguration：
+            // 只解析 尺寸/帧率/编码器/扩展标志——身份回显校验是首驱方案逻辑，
+            // 真实 PXC 仪表配置载荷可能不足 32 字节，强校验会误杀会话）
             guard request.payload.count >= 4 else { throw CPError.malformed("媒体配置载荷不足 4 字节") }
             let width = request.payload.uint16LE(0)
             let height = request.payload.uint16LE(2)
             guard ZeehoMirrorLink.acceptable(width: Int(width), height: Int(height)) else {
                 throw CPError.rejected("仪表媒体尺寸 \(width)×\(height) 与极核配置不符")
-            }
-            guard let signature = signedHUID, let huid, let identity else {
-                throw CPError.malformed("媒体配置先于身份协商")
-            }
-            guard let echoed = Data(base64Encoded: request.payload.dropFirst(32)),
-                  echoed == signature,
-                  ZeehoMirrorIdentity.verifyEcho(identity, signature: echoed, huid: huid) else {
-                throw CPError.rejected("媒体身份回显不匹配")
             }
             // 1024×488 的新批次仪表：按参考实现回 1024×480（已实测兼容）；
             // 其他未知尺寸按上报值自适应，转码器输出随协商结果走。
@@ -677,7 +671,6 @@ final class ZeehoMirrorLink {
                 name = "极核仪表 \(Self.even(Int(width)))×\(Self.even(Int(height)))"
             }
             // 响应格式对齐参考 PxcConnection：[编码器 u32][宽 u16][高 u16][扩展标志 u8]
-            // （此前漏了扩展标志字节、编码器字段写死 codec，仪表可能解析失败）
             let encoder: UInt32 = request.payload.count >= 12 ? request.payload.uint32LE(8) : 2
             let ext: UInt8 = request.payload.count >= 30 ? request.payload[request.payload.startIndex + 29] : 0
             ZeehoMirrorFrame.appendLE(&payload, encoder == 0 ? UInt32(2) : encoder)
@@ -688,7 +681,7 @@ final class ZeehoMirrorLink {
             configured = true
             outputSize = output
             negotiatedName = name
-            log("媒体身份回显校验通过：仪表面板 \(width)×\(height)，投屏输出 \(name) \(output.width)×\(output.height) H.264")
+            log("媒体配置已接受：仪表面板 \(width)×\(height)，投屏输出 \(name) \(output.width)×\(output.height) H.264")
         case 0x70:
             guard configured else { throw CPError.rejected("仪表在配置完成前请求媒体启动") }
             try await channel.write(try ZeehoMirrorFrame.encodeAuxiliary(command: 0x71, token: request.token))
