@@ -22,6 +22,7 @@ struct MirrorView: View {
     @State private var wifiSaved = false
     @State private var showLogs = false
     @State private var showSettings = false
+    @State private var showQRScan = false
     /// 分辨率/帧率/图标大小属「重启 CarPlay 生效」参数：改动后亮出提示，关弹窗复位
     @State private var displayNeedsRestart = false
     @State private var showStartupHint = false
@@ -31,6 +32,22 @@ struct MirrorView: View {
     @State private var showVehicleInfo = false
     /// 全屏是否横屏（用户点旋转按钮自选，不自动翻转）
     @State private var fullscreenLandscape = false
+    /// 氛围光联动（写穿到 BMSOverlayConfig 持久化）
+    @State private var ambientGlowMode = BMSOverlayConfig.glowMode
+    @State private var ambientGlowMax = BMSOverlayConfig.glowMaxValue
+    /// 氛围光实时颜色（保护板功率/电流 → 绿→橙→红）
+    private var ambientGlowColor: Color? {
+        guard ambientGlowMode != .off else { return nil }
+        guard ble.isConnected(.bms), let realtime = bmsStore.realtime else { return nil }
+        let maxV = max(1, ambientGlowMax)
+        let t: Double
+        switch ambientGlowMode {
+        case .off: return nil
+        case .power: t = min(1, max(0, abs(realtime.power) / maxV))
+        case .current: t = min(1, max(0, abs(realtime.current) / maxV))
+        }
+        return Color(hue: 0.33 * (1 - t), saturation: 0.92, brightness: 1)
+    }
 
     // BMS 叠画（本地状态驱动 UI；写入 UserDefaults 持久化）
     @State private var bmsOverlayEnabled = BMSOverlayConfig.enabled
@@ -92,6 +109,18 @@ struct MirrorView: View {
         }
         .sheet(isPresented: $showVehicleInfo) { vehicleInfoSheet }
         .sheet(isPresented: $showSettings) { settingsSheet }
+        .sheet(isPresented: $showQRScan) {
+            QRCodeScanSheet { ssid, password, _ in
+                if let ssid, !ssid.isEmpty {
+                    store.wifiSSID = ssid
+                    if let password, !password.isEmpty { store.wifiPassword = password }
+                    store.commitWiFi()
+                    wifiSaved = true
+                    controller.appendLog("已从二维码回填 Wi-Fi「\(ssid)」")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { wifiSaved = false }
+                }
+            }
+        }
         .onChange(of: showSettings) { _, shown in
             if !shown { displayNeedsRestart = false }
         }
@@ -139,6 +168,7 @@ struct MirrorView: View {
                 .aspectRatio(streamAspect, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .modifier(AmbientGlowModifier(cornerRadius: 18, color: ambientGlowColor))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
@@ -211,6 +241,52 @@ struct MirrorView: View {
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(PressableStyle(scale: 0.97, brightness: 0))
+    }
+
+    // MARK: - 氛围光卡片（画面周边一圈随保护板参数变色）
+
+    private var ambientGlowCard: some View {
+        AppleCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                settingsIconTitle("画面周边氛围光", icon: "rays", tint: Theme.orange)
+                Text("画面边缘一圈氛围色跟随保护板参数联动：负载越高越偏红，一眼看出功率 / 电流变化。卡片与全屏、投到仪表的画面同步生效。")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                chipRow("联动模式", tint: Theme.orange,
+                        items: BMSOverlayConfig.GlowMode.allCases.map(\.title),
+                        currentIndex: BMSOverlayConfig.GlowMode.allCases
+                            .firstIndex(of: ambientGlowMode) ?? 0) { index in
+                    ambientGlowMode = BMSOverlayConfig.GlowMode.allCases[index]
+                    BMSOverlayConfig.glowMode = ambientGlowMode
+                }
+
+                if ambientGlowMode != .off {
+                    HStack {
+                        Text("满载值")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.label)
+                        Text("达到该\(ambientGlowMode == .power ? "功率(W)" : "电流(A)")时氛围最红")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.tertiary)
+                        Spacer()
+                        Stepper(
+                            "\(Int(ambientGlowMax))",
+                            onIncrement: {
+                                ambientGlowMax = min(2000, ambientGlowMax + 10)
+                                BMSOverlayConfig.glowMaxValue = ambientGlowMax
+                            },
+                            onDecrement: {
+                                ambientGlowMax = max(10, ambientGlowMax - 10)
+                                BMSOverlayConfig.glowMaxValue = ambientGlowMax
+                            }
+                        )
+                        .fixedSize()
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Wi-Fi 预设
@@ -444,7 +520,6 @@ struct MirrorView: View {
     private var settingsSheet: some View {
         SheetShell(
             title: "CarPlay 设置",
-            subtitle: "画面 · Wi-Fi · 叠画 · 输出",
             onClose: { showSettings = false }
         ) {
             ScrollView(showsIndicators: false) {
@@ -454,6 +529,8 @@ struct MirrorView: View {
                     displayConfigCard
                     settingsSectionLabel("BMS 叠画", icon: "bolt.batteryblock.fill", tint: Theme.green)
                     bmsOverlaySettingsCard
+                    settingsSectionLabel("氛围光", icon: "rays", tint: Theme.orange)
+                    ambientGlowCard
                     settingsSectionLabel("网络", icon: "wifi", tint: Theme.teal)
                     wifiSetupCard
                     settingsSectionLabel("输出", icon: "tv.and.hifispeaker.fill", tint: Theme.orange)
@@ -876,6 +953,17 @@ struct MirrorView: View {
                             .foregroundStyle(Theme.secondary)
                     }
                     Spacer(minLength: 0)
+                    Button {
+                        showQRScan = true
+                    } label: {
+                        Image(systemName: "qrcode.viewfinder")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.teal)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Theme.teal.opacity(0.12)))
+                    }
+                    .buttonStyle(PressableStyle(scale: 0.9, brightness: 0))
+                    .accessibilityLabel("扫码读取 Wi-Fi")
                     Button { store.detectSSID() } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 14, weight: .semibold))
@@ -1400,6 +1488,16 @@ struct MirrorView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
+                // 全屏内边缘氛围光（外扩光晕会被屏幕裁掉，用内圈发光）
+                if let color = ambientGlowColor {
+                    RoundedRectangle(cornerRadius: 0, style: .continuous)
+                        .strokeBorder(color.opacity(0.55), lineWidth: 16)
+                        .blur(radius: 26)
+                        .allowsHitTesting(false)
+                        .ignoresSafeArea()
+                }
+            }
+            .overlay {
                 GeometryReader { geo in
                     if bmsOverlayEnabled {
                         BMSOverlayCard(
@@ -1611,4 +1709,30 @@ private struct ActivitySheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 氛围光（画面周边一圈随保护板参数变色）
+
+/// 负载越高越偏红：color 为 nil 时不渲染（联动关闭或保护板未连）
+struct AmbientGlowModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let color: Color?
+
+    func body(content: Content) -> some View {
+        if let color {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius + 8, style: .continuous)
+                        .fill(color.opacity(0.65))
+                        .blur(radius: 24)
+                        .padding(-12)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(color.opacity(0.85), lineWidth: 2)
+                )
+        } else {
+            content
+        }
+    }
 }

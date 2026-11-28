@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>214</string>
+	<string>215</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchScreen</key>
@@ -52,6 +52,8 @@
 	<string>Automatic</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>读取 GPS 用于核对车速与显示车辆位置，数据不会上传。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>扫描仪表屏幕上的二维码，读取 Wi-Fi 名称与密码自动回填，画面不会保存或上传。</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>iosamap</string>

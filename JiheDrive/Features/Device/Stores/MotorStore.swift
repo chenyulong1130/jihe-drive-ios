@@ -61,14 +61,15 @@ final class MotorStore: ObservableObject {
     private func requestParams() {
         Task {
             await send([4, 2, 15], timeout: 1.0)
-            scheduleTimeout(seconds: 1.0) { [weak self] in
+            // 电机刚动完可能忙于行程、应答偏慢：窗口 1.5 秒 + 最多重试 4 次
+            scheduleTimeout(seconds: 1.5) { [weak self] in
                 guard let self else { return }
-                if self.retryCount < 2 {
+                if self.retryCount < 4 {
                     self.retryCount += 1
                     self.requestParams()
                 } else {
                     self.busy = false // 重试耗尽要解除占用，否则滑块一直禁用
-                    self.status = "读取参数失败，请重连"
+                    self.status = "电机参数读取失败，点右上角重新读取"
                     self.retryCount = 0
                 }
             }

@@ -122,6 +122,63 @@ enum BMSOverlayConfig {
     private static let positionKey = "mirror.bmsOverlay.position"
     private static let sizeKey = "mirror.bmsOverlay.size"
     private static let fieldsKey = "mirror.bmsOverlay.fields"
+    private static let glowModeKey = "mirror.bms.glowMode"
+    private static let glowMaxKey = "mirror.bms.glowMax"
+
+    /// 画面周边氛围光：跟随保护板指定参数联动变色（绿→橙→红 随负载升高）
+    enum GlowMode: String, CaseIterable, Identifiable {
+        case off, power, current
+
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .off: return "关闭"
+            case .power: return "功率联动"
+            case .current: return "电流联动"
+            }
+        }
+        /// 满负载映射上限（功率 W / 电流 A）
+        var maxValue: Double {
+            switch self {
+            case .off: return 1
+            case .power: return UserDefaults.standard.double(forKey: glowMaxKey) > 0
+                ? UserDefaults.standard.double(forKey: glowMaxKey) : 250
+            case .current: return UserDefaults.standard.double(forKey: glowMaxKey) > 0
+                ? UserDefaults.standard.double(forKey: glowMaxKey) : 40
+            }
+        }
+    }
+
+    static var glowMode: GlowMode {
+        get { GlowMode(rawValue: UserDefaults.standard.string(forKey: glowModeKey) ?? "") ?? .off }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: glowModeKey) }
+    }
+
+    /// 氛围光满载值（W 或 A，按联动模式）
+    static var glowMaxValue: Double {
+        get {
+            let stored = UserDefaults.standard.double(forKey: glowMaxKey)
+            return stored > 0 ? stored : (glowMode == .current ? 40 : 250)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: glowMaxKey) }
+    }
+
+    /// 由实时负载算出氛围色：t = 负载比例（0→绿，0.5→橙，1→红）
+    static func glowColor(for realtime: BMSRealtime?, connected: Bool) -> Color? {
+        guard connected, let realtime else { return nil }
+        switch glowMode {
+        case .off:
+            return nil
+        case .power:
+            return heatColor(min(1, max(0, abs(realtime.power) / max(1, glowMaxValue))))
+        case .current:
+            return heatColor(min(1, max(0, abs(realtime.current) / max(1, glowMaxValue))))
+        }
+    }
+
+    private static func heatColor(_ t: Double) -> Color {
+        Color(hue: 0.33 * (1 - t), saturation: 0.92, brightness: 1)
+    }
 
     static var enabled: Bool {
         get {
