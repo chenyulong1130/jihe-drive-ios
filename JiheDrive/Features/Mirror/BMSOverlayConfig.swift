@@ -24,6 +24,15 @@ enum BMSOverlayConfig {
             case .bottomTrailing: return .bottomTrailing
             }
         }
+        /// scaleEffect 锚点用（UnitPoint，Alignment 不能直接转）
+        var unitPoint: UnitPoint {
+            switch self {
+            case .topLeading: return .topLeading
+            case .topTrailing: return .topTrailing
+            case .bottomLeading: return .bottomLeading
+            case .bottomTrailing: return .bottomTrailing
+            }
+        }
         var icon: String {
             switch self {
             case .topLeading: return "arrow.up.left"

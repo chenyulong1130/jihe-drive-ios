@@ -497,9 +497,7 @@ struct MirrorView: View {
                             fields: bmsOverlayFields,
                             compactChrome: true
                         )
-                        .scaleEffect(0.72, anchor: UnitPoint(
-                            x: (bmsOverlayPosition.alignment.horizontal.offset + 1) / 2,
-                            y: (bmsOverlayPosition.alignment.vertical.offset + 1) / 2))
+                        .scaleEffect(0.72, anchor: bmsOverlayPosition.unitPoint)
                         .padding(6)
                     }
                 }
