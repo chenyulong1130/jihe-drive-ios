@@ -217,7 +217,7 @@ final class CPMirrorController: ObservableObject {
         currentConfiguration = configuration
         currentIdentity = identity
         setPhase(.starting)
-        appendLog("启动同机 CarPlay（\(configuration.width)×\(configuration.height)@\(configuration.maxFPS)，音频留在手机，极核投屏\(castToZeeho ? "开启" : "关闭")）")
+        appendLog("启动同机 CarPlay（\(configuration.width)×\(configuration.height)@\(configuration.maxFPS) · \(CPDisplayConfig.resolution.rawValue)档，音频留在手机，极核投屏\(castToZeeho ? "开启" : "关闭")）")
 
         // 1) 极核仪表输出链路（可选）
         if castToZeeho { installZeehoLink() }
